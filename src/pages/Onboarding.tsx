@@ -1,0 +1,403 @@
+import { ArrowLeft, ArrowRight, Brush, Car, Check, HardHat, MessageCircle, Plus, Shirt, ShoppingBag, Sparkles, Trash2, Utensils, Wrench } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Conversa } from '../components/Conversa'
+import { IconeCarteira } from '../components/Shell'
+import { CampoDinheiro, Chave, Codigo, Mascote, Seg, type Pose } from '../components/ui'
+import { linkWhats, RAMOS } from '../lib/config'
+import { DIAS_SEMANA, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaMeses } from '../lib/format'
+import { categoriasPadrao } from '../lib/seed'
+import { novoId, useApp } from '../lib/store'
+import type { Carteira, Conta, Fixa, TipoCarteira } from '../lib/tipos'
+
+const ICONE_RAMO: Record<string, typeof Brush> = { beleza: Brush, alimentacao: Utensils, comercio: ShoppingBag, servicos: Wrench, obras: HardHat, transporte: Car, moda: Shirt, outro: Sparkles }
+
+interface CarteiraOb {
+  tipo: TipoCarteira
+  nome: string
+  dica: string
+  on: boolean
+  saldo: number
+}
+interface FixaOb {
+  id: string
+  nome: string
+  categoriaId: string
+  on: boolean
+  valor: number
+  dia: number
+  das?: boolean
+  livre?: boolean
+}
+
+const HORAS = Array.from({ length: 16 }, (_, i) => `${String(i + 6).padStart(2, '0')}:00`)
+
+const GUIA: { pose: Pose; titulo: string; texto: string }[] = [
+  { pose: 'laptop', titulo: 'Prazer, eu sou a Granninha!', texto: 'Vou cuidar do dinheiro do seu negócio com você. Primeiro, me conta do seu negócio.' },
+  { pose: 'loja', titulo: 'Qual é o seu ramo?', texto: 'Assim eu já separo seus ganhos e gastos do jeito certo.' },
+  { pose: 'moedas', titulo: 'Onde fica o seu dinheiro?', texto: 'Marque onde você guarda e quanto tem em cada lugar hoje.' },
+  { pose: 'calendario', titulo: 'Quais contas chegam todo mês?', texto: 'Eu aviso antes de vencer, para você não pagar multa por esquecimento.' },
+  { pose: 'sino', titulo: 'Quando eu posso te chamar?', texto: 'Escolha o melhor horário para o resumo e os lembretes.' },
+  { pose: 'festa', titulo: 'Tudo pronto!', texto: 'Agora é só me mandar o primeiro lançamento no WhatsApp.' },
+]
+
+export default function Onboarding() {
+  const { s, mut, sair } = useApp()
+  const [passo, setPasso] = useState(0)
+
+  const [negocio, setNegocio] = useState('')
+  const [cnpj, setCnpj] = useState('')
+  const [fone, setFone] = useState('')
+  const [enviado, setEnviado] = useState(false)
+  const [codigo, setCodigo] = useState('')
+  const [ramo, setRamo] = useState('')
+  const [carteiras, setCarteiras] = useState<CarteiraOb[]>([
+    { tipo: 'banco', nome: 'Conta do banco', dica: 'Pix, transferência e cartão de débito', on: true, saldo: 0 },
+    { tipo: 'dinheiro', nome: 'Dinheiro', dica: 'O que fica na gaveta ou na carteira', on: false, saldo: 0 },
+    { tipo: 'maquininha', nome: 'Maquininha', dica: 'Vendas no cartão que ainda vão cair', on: false, saldo: 0 },
+  ])
+  const [padrao, setPadrao] = useState<TipoCarteira>('banco')
+  const [fixas, setFixas] = useState<FixaOb[]>([
+    { id: 'das', nome: 'DAS do MEI', categoriaId: 'impostos', on: true, valor: 86.05, dia: 20, das: true },
+    { id: 'aluguel', nome: 'Aluguel', categoriaId: 'aluguel', on: false, valor: 0, dia: 10 },
+    { id: 'internet', nome: 'Internet', categoriaId: 'contas-casa', on: false, valor: 0, dia: 15 },
+    { id: 'luz', nome: 'Luz', categoriaId: 'contas-casa', on: false, valor: 0, dia: 10 },
+    { id: 'celular', nome: 'Celular', categoriaId: 'contas-casa', on: false, valor: 0, dia: 5 },
+  ])
+  const [resumoDia, setResumoDia] = useState(1)
+  const [resumoHora, setResumoHora] = useState('08:00')
+  const [lembreteHora, setLembreteHora] = useState('09:00')
+  const [antecedencia, setAntecedencia] = useState('1')
+
+  const foneOk = fone.replace(/\D/g, '').length >= 10
+  const verificado = enviado && codigo.length === 6
+  const cnpjOk = cnpj === '' || cnpj.replace(/\D/g, '').length === 14
+
+  /** O que ainda falta no passo atual. Vazio = pode avançar. */
+  const falta = useMemo(() => {
+    if (passo === 0) {
+      if (negocio.trim().length < 2) return 'Diga o nome do seu negócio.'
+      if (!cnpjOk) return 'O CNPJ tem 14 números. Se preferir, deixe em branco.'
+      if (!foneOk) return 'Digite seu WhatsApp com DDD.'
+      if (!enviado) return 'Peça o código para confirmar seu WhatsApp.'
+      if (!verificado) return 'Digite os 6 números do código.'
+    }
+    if (passo === 1 && !ramo) return 'Escolha o ramo mais parecido com o seu.'
+    if (passo === 2) {
+      if (!carteiras.some((c) => c.on)) return 'Marque pelo menos um lugar.'
+      if (!carteiras.find((c) => c.tipo === padrao)?.on) return 'Escolha qual é a principal.'
+    }
+    if (passo === 3) {
+      const semNome = fixas.find((f) => f.on && !f.nome.trim())
+      if (semNome) return 'Dê um nome para a conta nova, ou remova.'
+      const semValor = fixas.find((f) => f.on && f.valor <= 0)
+      if (semValor) return `Falta o valor de ${semValor.nome}.`
+    }
+    return ''
+  }, [passo, negocio, cnpjOk, foneOk, enviado, verificado, ramo, carteiras, padrao, fixas])
+
+  const concluir = () =>
+    mut((a) => {
+      const h = hoje()
+      const cs: Carteira[] = carteiras.filter((c) => c.on).map((c) => ({ id: c.tipo, nome: c.nome, tipo: c.tipo, saldoInicial: c.saldo, padrao: c.tipo === padrao }))
+      const fx: Fixa[] = fixas.filter((f) => f.on).map((f) => ({ id: `fx-${f.id}`, descricao: f.nome.trim(), valor: f.valor, dia: f.dia, categoriaId: f.categoriaId, das: f.das }))
+      const contas: Conta[] = []
+      for (const f of fx) {
+        for (let k = 0; k < 3; k++) {
+          const venc = `${somaMeses(mesAtual(), k)}-${String(Math.min(f.dia, 28)).padStart(2, '0')}`
+          if (venc < h) continue
+          contas.push({ id: novoId('c'), tipo: 'pagar', descricao: f.descricao, valor: f.valor, vencimento: venc, status: 'aberta', categoriaId: f.categoriaId, fixaId: f.id, das: f.das })
+        }
+      }
+      return {
+        ...a,
+        sessao: { ...a.sessao, onboarding: true },
+        usuario: { ...a.usuario, negocio: negocio.trim(), cnpj, whats: fone, ramo },
+        categorias: categoriasPadrao(ramo),
+        carteiras: cs,
+        fixas: fx,
+        contas,
+        prefs: { ...a.prefs, resumoDia, resumoHora, lembreteHora, antecedencia: Number(antecedencia) },
+      }
+    })
+
+  const g = GUIA[passo]
+  const nome = primeiroNome(s.usuario.nome)
+  const mudaCarteira = (i: number, p: Partial<CarteiraOb>) => {
+    setCarteiras((cs) => {
+      const novo = cs.map((c, k) => (k === i ? { ...c, ...p } : c))
+      if (!novo.find((c) => c.tipo === padrao)?.on) {
+        const prim = novo.find((c) => c.on)
+        if (prim) setPadrao(prim.tipo)
+      }
+      return novo
+    })
+  }
+  const mudaFixa = (id: string, p: Partial<FixaOb>) => setFixas((fs) => fs.map((f) => (f.id === id ? { ...f, ...p } : f)))
+
+  return (
+    <div className="ob">
+      {passo === 5 && <Confete />}
+      <div className="ob-topo">
+        <div className="faixa-topo">
+          <button type="button" className="icone-btn" aria-label={passo === 0 ? 'Sair' : 'Voltar'} onClick={() => (passo === 0 ? sair() : setPasso(passo - 1))}>
+            <ArrowLeft size={22} />
+          </button>
+          <div className="ob-passos" role="progressbar" aria-valuemin={1} aria-valuemax={6} aria-valuenow={passo + 1} aria-label="Progresso do cadastro">
+            {GUIA.map((_, i) => (
+              <i key={i} className={i < passo ? 'feito' : i === passo ? 'atual' : ''} />
+            ))}
+          </div>
+          <span className="ob-cont num">{passo + 1} de 6</span>
+        </div>
+      </div>
+
+      <div className="ob-corpo" key={passo}>
+        <div className="ob-guia">
+          <Mascote pose={g.pose} tam={104} anim={passo === 5 ? 'pula' : 'flutua'} />
+          <div className="balao">
+            <h1>{passo === 5 && nome ? `Tudo pronto, ${nome}!` : passo === 0 && nome ? `Prazer, ${nome}! Eu sou a Granninha.` : g.titulo}</h1>
+            <p>{g.texto}</p>
+          </div>
+        </div>
+
+        {passo === 0 && (
+          <div className="pilha">
+            <label className="campo">
+              <span>Nome do seu negócio</span>
+              <input className="entrada" value={negocio} onChange={(e) => setNegocio(e.target.value)} placeholder="Ex.: Studio Camila" autoComplete="organization" />
+            </label>
+            <label className="campo">
+              <span>CNPJ do MEI (opcional)</span>
+              <input className="entrada num" inputMode="numeric" value={cnpj} onChange={(e) => setCnpj(mascaraCnpj(e.target.value))} placeholder="00.000.000/0001-00" />
+            </label>
+            <label className="campo">
+              <span>Seu WhatsApp</span>
+              <input
+                className="entrada num"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel-national"
+                value={fone}
+                onChange={(e) => {
+                  setFone(mascaraFone(e.target.value))
+                  setEnviado(false)
+                  setCodigo('')
+                }}
+                placeholder="(81) 90000-0000"
+              />
+              <small>É por este número que você vai conversar comigo.</small>
+            </label>
+            {!enviado ? (
+              <button type="button" className="btn btn-wa" disabled={!foneOk} onClick={() => setEnviado(true)}>
+                <MessageCircle size={19} />
+                Receber código no WhatsApp
+              </button>
+            ) : (
+              <div className="campo">
+                <span>{verificado ? 'WhatsApp confirmado' : 'Digite o código que eu te mandei'}</span>
+                <Codigo valor={codigo} onChange={setCodigo} />
+                <small>{verificado ? 'Pronto, já sei que é você.' : 'Demonstração: qualquer código de 6 números vale.'}</small>
+              </div>
+            )}
+          </div>
+        )}
+
+        {passo === 1 && (
+          <div className="opcoes">
+            {RAMOS.map((r) => {
+              const I = ICONE_RAMO[r.id]
+              return (
+                <button type="button" key={r.id} className="opcao" aria-pressed={ramo === r.id} onClick={() => setRamo(r.id)}>
+                  {ramo === r.id && (
+                    <span className="visto">
+                      <Check size={14} strokeWidth={3} />
+                    </span>
+                  )}
+                  <span className="ic">
+                    <I size={19} />
+                  </span>
+                  <b>{r.nome}</b>
+                  <small>{r.ex}</small>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {passo === 2 && (
+          <div className="pilha">
+            {carteiras.map((c, i) => (
+              <div key={c.tipo} className={`item-ob ${c.on ? 'ligado' : ''}`}>
+                <div className="cab">
+                  <span className="selo" style={{ background: 'var(--mist)', color: 'var(--indigo)' }}>
+                    <IconeCarteira tipo={c.tipo} size={19} />
+                  </span>
+                  <div className="cresce">
+                    <b>{c.nome}</b>
+                    <small>{c.dica}</small>
+                  </div>
+                  <Chave ligado={c.on} onChange={(v) => mudaCarteira(i, { on: v })} rotulo={`Usar ${c.nome}`} />
+                </div>
+                {c.on && (
+                  <div className="abre">
+                    <label className="campo">
+                      <span>Quanto tem aí hoje?</span>
+                      <CampoDinheiro valor={c.saldo} onChange={(v) => mudaCarteira(i, { saldo: v })} />
+                    </label>
+                    <button type="button" className="radio-linha" aria-pressed={padrao === c.tipo} onClick={() => setPadrao(c.tipo)}>
+                      <i />
+                      Principal: uso esta quando você não disser de onde saiu
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {passo === 3 && (
+          <div className="pilha">
+            {fixas.map((f) => (
+              <div key={f.id} className={`item-ob ${f.on ? 'ligado' : ''}`}>
+                <div className="cab">
+                  <div className="cresce">
+                    {f.livre ? (
+                      <input className="entrada" value={f.nome} onChange={(e) => mudaFixa(f.id, { nome: e.target.value })} placeholder="Nome da conta" autoFocus />
+                    ) : (
+                      <>
+                        <b>{f.nome}</b>
+                        {f.das && <small>O imposto mensal de todo MEI. Confira o valor no seu boleto.</small>}
+                      </>
+                    )}
+                  </div>
+                  {f.livre ? (
+                    <button type="button" className="icone-btn" aria-label="Remover conta" onClick={() => setFixas((fs) => fs.filter((x) => x.id !== f.id))}>
+                      <Trash2 size={19} />
+                    </button>
+                  ) : (
+                    <Chave ligado={f.on} onChange={(v) => mudaFixa(f.id, { on: v })} rotulo={`Tenho ${f.nome}`} />
+                  )}
+                </div>
+                {f.on && (
+                  <div className="abre dupla">
+                    <label className="campo">
+                      <span>Valor</span>
+                      <CampoDinheiro valor={f.valor} onChange={(v) => mudaFixa(f.id, { valor: v })} />
+                    </label>
+                    <label className="campo">
+                      <span>Vence todo dia</span>
+                      <select className="entrada num" value={f.dia} onChange={(e) => mudaFixa(f.id, { dia: Number(e.target.value) })}>
+                        {Array.from({ length: 28 }, (_, i) => (
+                          <option key={i} value={i + 1}>
+                            {i + 1}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
+              </div>
+            ))}
+            <button type="button" className="btn btn-sec" onClick={() => setFixas((fs) => [...fs, { id: novoId('x'), nome: '', categoriaId: 'taxas', on: true, valor: 0, dia: 10, livre: true }])}>
+              <Plus size={18} />
+              Outra conta
+            </button>
+          </div>
+        )}
+
+        {passo === 4 && (
+          <div className="pilha">
+            <div className="card pilha">
+              <div>
+                <div className="rotulo">Resumo da semana: em que dia?</div>
+                <div className="dias">
+                  {DIAS_SEMANA.map((d, i) => (
+                    <button type="button" key={d} aria-pressed={resumoDia === i} aria-label={d} onClick={() => setResumoDia(i)}>
+                      {d.slice(0, 3)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="campo">
+                <span>A que horas?</span>
+                <select className="entrada num" value={resumoHora} onChange={(e) => setResumoHora(e.target.value)}>
+                  {HORAS.map((h) => (
+                    <option key={h}>{h}</option>
+                  ))}
+                </select>
+                <small>Toda {DIAS_SEMANA[resumoDia]} eu conto quanto entrou, quanto saiu e o que vem pela frente.</small>
+              </label>
+            </div>
+            <div className="card pilha">
+              <label className="campo">
+                <span>Lembrete de conta vencendo: a que horas?</span>
+                <select className="entrada num" value={lembreteHora} onChange={(e) => setLembreteHora(e.target.value)}>
+                  {HORAS.map((h) => (
+                    <option key={h}>{h}</option>
+                  ))}
+                </select>
+              </label>
+              <div>
+                <div className="rotulo">Com quanta antecedência?</div>
+                <Seg
+                  bloco
+                  valor={antecedencia}
+                  onChange={setAntecedencia}
+                  opcoes={[
+                    { v: '0', r: 'Só no dia' },
+                    { v: '1', r: '1 dia antes' },
+                    { v: '3', r: '3 dias antes' },
+                  ]}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {passo === 5 && <Conversa />}
+      </div>
+
+      <div className="ob-pe">
+        <div>
+          {passo < 5 ? (
+            <>
+              <div className="falta" aria-live="polite">
+                {falta}
+              </div>
+              <button type="button" className="btn btn-pri btn-bloco" disabled={!!falta} onClick={() => setPasso(passo + 1)}>
+                {passo === 4 ? 'Concluir' : 'Continuar'}
+                <ArrowRight size={18} />
+              </button>
+            </>
+          ) : (
+            <>
+              <a className="btn btn-wa btn-bloco" href={linkWhats('Oi, Granninha! Quero fazer meu primeiro lançamento.')} target="_blank" rel="noopener noreferrer" onClick={concluir}>
+                <MessageCircle size={19} />
+                Falar com a Granninha
+              </a>
+              <button type="button" className="btn btn-sec btn-bloco" onClick={concluir}>
+                Ver meu painel
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const CORES = ['#17A34F', '#454C83', '#747EAD', '#B1B9D8', '#5BBF8A', '#292D54']
+
+function Confete() {
+  const pecas = useMemo(
+    () => Array.from({ length: 42 }, (_, i) => ({ left: `${(i * 37) % 100}%`, cor: CORES[i % CORES.length], dur: 1.8 + ((i * 13) % 14) / 10, atraso: ((i * 7) % 10) / 14, giro: (i * 47) % 360 })),
+    [],
+  )
+  return (
+    <div className="confete" aria-hidden>
+      {pecas.map((p, i) => (
+        <i key={i} style={{ left: p.left, background: p.cor, animationDuration: `${p.dur}s`, animationDelay: `${p.atraso}s`, transform: `rotate(${p.giro}deg)` }} />
+      ))}
+    </div>
+  )
+}
