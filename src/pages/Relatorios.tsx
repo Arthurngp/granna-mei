@@ -238,6 +238,8 @@ export default function Relatorios() {
             disabled={!contadorOk}
             onClick={() => {
               setFolhaContador(false)
+              // O envio direto ainda não existe na conta de verdade: nunca dizer que foi enviado.
+              if (!s.sessao.demo) return avisar('O envio direto ao contador chega em breve. Por enquanto, baixe a planilha ou o PDF e mande para ele.')
               avisar(`Relatório de ${rotuloPeriodo} enviado para ${c.nome}`)
             }}
           >

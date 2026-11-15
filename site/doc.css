@@ -1,0 +1,51 @@
+/* Páginas de texto do site (documentação e perguntas frequentes). */
+.doc-topo { background: linear-gradient(170deg, #292d54 0%, #15162b 80%); color: #fff; padding: 36px 0 30px; overflow: hidden; }
+.doc-topo .wrap { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; }
+.doc-topo .migalha { font-size: 14px; color: var(--indigo-4); margin-bottom: 8px; }
+.doc-topo .migalha a { color: var(--indigo-4); text-decoration: none; }
+.doc-topo h1 { font-size: clamp(30px, 8vw, 44px); line-height: 1.1; letter-spacing: -.03em; font-weight: 800; }
+.doc-topo p { color: var(--indigo-4); font-size: 17px; margin-top: 10px; max-width: 560px; }
+.doc-topo img { width: 112px; animation: flutua 3.4s ease-in-out infinite; }
+
+.doc { display: grid; gap: 28px; padding: 28px 16px 64px; }
+.indice { display: flex; gap: 8px; overflow-x: auto; margin: 0; padding: 2px 0 6px; min-width: 0; scrollbar-width: none; position: sticky; top: 64px; z-index: 5; background: var(--bg); }
+.indice::-webkit-scrollbar { display: none; }
+.indice a { flex: none; text-decoration: none; background: #fff; box-shadow: inset 0 0 0 1.5px var(--line); color: var(--indigo-2); border-radius: 19px; padding: 8px 14px; font-size: 14px; font-weight: 650; }
+.indice a:hover { box-shadow: inset 0 0 0 1.5px var(--indigo-3); }
+
+.secao { background: #fff; border: 1px solid #eceef7; border-radius: 18px; padding: 22px 20px; box-shadow: 0 6px 20px rgba(21,22,43,.05); scroll-margin-top: 130px; }
+.secao-cab { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; margin-bottom: 14px; }
+.secao-cab img { width: 64px; height: 64px; object-fit: contain; }
+.secao-cab small { display: block; color: var(--indigo-3); font-weight: 700; font-size: 13px; }
+.secao h2 { font-size: 23px; font-weight: 800; letter-spacing: -.02em; line-height: 1.2; }
+.secao h3 { font-size: 17px; font-weight: 750; margin: 18px 0 6px; }
+.secao p { color: #33395c; font-size: 16px; line-height: 1.6; }
+.secao p + p { margin-top: 10px; }
+.secao ul, .secao ol { margin: 8px 0 0; padding-left: 22px; color: #33395c; line-height: 1.6; display: grid; gap: 6px; }
+.secao strong { color: var(--ink); }
+.porque { margin-top: 14px; background: var(--mist); border-radius: 12px; padding: 12px 14px; font-size: 15px; color: var(--indigo); line-height: 1.5; }
+.porque b { display: block; font-size: 13px; color: var(--indigo-2); margin-bottom: 2px; }
+.breve { display: inline-block; font-size: 12.5px; font-weight: 700; color: #9a6408; background: #fdf1d8; border-radius: 6px; padding: 1px 7px; margin-left: 4px; vertical-align: 2px; }
+
+.exemplos-tabela { display: grid; gap: 8px; margin-top: 10px; }
+.ex { display: grid; gap: 4px; border: 1px solid #eceef7; border-radius: 12px; padding: 10px 12px; }
+.ex .voce { justify-self: start; background: #d9fdd3; color: #111b21; border-radius: 10px; padding: 6px 10px; font-size: 14.5px; }
+.ex .ela { font-size: 14px; color: var(--muted); }
+
+.passos-lista { counter-reset: n; list-style: none; padding: 0 !important; display: grid; gap: 10px !important; }
+.passos-lista li { counter-increment: n; display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start; }
+.passos-lista li::before { content: counter(n); width: 30px; height: 30px; border-radius: 50%; background: var(--indigo); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 14px; }
+
+.faq-grupo { display: grid; gap: 10px; scroll-margin-top: 130px; }
+.faq-grupo h2 { font-size: 21px; font-weight: 800; letter-spacing: -.02em; margin: 6px 4px 2px; }
+.ajuda-final { text-align: center; display: grid; gap: 12px; justify-items: center; padding: 8px 0 0; }
+.ajuda-final img { width: 110px; }
+.ajuda-final p { color: var(--muted); max-width: 440px; }
+
+@media (min-width: 860px) {
+  .doc-topo { padding: 56px 0 44px; }
+  .doc-topo img { width: 150px; }
+  .secao { padding: 30px 32px; }
+  .indice { margin: 0; padding: 2px 0 6px; flex-wrap: wrap; position: static; }
+}
+@media (max-width: 420px) { .doc-topo img { width: 84px; } }
