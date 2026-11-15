@@ -1,0 +1,42 @@
+# Monta a imagem do gateway WA-AKG FORA da VPS e publica no GitHub Container Registry.
+# Motivo: o build Next do WA-AKG travou a VPS do Coolify em 2026-11-15. A VPS só baixa a imagem pronta.
+# Rodar manualmente (Actions → Imagem do WA-AKG → Run workflow). Código aberto (MIT), sem segredo na imagem:
+# todas as senhas entram como variáveis no Coolify.
+name: Imagem do WA-AKG
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Commit do WA-AKG a montar
+        default: 936b26bf7c96bb5776e00224c3803c1bf39c7c71
+        required: true
+permissions:
+  contents: read
+  packages: write
+jobs:
+  montar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o WA-AKG no commit escolhido
+        uses: actions/checkout@v4
+        with:
+          repository: mrifqidaffaaditya/WA-AKG
+          ref: ${{ inputs.commit }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Montar e publicar
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/arthurngp/wa-akg-grannamei:${{ inputs.commit }}
+            ghcr.io/arthurngp/wa-akg-grannamei:atual
+          labels: org.opencontainers.image.source=https://github.com/Arthurngp/granna-mei
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
