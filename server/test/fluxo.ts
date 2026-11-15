@@ -267,6 +267,19 @@ try {
     assert.equal(enviados.length, n)
     assert.ok(!(await lancs(uid)).some((l) => [98, 99].includes(Number(l.valor))))
   })
+  await caso('modo teste: número fora da lista de liberados é ignorado em silêncio', async () => {
+    process.env.WA_SOMENTE_NUMEROS = FONE
+    try {
+      const r = await mandar(ESTRANHO, { content: 'oi, quero saber o preço' }, { esperarNada: true })
+      assert.equal(r.texto, '')
+      const m = (await sb.from('mensagens').select('status,erro').eq('id', r.id).single()).data!
+      assert.equal(m.status, 'ignorada')
+      const r2 = await mandar(FONE, { content: 'paguei 12 de pão' })
+      assert.match(r2.texto, /R\$ 12,00/)
+    } finally {
+      delete process.env.WA_SOMENTE_NUMEROS
+    }
+  })
   await caso('saúde do serviço responde com o estado do número', async () => {
     const s = await (await fetch(SERV + '/saude')).json()
     assert.equal(s.whatsapp.estado, 'CONNECTED')
