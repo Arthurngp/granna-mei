@@ -6,10 +6,25 @@ from cool import call
 U = 'jyrip6777vo8dr6bhugib70a'
 URL = 'https://db-grannamei.amplasoft.me'
 _envs = None
+def _local():
+    import os
+    r = {}
+    for arq in ('~/Desktop/Cerebro-obsidian-mesa/Projetos-Software-Local/granna-mei/.claude/worktrees/fase3/server/.env.local', '~/Desktop/Cerebro-obsidian-mesa/Projetos-Software-Local/granna-mei/.claude/worktrees/fase2/.env.local'):
+        p = os.path.expanduser(arq)
+        if os.path.exists(p):
+            for l in open(p):
+                if '=' in l: k, v = l.rstrip('\n').split('=', 1); r[k] = v
+    return r
+
 def chave(tipo):
     global _envs
     if _envs is None:
-        _, _envs = call('GET', '/services/' + U + '/envs')
+        # Sem depender do Coolify: as chaves já estão nos arquivos locais (fora do git) do serviço e do painel.
+        l = _local()
+        if l.get('SUPABASE_SERVICE_ROLE_KEY') and l.get('VITE_SUPABASE_ANON_KEY'):
+            _envs = [{'key': 'SERVICE_SUPABASESERVICE_KEY', 'value': l['SUPABASE_SERVICE_ROLE_KEY']}, {'key': 'SERVICE_SUPABASEANON_KEY', 'value': l['VITE_SUPABASE_ANON_KEY']}]
+        else:
+            _, _envs = call('GET', '/services/' + U + '/envs')
     for e in _envs:
         v = e.get('real_value') or e.get('value') or ''
         k = e.get('key', '')
