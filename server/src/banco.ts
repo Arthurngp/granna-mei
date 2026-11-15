@@ -1,0 +1,83 @@
+/**
+ * Acesso ao banco com a service_role. ATENÇÃO: essa chave ignora as regras de acesso (RLS).
+ * Por isso toda consulta aqui recebe o userId resolvido pelo número verificado e filtra por ele.
+ */
+import { createClient } from '@supabase/supabase-js'
+import { env } from './env.ts'
+import type { Contexto } from './interpretar.ts'
+
+export const sb = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false, autoRefreshToken: false } })
+
+export function falhou(e: { message: string } | null, onde: string) {
+  if (e) throw new Error(`${onde}: ${e.message}`)
+}
+
+/** "558198765432@s.whatsapp.net" ou "5581987654321" → chave DDD + 8 últimos dígitos ("8187654321"). */
+export function chaveDoNumero(jidOuNumero: string): string | null {
+  let d = jidOuNumero.split('@')[0].split(':')[0].replace(/\D/g, '')
+  if (d.startsWith('55') && d.length >= 12) d = d.slice(2)
+  if (d.length < 10) return null
+  return d.slice(0, 2) + d.slice(-8)
+}
+
+/** "558198765432" → "(81) 98765-4321" (repõe o nono dígito de celular, que o WhatsApp às vezes omite). */
+export function formatarNumero(jid: string): string {
+  let d = jid.split('@')[0].split(':')[0].replace(/\D/g, '')
+  if (d.startsWith('55') && d.length >= 12) d = d.slice(2)
+  const ddd = d.slice(0, 2)
+  let n = d.slice(2)
+  if (n.length === 8 && /[6-9]/.test(n[0])) n = '9' + n
+  return n.length === 9 ? `(${ddd}) ${n.slice(0, 5)}-${n.slice(5)}` : `(${ddd}) ${n.slice(0, 4)}-${n.slice(4)}`
+}
+
+export interface Cliente {
+  id: string
+  nome: string
+  negocio: string
+  ramo: string
+}
+
+/** Só número VERIFICADO identifica um cliente. Número só digitado no cadastro não vale. */
+export async function clientePorNumero(jid: string): Promise<Cliente | null> {
+  const chave = chaveDoNumero(jid)
+  if (!chave) return null
+  const { data, error } = await sb.from('perfis').select('id,nome,negocio,ramo').eq('whats_chave', chave).eq('whats_verificado', true).maybeSingle()
+  falhou(error, 'clientePorNumero')
+  return data as Cliente | null
+}
+
+export type Acesso = 'liberado' | 'bloqueado'
+/** Mesma regra do banco (acesso_liberado), aplicada aqui porque a service_role passa por cima dela. */
+export async function acessoDe(userId: string, hoje: string): Promise<{ acesso: Acesso; status: string }> {
+  const { data, error } = await sb.from('assinaturas').select('status,trial_fim').eq('user_id', userId).maybeSingle()
+  falhou(error, 'acessoDe')
+  if (!data) return { acesso: 'bloqueado', status: 'sem assinatura' }
+  const ok = ['ativa', 'atrasada', 'cortesia'].includes(data.status) || (data.status === 'trial' && data.trial_fim >= hoje)
+  return { acesso: ok ? 'liberado' : 'bloqueado', status: data.status }
+}
+
+export async function contextoDe(userId: string, hoje: string): Promise<Contexto> {
+  const [p, cats, carts, contas] = await Promise.all([
+    sb.from('perfis').select('ramo').eq('id', userId).single(),
+    sb.from('categorias').select('id,nome,tipo,pessoal').eq('user_id', userId),
+    sb.from('carteiras').select('id,nome,tipo,padrao').eq('user_id', userId),
+    sb.from('contas').select('id,descricao,valor,vencimento,tipo').eq('user_id', userId).eq('status', 'aberta').order('vencimento').limit(40),
+  ])
+  for (const [r, n] of [[p, 'perfil'], [cats, 'categorias'], [carts, 'carteiras'], [contas, 'contas']] as const) falhou(r.error, 'contexto ' + n)
+  return {
+    hoje,
+    ramo: p.data?.ramo || undefined,
+    categorias: (cats.data ?? []).map((c) => ({ ...c, pessoal: !!c.pessoal })),
+    carteiras: carts.data ?? [],
+    contasAbertas: (contas.data ?? []).map((c) => ({ ...c, valor: Number(c.valor) })),
+  }
+}
+
+/** Uso do mês: mensagens que viraram lançamento e mídias (áudio, foto, PDF) recebidas. */
+export async function usoDoMes(userId: string, inicioMes: string) {
+  const base = () => sb.from('mensagens').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('criado_em', inicioMes)
+  const [l, m] = await Promise.all([base().eq('status', 'ok'), base().in('tipo', ['audio', 'foto', 'pdf'])])
+  falhou(l.error, 'uso')
+  falhou(m.error, 'uso')
+  return { lancamentos: l.count ?? 0, midias: m.count ?? 0 }
+}
