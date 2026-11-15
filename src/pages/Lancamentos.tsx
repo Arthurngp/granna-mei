@@ -4,6 +4,7 @@ import { BotaoZap, FaixaAssinatura, SeloCategoria, Topo } from '../components/Sh
 import { Chave, Folha, IconeOrigem, MesNav, NOME_ORIGEM, useAviso, Vazio } from '../components/ui'
 import { doMes, totais } from '../lib/calc'
 import { linkWhats } from '../lib/config'
+import { linkComprovante } from '../lib/remoto'
 import { brl, capitaliza, diaExtenso, mesAtual, nomeMes } from '../lib/format'
 import { useApp } from '../lib/store'
 import type { Lancamento } from '../lib/tipos'
@@ -282,7 +283,22 @@ export default function Lancamentos() {
               </div>
             </div>
             {aberto.pessoal && <p className="suave pq" style={{ marginTop: 10 }}>Gasto pessoal sai do caixa, mas não entra na conta do lucro da empresa.</p>}
-            {aberto.anexo && (
+            {aberto.anexoPath && (
+              <button
+                type="button"
+                className="btn btn-sec btn-bloco"
+                style={{ marginTop: 14 }}
+                onClick={async () => {
+                  const url = await linkComprovante(aberto.anexoPath!)
+                  if (url) window.open(url, '_blank', 'noopener,noreferrer')
+                  else avisar('Não consegui abrir o comprovante agora.')
+                }}
+              >
+                <Paperclip size={17} />
+                Abrir comprovante
+              </button>
+            )}
+            {aberto.anexo && !aberto.anexoPath && (
               <div className="comprovante" aria-label="Comprovante anexado">
                 <b>
                   <span>COMPROVANTE</span>

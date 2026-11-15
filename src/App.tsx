@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Shell } from './components/Shell'
+import { Mascote } from './components/ui'
 import { useApp } from './lib/store'
 import Ajustes from './pages/Ajustes'
 import Assinatura from './pages/Assinatura'
@@ -20,8 +21,19 @@ function SobeAoTrocar() {
 }
 
 export default function App() {
-  const { s } = useApp()
+  const { s, carregando } = useApp()
   const { logado, onboarding } = s.sessao
+
+  if (carregando) {
+    return (
+      <div className="bloq" role="status" aria-label="Carregando">
+        <div>
+          <Mascote pose="hero" tam={120} anim="flutua" />
+          <p>Abrindo suas contas...</p>
+        </div>
+      </div>
+    )
+  }
 
   let rotas
   if (!logado) {

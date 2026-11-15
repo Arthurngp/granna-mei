@@ -2366,3 +2366,12 @@ select.entrada {
     grid-column: span 12 !important;
   }
 }
+
+.gira {
+  animation: gira 0.9s linear infinite;
+}
+@keyframes gira {
+  to {
+    transform: rotate(360deg);
+  }
+}

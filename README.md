@@ -13,19 +13,25 @@ npm run build    # confere os tipos e gera dist/
 
 ## Estado (2026-11-15)
 
-Só o front, em modo demonstração: não há backend ligado. Os dados vivem em `localStorage`
-(`src/lib/store.tsx`) e a conta de exemplo é gerada em `src/lib/seed.ts`.
-Qualquer e-mail, senha ou código de 6 números entra.
+Painel ligado ao banco. Há dois modos:
 
-Telas: entrar, criar conta, boas-vindas em 6 passos, Início, Lançamentos, Contas, Relatórios,
-Meu MEI, Ajustes, Assinatura e a tela de acesso pausado.
+- **Conta de verdade:** login por e-mail e senha no Supabase próprio (`db-grannamei.amplasoft.me`).
+  Tudo que o cliente muda é gravado no banco por `src/lib/remoto.ts`, que compara o estado de antes
+  com o de depois e envia só a diferença. As telas não falam com o banco.
+- **Demonstração:** botão "Ver uma demonstração" na tela de entrar. Conta de exemplo que vive só no
+  navegador (`src/lib/seed.ts`) e nunca toca o banco.
 
-## O que trocar quando o backend existir
+Variáveis: copie `.env.example` para `.env.local` e preencha a chave anon. No Coolify elas entram
+no build (`VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`).
 
-- `src/lib/store.tsx`: é o único ponto que lê e grava dados. Trocar por Supabase.
+Banco: `supabase/migrations/`. Cada cliente só enxerga as próprias linhas (RLS em todas as tabelas),
+a assinatura só é gravada pelo servidor e conta bloqueada lê mas não grava.
+
+## O que ainda só simula
+
+- Código pelo WhatsApp, cobrança, envio ao contador e a exclusão definitiva da conta.
+- E-mail (confirmação e troca de senha) depende do Resend; por enquanto a conta entra sem confirmar e-mail.
 - `src/lib/config.ts`: `WHATS_GRANNINHA` é provisório; preços, limite do MEI e uso justo ficam aqui.
-- Login, código pelo WhatsApp, pagamento, envio ao contador e exclusão de conta só simulam a ação.
-- O bloco "Demonstração" em Ajustes existe para ver os estados da assinatura; remover.
 
 ## Marca
 

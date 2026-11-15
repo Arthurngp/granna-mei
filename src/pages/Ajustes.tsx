@@ -180,12 +180,13 @@ export default function Ajustes() {
                 setAba('excluir')
               }}
             />
-            <Item I={LogOut} titulo="Sair" det="Encerrar a sessão neste aparelho" onClick={sair} />
+            <Item I={LogOut} titulo="Sair" det={s.sessao.demo ? 'Fechar a demonstração' : 'Encerrar a sessão neste aparelho'} onClick={sair} />
           </section>
         </div>
 
+        {s.sessao.demo && (
         <div className="g-6 pilha" style={{ gap: 8 }}>
-          <div className="secao-tit">Demonstração (some quando o sistema for ligado de verdade)</div>
+          <div className="secao-tit">Demonstração (não existe na conta de verdade)</div>
           <section className="card pilha">
             <div>
               <div className="rotulo">Simular situação da assinatura</div>
@@ -218,6 +219,7 @@ export default function Ajustes() {
             </div>
           </section>
         </div>
+        )}
       </div>
 
       <div className="assinatura-amp" style={{ marginTop: 6 }}>
@@ -273,7 +275,7 @@ export default function Ajustes() {
               onClick={() => {
                 usuario({ whats: novoFone })
                 fechar()
-                avisar('WhatsApp trocado. A Granninha já fala com o número novo.')
+                avisar(s.sessao.demo ? 'WhatsApp trocado. A Granninha já fala com o número novo.' : 'Número salvo. A confirmação pelo WhatsApp entra quando a Granninha for ligada.')
               }}
             >
               Confirmar número novo
@@ -309,7 +311,7 @@ export default function Ajustes() {
             <div className="campo">
               <span>Código enviado para {novoFone}</span>
               <Codigo valor={codigo} onChange={setCodigo} />
-              <small>Demonstração: qualquer código de 6 números vale.</small>
+              <small>{s.sessao.demo ? 'Demonstração: qualquer código de 6 números vale.' : 'Digite o código que a Granninha mandou.'}</small>
             </div>
           )}
         </div>

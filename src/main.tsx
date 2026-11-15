@@ -10,11 +10,11 @@ import './styles.css'
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <AppProvider>
-        <AvisoProvider>
+      <AvisoProvider>
+        <AppProvider>
           <App />
-        </AvisoProvider>
-      </AppProvider>
+        </AppProvider>
+      </AvisoProvider>
     </BrowserRouter>
   </StrictMode>,
 )

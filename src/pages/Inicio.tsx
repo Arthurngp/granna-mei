@@ -125,9 +125,11 @@ export default function Inicio() {
                 <MessageCircle size={19} />
                 Falar com a Granninha
               </a>
-              <button type="button" className="btn btn-sec btn-bloco" onClick={carregarExemplo}>
-                Ver o painel com dados de exemplo
-              </button>
+              {s.sessao.demo && (
+                <button type="button" className="btn btn-sec btn-bloco" onClick={carregarExemplo}>
+                  Ver o painel com dados de exemplo
+                </button>
+              )}
             </div>
           </section>
         ) : (
