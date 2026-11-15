@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Brush, Car, Check, HardHat, MessageCircle, Plus, Shirt, ShoppingBag, Sparkles, Trash2, Utensils, Wrench } from 'lucide-react'
+import { ArrowLeft, ArrowRight, LoaderCircle, Brush, Car, Check, HardHat, MessageCircle, Plus, Shirt, ShoppingBag, Sparkles, Trash2, Utensils, Wrench } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Conversa } from '../components/Conversa'
 import { IconeCarteira } from '../components/Shell'
@@ -37,11 +37,12 @@ const GUIA: { pose: Pose; titulo: string; texto: string }[] = [
   { pose: 'moedas', titulo: 'Onde fica o seu dinheiro?', texto: 'Marque onde você guarda e quanto tem em cada lugar hoje.' },
   { pose: 'calendario', titulo: 'Quais contas chegam todo mês?', texto: 'Eu aviso antes de vencer, para você não pagar multa por esquecimento.' },
   { pose: 'sino', titulo: 'Quando eu posso te chamar?', texto: 'Escolha o melhor horário para o resumo e os lembretes.' },
-  { pose: 'festa', titulo: 'Tudo pronto!', texto: 'Toque em Falar com a Granninha e envie a mensagem que aparecer: é assim que eu sei que esse número é seu.' },
+  { pose: 'hero', titulo: 'Último passo: confirme seu WhatsApp', texto: 'É assim que eu sei que o número é seu. Sem isso, eu não consigo anotar o que você me mandar.' },
 ]
 
 export default function Onboarding() {
-  const { s, mut, sair, gerarCodigo } = useApp()
+  const { s, mut, sair, gerarCodigo, checarConfirmado } = useApp()
+  const [confirmado, setConfirmado] = useState(false)
   const [codigo, setCodigo] = useState<string | null>(null)
   const [passo, setPassoLocal] = useState(0)
 
@@ -91,7 +92,7 @@ export default function Onboarding() {
     return ''
   }, [passo, negocio, cnpjOk, foneOk, ramo, carteiras, padrao, fixas])
 
-  const concluir = () =>
+  const salvarDados = () =>
     mut((a) => {
       const h = hoje()
       const cs: Carteira[] = carteiras.filter((c) => c.on).map((c) => ({ id: c.tipo, nome: c.nome, tipo: c.tipo, saldoInicial: c.saldo, padrao: c.tipo === padrao }))
@@ -106,7 +107,7 @@ export default function Onboarding() {
       }
       return {
         ...a,
-        sessao: { ...a.sessao, onboarding: true, passo: 6 },
+        sessao: { ...a.sessao, passo: 5 },
         usuario: { ...a.usuario, negocio: negocio.trim(), cnpj, whats: fone, ramo },
         categorias: categoriasPadrao(ramo),
         carteiras: cs,
@@ -122,10 +123,23 @@ export default function Onboarding() {
     if (p > s.sessao.passo) mut((a) => ({ ...a, sessao: { ...a.sessao, passo: p } }))
   }
 
-  // No último passo o botão do WhatsApp já leva o código: mandar a mensagem confirma o número.
+  const concluir = () => mut((a) => ({ ...a, sessao: { ...a.sessao, onboarding: true, passo: 6 } }))
+
+  // Último passo: gera o código e fica conferindo no banco até a Granninha confirmar o número.
   useEffect(() => {
     if (passo === 5 && !codigo) void gerarCodigo().then(setCodigo)
   }, [passo, codigo, gerarCodigo])
+  useEffect(() => {
+    if (passo !== 5 || confirmado) return
+    let vivo = true
+    const t = setInterval(async () => {
+      if (vivo && (await checarConfirmado())) setConfirmado(true)
+    }, 3000)
+    return () => {
+      vivo = false
+      clearInterval(t)
+    }
+  }, [passo, confirmado, checarConfirmado])
 
   const g = GUIA[passo]
   const nome = primeiroNome(s.usuario.nome)
@@ -143,7 +157,7 @@ export default function Onboarding() {
 
   return (
     <div className="ob">
-      {passo === 5 && <Confete />}
+      {confirmado && <Confete />}
       <div className="ob-topo">
         <div className="faixa-topo">
           <button type="button" className="icone-btn" aria-label={passo === 0 ? 'Sair' : 'Voltar'} onClick={() => (passo === 0 ? sair() : setPasso(passo - 1))}>
@@ -160,10 +174,10 @@ export default function Onboarding() {
 
       <div className="ob-corpo" key={passo}>
         <div className="ob-guia">
-          <Mascote pose={g.pose} tam={104} anim={passo === 5 ? 'pula' : 'flutua'} />
+          <Mascote pose={passo === 5 && confirmado ? 'festa' : g.pose} tam={104} anim={confirmado ? 'pula' : 'flutua'} />
           <div className="balao">
-            <h1>{passo === 5 && nome ? `Tudo pronto, ${nome}!` : passo === 0 && nome ? `Prazer, ${nome}! Eu sou a Granninha.` : g.titulo}</h1>
-            <p>{g.texto}</p>
+            <h1>{passo === 5 && confirmado ? `Tudo pronto${nome ? `, ${nome}` : ''}!` : passo === 0 && nome ? `Prazer, ${nome}! Eu sou a Granninha.` : g.titulo}</h1>
+            <p>{passo === 5 && confirmado ? 'Seu número está confirmado e eu já te respondi no WhatsApp. Agora é só me mandar o que entrou ou saiu.' : g.texto}</p>
           </div>
         </div>
 
@@ -345,7 +359,23 @@ export default function Onboarding() {
           </div>
         )}
 
-        {passo === 5 && <Conversa />}
+        {passo === 5 && !confirmado && (
+          <div className="card pilha confirma">
+            <div className="codigo-grande">
+              <small>Seu código</small>
+              <b className="num">{codigo ?? '······'}</b>
+            </div>
+            <ol className="passos-confirma">
+              <li>Toque no botão verde aqui embaixo.</li>
+              <li>O WhatsApp abre com a mensagem pronta para a Granninha, do número {s.usuario.whats || 'que você informou'}.</li>
+              <li>Toque em enviar e volte para esta tela.</li>
+            </ol>
+            <div className="esperando" aria-live="polite">
+              <LoaderCircle size={16} className="gira" /> Esperando sua mensagem chegar...
+            </div>
+          </div>
+        )}
+        {passo === 5 && confirmado && <Conversa />}
       </div>
 
       <div className="ob-pe">
@@ -355,20 +385,47 @@ export default function Onboarding() {
               <div className="falta" aria-live="polite">
                 {falta}
               </div>
-              <button type="button" className="btn btn-pri btn-bloco" disabled={!!falta} onClick={() => setPasso(passo + 1)}>
+              <button
+                type="button"
+                className="btn btn-pri btn-bloco"
+                disabled={!!falta}
+                onClick={() => {
+                  // Ao concluir o passo 5, grava tudo antes de mandar a pessoa ao WhatsApp.
+                  if (passo === 4) salvarDados()
+                  setPasso(passo + 1)
+                }}
+              >
                 {passo === 4 ? 'Concluir' : 'Continuar'}
                 <ArrowRight size={18} />
               </button>
             </>
           ) : (
             <>
-              <a className="btn btn-wa btn-bloco" href={linkWhats(codigo ? `Meu código Granna Mei: ${codigo}` : 'Oi, Granninha!')} target="_blank" rel="noopener noreferrer" onClick={concluir}>
-                <MessageCircle size={19} />
-                Falar com a Granninha
-              </a>
-              <button type="button" className="btn btn-sec btn-bloco" onClick={concluir}>
-                Ver meu painel
-              </button>
+              {!confirmado ? (
+                <>
+                  <a
+                    className="btn btn-wa btn-bloco"
+                    href={linkWhats(codigo ? `Meu código Granna Mei: ${codigo}` : 'Oi, Granninha!')}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => {
+                      // Na demonstração não há Granninha de verdade: confirma sozinho depois de um instante.
+                      if (s.sessao.demo) setTimeout(() => setConfirmado(true), 2500)
+                    }}
+                  >
+                    <MessageCircle size={19} />
+                    Abrir o WhatsApp e enviar o código
+                  </a>
+                  <button type="button" className="btn btn-txt" onClick={concluir}>
+                    Confirmar depois
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="btn btn-pri btn-bloco" onClick={concluir}>
+                  Ver meu painel
+                  <ArrowRight size={18} />
+                </button>
+              )}
             </>
           )}
         </div>
