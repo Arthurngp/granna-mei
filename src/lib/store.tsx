@@ -50,6 +50,8 @@ interface Ctx {
   recuperarSenha: (email: string) => Promise<string | null>
   /** Código de 6 números para o cliente mandar à Granninha e confirmar o WhatsApp. */
   gerarCodigo: () => Promise<string | null>
+  /** Confere no banco se a Granninha já confirmou o número (o cliente mandou o código). */
+  checarConfirmado: () => Promise<boolean>
   entrarDemo: () => void
   sair: () => void
   pagarConta: (id: string, carteiraId?: string) => void
@@ -253,6 +255,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (s.sessao.demo || !supabase) return String(Math.floor(100000 + Math.random() * 900000))
         const { data, error } = await supabase.rpc('gerar_codigo_whats')
         return error ? null : (data as string)
+      },
+      checarConfirmado: async () => {
+        if (s.sessao.demo || !supabase || !userId.current) return s.usuario.verificado
+        const { data } = await supabase.from('perfis').select('whats_verificado').eq('id', userId.current).maybeSingle()
+        const ok = !!data?.whats_verificado
+        // verificado não é gravado pelo painel (perfilDe não o envia): só atualiza a tela.
+        if (ok && !s.usuario.verificado) mut((a) => ({ ...a, usuario: { ...a.usuario, verificado: true } }))
+        return ok
       },
       entrarDemo: () => {
         userId.current = null

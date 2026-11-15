@@ -56,7 +56,7 @@ with sync_playwright() as p:
         page.locator('.item-ob.ligado').nth(1).locator('input').first.fill('80000')
         page.get_by_role('button', name='Continuar').click()
         page.get_by_role('button', name='Concluir').click()
-        page.get_by_role('button', name='Ver meu painel').click()
+        page.get_by_role('button', name='Confirmar depois').click()
         page.wait_for_url(re.compile(re.escape(BASE) + r'/?$')); page.wait_for_timeout(2500)
         page.screenshot(path=OUT + '/03-inicio-novo.png')
         r = banco(f"select (select onboarding_feito from perfis where id='{uid}') feito, (select negocio from perfis where id='{uid}') negocio, (select whats_verificado from perfis where id='{uid}') verif, (select count(*) from carteiras where user_id='{uid}') cart, (select saldo_inicial from carteiras where user_id='{uid}' limit 1) saldo, (select count(*) from categorias where user_id='{uid}') cat, (select count(*) from fixas where user_id='{uid}') fix, (select count(*) from contas where user_id='{uid}') contas")[0]
