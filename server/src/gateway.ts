@@ -53,3 +53,33 @@ export function assinaturaValida(corpo: string, cabecalho: string | undefined): 
   const veio = cabecalho.slice(7)
   return veio.length === esperado.length && timingSafeEqual(Buffer.from(veio), Buffer.from(esperado))
 }
+
+/** Cria a sessão do número da Granninha se ainda não existir, com o robô automático do gateway desligado. */
+export async function garantirSessao(): Promise<void> {
+  const r = await fetch(`${base()}/api/sessions/${sessao()}`, { headers: cabecalhos(), signal: AbortSignal.timeout(10_000) })
+  if (r.ok) return
+  if (r.status !== 404) throw new Error(`gateway sessão ${r.status}`)
+  const c = await fetch(`${base()}/api/sessions`, { method: 'POST', headers: cabecalhos(), body: JSON.stringify({ name: 'Granninha', sessionId: sessao() }), signal: AbortSignal.timeout(15_000) })
+  if (!c.ok) throw new Error(`gateway criar sessão ${c.status}: ${(await c.text()).slice(0, 200)}`)
+  await neutralizarRobo()
+}
+
+/** O WA-AKG tem um robô de comandos e respostas automáticas. A Granninha responde sozinha; o robô dele fica mudo. */
+export async function neutralizarRobo(): Promise<void> {
+  const r = await fetch(`${base()}/api/sessions/${sessao()}/bot-config`, {
+    method: 'POST',
+    headers: cabecalhos(),
+    body: JSON.stringify({ enabled: false, botMode: 'SPECIFIC', botAllowedJids: [], autoReplyMode: 'SPECIFIC', autoReplyAllowedJids: [], enableSticker: false, enableVideoSticker: false, enablePing: false, enableUptime: false }),
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!r.ok) throw new Error(`gateway robô ${r.status}`)
+}
+
+/** QR para parear o chip. Sem QR quando já está conectado. */
+export async function qrDaSessao(): Promise<{ conectado: boolean; imagem: string | null; estado: string; numero: string | null }> {
+  const st = await statusSessao()
+  if (st.estado === 'CONNECTED') return { conectado: true, imagem: null, estado: st.estado, numero: st.numero }
+  const r = await fetch(`${base()}/api/sessions/${sessao()}/qr`, { headers: cabecalhos(), signal: AbortSignal.timeout(15_000) })
+  const j = (await r.json().catch(() => ({}))) as { base64?: string; data?: { base64?: string } }
+  return { conectado: false, imagem: j.data?.base64 ?? j.base64 ?? null, estado: st.estado, numero: null }
+}

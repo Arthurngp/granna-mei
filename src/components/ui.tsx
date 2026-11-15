@@ -11,7 +11,7 @@ export type Pose =
   | 'relatorio' | 'moedas' | 'mei' | 'loja' | 'foto' | 'resumo' | 'saco' | 'dormindo' | 'trofeu' | 'notificacao'
 
 export function Mascote({ pose, tam = 96, anim, className = '', style }: { pose: Pose; tam?: number; anim?: 'flutua' | 'pula'; className?: string; style?: CSSProperties }) {
-  return <img src={`/mascote/${pose}.png`} alt="" aria-hidden className={`mascote ${anim ?? ''} ${className}`} style={{ height: tam, ...style }} draggable={false} />
+  return <img src={`${import.meta.env.BASE_URL}mascote/${pose}.png`} alt="" aria-hidden className={`mascote ${anim ?? ''} ${className}`} style={{ height: tam, ...style }} draggable={false} />
 }
 
 export function Vazio({ pose, titulo, texto, children }: { pose: Pose; titulo: string; texto: string; children?: ReactNode }) {

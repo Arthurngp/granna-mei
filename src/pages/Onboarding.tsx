@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, Brush, Car, Check, HardHat, MessageCircle, Plus, Shirt, ShoppingBag, Sparkles, Trash2, Utensils, Wrench } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Conversa } from '../components/Conversa'
 import { IconeCarteira } from '../components/Shell'
 import { CampoDinheiro, Chave, Mascote, Seg, type Pose } from '../components/ui'
@@ -37,11 +37,12 @@ const GUIA: { pose: Pose; titulo: string; texto: string }[] = [
   { pose: 'moedas', titulo: 'Onde fica o seu dinheiro?', texto: 'Marque onde você guarda e quanto tem em cada lugar hoje.' },
   { pose: 'calendario', titulo: 'Quais contas chegam todo mês?', texto: 'Eu aviso antes de vencer, para você não pagar multa por esquecimento.' },
   { pose: 'sino', titulo: 'Quando eu posso te chamar?', texto: 'Escolha o melhor horário para o resumo e os lembretes.' },
-  { pose: 'festa', titulo: 'Tudo pronto!', texto: 'Agora é só me mandar o primeiro lançamento no WhatsApp.' },
+  { pose: 'festa', titulo: 'Tudo pronto!', texto: 'Toque em Falar com a Granninha e envie a mensagem que aparecer: é assim que eu sei que esse número é seu.' },
 ]
 
 export default function Onboarding() {
-  const { s, mut, sair } = useApp()
+  const { s, mut, sair, gerarCodigo } = useApp()
+  const [codigo, setCodigo] = useState<string | null>(null)
   const [passo, setPassoLocal] = useState(0)
 
   const [negocio, setNegocio] = useState('')
@@ -120,6 +121,11 @@ export default function Onboarding() {
     setPassoLocal(p)
     if (p > s.sessao.passo) mut((a) => ({ ...a, sessao: { ...a.sessao, passo: p } }))
   }
+
+  // No último passo o botão do WhatsApp já leva o código: mandar a mensagem confirma o número.
+  useEffect(() => {
+    if (passo === 5 && !codigo) void gerarCodigo().then(setCodigo)
+  }, [passo, codigo, gerarCodigo])
 
   const g = GUIA[passo]
   const nome = primeiroNome(s.usuario.nome)
@@ -356,7 +362,7 @@ export default function Onboarding() {
             </>
           ) : (
             <>
-              <a className="btn btn-wa btn-bloco" href={linkWhats('Oi, Granninha! Quero fazer meu primeiro lançamento.')} target="_blank" rel="noopener noreferrer" onClick={concluir}>
+              <a className="btn btn-wa btn-bloco" href={linkWhats(codigo ? `Meu código Granna Mei: ${codigo}` : 'Oi, Granninha!')} target="_blank" rel="noopener noreferrer" onClick={concluir}>
                 <MessageCircle size={19} />
                 Falar com a Granninha
               </a>

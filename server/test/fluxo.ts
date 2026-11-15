@@ -12,7 +12,8 @@ import { type AddressInfo } from 'node:net'
 process.env.WA_GATEWAY_API_KEY = 'chave-teste'
 process.env.WA_WEBHOOK_SECRET = 'segredo-teste'
 process.env.WA_SESSAO = 'granninha'
-process.env.PAINEL_URL = 'https://grannamei.amplasoft.me'
+process.env.PAINEL_URL = 'https://grannamei.amplasoft.me/painel'
+process.env.SEM_BATIMENTO = '1'
 
 // ---------- Gateway falso ----------
 const enviados: { jid: string; texto: string }[] = []

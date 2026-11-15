@@ -72,7 +72,7 @@ export interface Fatura {
 export interface Estado {
   versao: number
   sessao: { logado: boolean; onboarding: boolean; demo: boolean; passo: number }
-  usuario: { nome: string; email: string; negocio: string; cnpj: string; whats: string; ramo: string }
+  usuario: { nome: string; email: string; negocio: string; cnpj: string; whats: string; ramo: string; verificado: boolean }
   carteiras: Carteira[]
   categorias: Categoria[]
   lancamentos: Lancamento[]

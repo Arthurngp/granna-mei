@@ -95,7 +95,7 @@ export async function carregar(email: string): Promise<Estado> {
   return {
     versao: VERSAO,
     sessao: { logado: true, onboarding: !!p.onboarding_feito, demo: false, passo: Number(p.onboarding_passo ?? 0) },
-    usuario: { nome: (p.nome as string) ?? '', email, negocio: (p.negocio as string) ?? '', cnpj: (p.cnpj as string) ?? '', whats: (p.whats as string) ?? '', ramo },
+    usuario: { nome: (p.nome as string) ?? '', email, negocio: (p.negocio as string) ?? '', cnpj: (p.cnpj as string) ?? '', whats: (p.whats as string) ?? '', ramo, verificado: !!p.whats_verificado },
     carteiras: carteiras.map(deCarteira),
     categorias: categorias.length ? categorias.map(deCategoria) : categoriasPadrao(ramo || 'outro'),
     lancamentos: lancs.map(deLancamento).sort((x, y) => (x.data + x.hora < y.data + y.hora ? 1 : -1)),

@@ -9,7 +9,7 @@ import './styles.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename="/painel">
       <AvisoProvider>
         <AppProvider>
           <App />

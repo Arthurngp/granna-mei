@@ -32,7 +32,7 @@ export function Conversa() {
   return (
     <div className="zap" aria-label="Exemplo de conversa com a Granninha">
       <div className="zap-cab">
-        <img src="/mascote/hero.png" alt="" />
+        <img src={`${import.meta.env.BASE_URL}mascote/hero.png`} alt="" />
         <div>
           <b>Granninha</b>
           <small>{digitando ? 'digitando...' : 'online'}</small>

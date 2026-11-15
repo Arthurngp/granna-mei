@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:admin": "tsc -p admin/tsconfig.json --noEmit && vite build --config admin/vite.config.ts",
+    "dev:admin": "vite --config admin/vite.config.ts"
   },
   "dependencies": {
     "@fontsource-variable/figtree": "^5.1.1",

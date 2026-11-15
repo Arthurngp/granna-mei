@@ -10,7 +10,7 @@ function Tela({ titulo, sub, pose, children }: { titulo: string; sub: string; po
   return (
     <div className="auth">
       <div className="auth-topo">
-        <img className="logo" src="/logo-192.png" alt="Granna Mei" />
+        <img className="logo" src={`${import.meta.env.BASE_URL}logo-192.png`} alt="Granna Mei" />
         <h1>{titulo}</h1>
         <p>{sub}</p>
         <div className="auth-palco">

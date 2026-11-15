@@ -13,7 +13,7 @@ import { responderPergunta } from './perguntas.ts'
 
 export const LIMITE_LANCAMENTOS = Number(process.env.LIMITE_LANCAMENTOS ?? 300)
 export const LIMITE_MIDIAS = Number(process.env.LIMITE_MIDIAS ?? 100)
-const PAINEL = () => (process.env.PAINEL_URL ?? 'https://grannamei.amplasoft.me').replace(/\/+$/, '')
+const PAINEL = () => (process.env.PAINEL_URL ?? 'https://grannamei.amplasoft.me/painel').replace(/\/+$/, '')
 
 export interface EventoGateway {
   event: string
