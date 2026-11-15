@@ -8,6 +8,8 @@ import { jsonEstruturado, type Uso } from './openai.ts'
 
 export interface Contexto {
   hoje: string // AAAA-MM-DD
+  /** Ramo do negócio, para saber o que é serviço dele (entrada) */
+  ramo?: string
   categorias: { id: string; nome: string; tipo: 'entrada' | 'saida'; pessoal?: boolean }[]
   carteiras: { id: string; nome: string; tipo: string; padrao: boolean }[]
   /** Contas em aberto, para "paguei a luz" achar a conta certa */
@@ -69,11 +71,11 @@ function sistema(c: Contexto) {
     ? c.contasAbertas.slice(0, 40).map((x) => `- ${x.id}: ${x.tipo === 'pagar' ? 'a pagar' : 'a receber'} "${x.descricao}" R$ ${x.valor.toFixed(2)} vence ${x.vencimento}`).join('\n')
     : '(nenhuma)'
   return `Você lê mensagens que um microempreendedor (MEI) manda no WhatsApp para registrar o dinheiro do negócio.
-Hoje é ${DIAS[d.getDay()]}, ${c.hoje}. Responda só no formato pedido.
+Hoje é ${DIAS[d.getDay()]}, ${c.hoje}.${c.ramo ? ` O negócio é do ramo: ${c.ramo}.` : ''} Responda só no formato pedido.
 
 INTENÇÃO
 - "acoes": a mensagem registra dinheiro (uma ou mais ações).
-- "pergunta": quer saber algo dos próprios números ("quanto gastei", "o que vence", "quanto sobrou"). Reescreva a pergunta clara em "pergunta".
+- "pergunta": quer saber algo dos próprios números ou do MEI dele ("quanto gastei", "o que vence", "quanto sobrou", "quanto falta pro limite do MEI", "quando vence o DAS"). Reescreva a pergunta clara em "pergunta".
 - "desfazer": quer anular o último registro ("desfazer", "apaga o último", "cancela isso", "errei, apaga").
 - "corrigir": quer mudar o último registro ("não foi 50, foi 60", "era dinheiro, não pix"). Descreva a correção em "correcao".
 - "saudacao": só cumprimento ou agradecimento. "ajuda": pergunta como usar. "outro": nada a ver com dinheiro.
@@ -83,7 +85,7 @@ TIPOS DE AÇÃO
 - "conta": dinheiro que VAI entrar ou sair numa data (boleto, fiado, "me deve", "vou receber", "vence dia"). movimento entrada = a receber, saida = a pagar. Preencha "vencimento".
 - "recorrente": conta que se repete todo mês ("aluguel 900 todo dia 10"). Preencha "dia_do_mes".
 - "parcelado": compra ou venda em parcelas ("em 4x", "4 vezes de 300"). "valor" = TOTAL; "parcelas" = quantidade.
-- "baixar_conta": pagou ou recebeu uma conta que JÁ está na lista abaixo ("paguei a luz", "a Juliana pagou"). Preencha "conta_id"; "valor" só se a pessoa disse um valor.
+- "baixar_conta": pagou ou recebeu uma conta que JÁ está na lista abaixo e que a pessoa NOMEOU ("paguei a água", "a Mariana pagou"). Preencha "conta_id"; "valor" só se a pessoa disse um valor. Se nenhuma conta da lista tem o nome do que a pessoa disse, NÃO é baixa: é lançamento (e se faltar o valor, pergunte). Se o valor dito é diferente do valor da conta, é lançamento novo, não baixa. Baixa de conta sem valor dito NÃO precisa perguntar o valor: usa o valor da conta.
 - "transferencia": dinheiro passando de uma carteira do próprio dono para outra ("depositei o dinheiro do caixa no banco", "a maquininha caiu no banco"). Use carteira_id (origem) e carteira_destino_id.
 
 REGRAS
@@ -95,7 +97,9 @@ REGRAS
 - Almoço, lanche e café durante o trabalho são gasto do negócio (alimentação), não pessoal.
 - carteira_id: "pix", "transferência", "débito", "boleto" → banco; "dinheiro", "em espécie", "na mão" → dinheiro; "cartão", "crédito", "maquininha" → maquininha. Sem pista → null.
 - descricao: curta, do jeito que a pessoa diria ("Conta de luz", "Corte · Juliana"). Sem valor na descrição.
-- Várias coisas na mesma mensagem viram várias ações.
+- Várias coisas na mesma mensagem viram várias ações. Mas quantidade vezes preço ("3 cortes de 50", "2 escovas de 60") é UMA ação com o total.
+- Quando a pessoa cita um serviço ou produto que o negócio dela vende, com valor, é dinheiro que ENTROU (ex.: "corte masc 35 pix", "escova 55").
+- "semana que vem" sem dia: vencimento é hoje mais 7 dias. "mês que vem" sem dia: mesmo dia do mês seguinte.
 
 CATEGORIAS DO CLIENTE
 ${cats}
@@ -144,6 +148,14 @@ function esquema(c: Contexto) {
   }
 }
 
+const tira = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+const VAZIAS = new Set(['conta', 'contas', 'de', 'da', 'do', 'das', 'dos', 'para', 'pra', 'com', 'pacote', 'parcela'])
+/** A frase cita a conta? Alguma palavra significativa da descrição aparece na mensagem. */
+function nomeada(texto: string, descricao: string) {
+  const t = tira(texto)
+  return tira(descricao).split(/[^a-z0-9]+/).some((p) => p.length >= 3 && !VAZIAS.has(p) && t.includes(p))
+}
+
 const dataValida = (s: string | null) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(new Date(s + 'T12:00:00').getTime())
 
 /** Confere cada ação. Devolve a pergunta a fazer, se algo não fecha. */
@@ -160,7 +172,16 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA): { acoes: Ac
     if (a.valor !== null && temDigito(texto) && !valorConfere(texto, a.valor, a.parcelas)) {
       return { acoes: [], perguntar: `Só para conferir: o valor de "${a.descricao}" é quanto?` }
     }
-    if (a.tipo_acao === 'baixar_conta' && !c.contasAbertas.some((x) => x.id === a.conta_id)) {
+    const conta = c.contasAbertas.find((x) => x.id === a.conta_id)
+    if (a.tipo_acao === 'baixar_conta' && (!conta || !nomeada(texto, conta.descricao) || (a.valor !== null && Math.abs(a.valor - conta.valor) > 0.01))) {
+      // Conta não nomeada ou valor diferente: não dá baixa em conta errada. Com valor, vira lançamento; sem valor, pergunta.
+      if (a.valor !== null && a.valor > 0 && conta) {
+        a.tipo_acao = 'lancamento'
+        a.movimento = conta.tipo === 'receber' ? 'entrada' : 'saida'
+        a.conta_id = null
+      } else return { acoes: [], perguntar: `Não achei essa conta em aberto. Qual conta você ${a.movimento === 'entrada' ? 'recebeu' : 'pagou'}, e de quanto?` }
+    }
+    if (a.tipo_acao === 'baixar_conta' && !conta) {
       return { acoes: [], perguntar: `Não achei essa conta em aberto. Qual conta você ${a.movimento === 'entrada' ? 'recebeu' : 'pagou'}, e de quanto?` }
     }
     if (a.tipo_acao === 'transferencia' && (!a.carteira_destino_id || a.carteira_destino_id === (a.carteira_id ?? padrao))) {

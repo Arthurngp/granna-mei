@@ -9,6 +9,7 @@ import { categoriasPadrao } from './categorias.ts'
 
 const CTX: Contexto = {
   hoje: '2026-11-15', // domingo
+  ramo: 'beleza e estética (salão)',
   categorias: categoriasPadrao('beleza'),
   carteiras: [
     { id: 'banco', nome: 'Conta do banco', tipo: 'banco', padrao: true },
@@ -97,7 +98,7 @@ const CASOS: Caso[] = [
   { f: 'secador de 720 parcelado em 6 vezes', a: [{ t: 'parcelado', m: 'saida', v: 720, n: 6 }] },
   { f: 'cadeira nova 4x de 300', a: [{ t: 'parcelado', m: 'saida', v: 1200, n: 4 }] },
   { f: 'vendi um pacote de 900 em 3x pra Renata', a: [{ t: 'parcelado', m: 'entrada', v: 900, n: 3 }] },
-  { f: 'a Sandra vai me pagar 200 semana que vem', a: [{ t: 'conta', m: 'entrada', v: 200 }] },
+  { f: 'a Sandra vai me pagar 200 semana que vem', a: [{ t: 'conta', m: 'entrada', v: 200, venc: '2026-11-22' }] },
   { f: 'parcela do empréstimo 350 todo dia 8', a: [{ t: 'recorrente', m: 'saida', v: 350, d: 8 }] },
   { f: 'fiado: Aline 80', perg: true },
   { f: 'IPTU do salão 680 vence dia 30', a: [{ t: 'conta', m: 'saida', v: 680, venc: '2026-11-30' }] },

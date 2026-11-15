@@ -7,7 +7,17 @@ const BASE = 'https://api.openai.com/v1'
 
 async function pedir(caminho: string, init: RequestInit, tentativas = 3): Promise<Response> {
   for (let i = 0; ; i++) {
-    const r = await fetch(BASE + caminho, { ...init, headers: { Authorization: `Bearer ${env('OPENAI_API_KEY')}`, ...(init.headers ?? {}) }, signal: AbortSignal.timeout(45_000) })
+    let r: Response
+    try {
+      r = await fetch(BASE + caminho, { ...init, headers: { Authorization: `Bearer ${env('OPENAI_API_KEY')}`, ...(init.headers ?? {}) }, signal: AbortSignal.timeout(25_000) })
+    } catch (e) {
+      // Sem resposta a tempo ou queda de rede: tenta de novo.
+      if (i + 1 < tentativas) {
+        await new Promise((ok) => setTimeout(ok, 800 * 2 ** i))
+        continue
+      }
+      throw e
+    }
     if (r.ok) return r
     // Limite de taxa ou instabilidade do lado deles: espera e tenta de novo. Erro nosso (400) não adianta repetir.
     if (i + 1 < tentativas && (r.status === 429 || r.status >= 500)) {
