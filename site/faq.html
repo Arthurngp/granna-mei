@@ -102,8 +102,8 @@
 
     <div class="faq-grupo" id="planos">
       <h2>Planos e pagamento</h2>
-      <details><summary>Quanto custa?</summary><p>R$ 19,90 por mês, sem fidelidade, ou R$ 197 por ano, que sai por R$ 16,42 ao mês. Os dois começam com 7 dias grátis.</p></details>
-      <details><summary>Preciso de cartão para testar?</summary><p>Não. Você cria a conta e usa os 7 dias sem informar forma de pagamento.</p></details>
+      <details><summary>Quanto custa?</summary><p>R$ 19,90 por mês, sem fidelidade, ou R$ 197 por ano, que sai por R$ 16,42 ao mês. <span data-fora="Os dois começam com 7 dias grátis.">Quem cria a conta até 30 de novembro usa grátis até o fim do mês.</span></p></details>
+      <details><summary>Preciso de cartão para testar?</summary><p>Não. Você cria a conta e usa o período grátis sem informar forma de pagamento.</p></details>
       <details><summary>Tem limite de uso?</summary><p>Tem um limite mensal de uso justo, bem acima do que um MEI usa no dia a dia. Se você chegar perto, a Granninha avisa antes, e o contador zera todo dia 1.</p></details>
       <details><summary>O que acontece se o pagamento atrasar?</summary><p>Você recebe um aviso. Se o pagamento não cair em 24 horas, o acesso fica pausado: dá para pagar e baixar seus dados, mas a Granninha deixa de anotar. Nada é apagado, e tudo volta assim que o pagamento é confirmado.</p></details>
       <details><summary>Como cancelo?</summary><p>Em Ajustes, Assinatura. No plano mensal não há multa: você usa até o fim do período que já pagou.</p></details>
@@ -113,7 +113,7 @@
       <img src="/img/suporte.png" alt="" />
       <p>Quer entender o raciocínio por trás de cada parte? A página Como funciona explica tudo em detalhe.</p>
       <a class="btn btn-claro" href="/documentacao">Como funciona</a>
-      <a class="btn btn-wa" href="/painel/criar-conta">Testar 7 dias grátis</a>
+      <a class="btn btn-wa" href="/painel/criar-conta" data-fora="Testar 7 dias grátis">Usar grátis até 30/11</a>
     </div>
   </div>
 </main>
@@ -126,5 +126,13 @@
     <div class="assina">Desenvolvido por <a href="https://grupongp.com.br" target="_blank" rel="noopener noreferrer">Amplasoft — Grupo NGP</a></div>
   </div>
 </footer>
+<script>
+  // Oferta de novembro: até 30/11 o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
+  (function () {
+    var hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+    if (hoje <= '2026-11-30') return;
+    document.querySelectorAll('[data-fora]').forEach(function (el) { el.textContent = el.getAttribute('data-fora'); });
+  })();
+</script>
 </body>
 </html>
