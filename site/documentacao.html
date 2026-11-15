@@ -59,7 +59,7 @@
 
     <section class="secao" id="comeco">
       <div class="secao-cab"><img src="/img/laptop.png" alt="" /><div><small>2</small><h2>Primeiros passos</h2></div></div>
-      <p>Você cria a conta com nome, e-mail e senha e ganha 7 dias grátis. Depois, a Granninha te guia por 6 passos curtos:</p>
+      <p>Você cria a conta com nome, e-mail e senha e <span data-fora="ganha 7 dias grátis">usa grátis até 30 de novembro</span>. Depois, a Granninha te guia por 6 passos curtos:</p>
       <ol class="passos-lista">
         <li><span><strong>Seu negócio e seu WhatsApp.</strong> O nome do negócio, o CNPJ (se tiver) e o número que você vai usar para conversar com ela.</span></li>
         <li><span><strong>Seu ramo.</strong> Beleza, alimentação, comércio, serviços e outros. Assim as categorias já chegam certas para o seu tipo de negócio.</span></li>
@@ -149,7 +149,7 @@
     <section class="secao" id="planos">
       <div class="secao-cab"><img src="/img/saco.png" alt="" /><div><small>9</small><h2>Planos, teste e pagamento</h2></div></div>
       <ul>
-        <li><strong>7 dias grátis</strong> para conhecer tudo.</li>
+        <li><strong data-fora="7 dias grátis">Grátis até 30 de novembro</strong> para conhecer tudo.</li>
         <li><strong>Mensal:</strong> R$ 19,90 por mês, sem fidelidade.</li>
         <li><strong>Anual:</strong> R$ 197 por ano, o que sai por R$ 16,42 ao mês.</li>
       </ul>
@@ -163,7 +163,7 @@
       <img src="/img/duvida.png" alt="" />
       <p>Ficou alguma dúvida? As perguntas mais comuns estão respondidas na página de perguntas frequentes.</p>
       <a class="btn btn-claro" href="/faq">Ver perguntas frequentes</a>
-      <a class="btn btn-wa" href="/painel/criar-conta">Testar 7 dias grátis</a>
+      <a class="btn btn-wa" href="/painel/criar-conta" data-fora="Testar 7 dias grátis">Usar grátis até 30/11</a>
     </div>
   </div>
 </main>
@@ -176,5 +176,13 @@
     <div class="assina">Desenvolvido por <a href="https://grupongp.com.br" target="_blank" rel="noopener noreferrer">Amplasoft — Grupo NGP</a></div>
   </div>
 </footer>
+<script>
+  // Oferta de novembro: até 30/11 o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
+  (function () {
+    var hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+    if (hoje <= '2026-11-30') return;
+    document.querySelectorAll('[data-fora]').forEach(function (el) { el.textContent = el.getAttribute('data-fora'); });
+  })();
+</script>
 </body>
 </html>

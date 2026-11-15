@@ -4,13 +4,13 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Granna Mei: o dinheiro do seu MEI em dia, pelo WhatsApp</title>
-<meta name="description" content="Você manda uma mensagem no WhatsApp e a Granninha anota. Entradas, gastos, contas a pagar e o limite do MEI, sem planilha. 7 dias grátis." />
+<meta name="description" content="Você manda uma mensagem no WhatsApp e a Granninha anota. Entradas, gastos, contas a pagar e o limite do MEI, sem planilha. Comece grátis, sem cartão." />
 <meta name="theme-color" content="#15162B" />
 <meta name="robots" content="noindex, nofollow" />
 <link rel="icon" type="image/png" href="/img/logo-96.png" />
 <link rel="apple-touch-icon" href="/img/logo-192.png" />
 <meta property="og:title" content="Granna Mei" />
-<meta property="og:description" content="O dinheiro do seu MEI em dia, pelo WhatsApp. 7 dias grátis." />
+<meta property="og:description" content="O dinheiro do seu MEI em dia, pelo WhatsApp. Comece grátis, sem cartão." />
 <meta property="og:image" content="/img/logo-512.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -35,7 +35,7 @@
         <h1>O dinheiro do seu MEI em dia, <em>pelo WhatsApp</em>.</h1>
         <p class="sub">Você manda uma mensagem e a Granninha anota. Entradas, gastos, contas a pagar e o limite do MEI, sem planilha e sem aplicativo novo.</p>
         <div class="acoes">
-          <a class="btn btn-wa" href="/painel/criar-conta">Testar 7 dias grátis</a>
+          <a class="btn btn-wa" href="/painel/criar-conta" data-fora="Testar 7 dias grátis">Usar grátis até 30/11</a>
           <a class="btn btn-claro" href="#como-funciona">Como funciona</a>
         </div>
         <p class="nota">Depois, R$ 19,90 por mês. Cancele quando quiser.</p>
@@ -98,7 +98,7 @@ Errou? Responda DESFAZER.<small>09:12</small></div>
     <div class="wrap">
       <div class="titulo">
         <h2>Menos que um lanche por semana</h2>
-        <p>Os dois planos começam com 7 dias grátis.</p>
+        <p data-fora="Os dois planos começam com 7 dias grátis.">Crie a conta até 30 de novembro e use grátis até o fim do mês.</p>
       </div>
       <div class="planos">
         <div class="plano">
@@ -137,8 +137,8 @@ Errou? Responda DESFAZER.<small>09:12</small></div>
     <div class="wrap">
       <img src="/img/festa.png" alt="" />
       <h2>Comece hoje e veja quanto sobra no fim do mês</h2>
-      <p>7 dias grátis, sem cartão. Leva menos de 5 minutos.</p>
-      <a class="btn btn-wa" href="/painel/criar-conta">Testar 7 dias grátis</a>
+      <p data-fora="7 dias grátis, sem cartão. Leva menos de 5 minutos.">Grátis até 30 de novembro, sem cartão. Leva menos de 5 minutos.</p>
+      <a class="btn btn-wa" href="/painel/criar-conta" data-fora="Testar 7 dias grátis">Usar grátis até 30/11</a>
     </div>
   </section>
 </main>
@@ -151,5 +151,13 @@ Errou? Responda DESFAZER.<small>09:12</small></div>
     <div class="assina">Desenvolvido por <a href="https://grupongp.com.br" target="_blank" rel="noopener noreferrer">Amplasoft — Grupo NGP</a></div>
   </div>
 </footer>
+<script>
+  // Oferta de novembro: até 30/11 o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
+  (function () {
+    var hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+    if (hoje <= '2026-11-30') return;
+    document.querySelectorAll('[data-fora]').forEach(function (el) { el.textContent = el.getAttribute('data-fora'); });
+  })();
+</script>
 </body>
 </html>

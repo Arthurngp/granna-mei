@@ -3,7 +3,7 @@ import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Mascote, useAviso, type Pose } from '../components/ui'
 import { PRECO_MENSAL } from '../lib/config'
-import { brl } from '../lib/format'
+import { brl, hoje } from '../lib/format'
 import { useApp } from '../lib/store'
 
 function Tela({ titulo, sub, pose, children }: { titulo: string; sub: string; pose: Pose; children: ReactNode }) {
@@ -110,7 +110,7 @@ export function Entrar() {
         </button>
       </form>
       <p className="auth-troca">
-        Ainda não tem conta? <Link to="/criar-conta">Teste grátis por 7 dias</Link>
+        Ainda não tem conta? <Link to="/criar-conta">{hoje() <= '2026-11-30' ? 'Use grátis até 30 de novembro' : 'Teste grátis por 7 dias'}</Link>
       </p>
       <div className="divisor">ou</div>
       <button type="button" className="btn btn-sec btn-bloco" onClick={entrarDemo}>
@@ -144,7 +144,7 @@ export function CriarConta() {
   }
 
   return (
-    <Tela titulo="7 dias grátis para arrumar as contas" sub={`Depois, ${brl(PRECO_MENSAL)} por mês. Cancele quando quiser.`} pose="ola">
+    <Tela titulo={hoje() <= '2026-11-30' ? 'Grátis até 30 de novembro' : '7 dias grátis para arrumar as contas'} sub={`Depois, ${brl(PRECO_MENSAL)} por mês. Cancele quando quiser.`} pose="ola">
       <h2>Criar conta</h2>
       <form className="pilha" onSubmit={enviar} noValidate>
         <label className="campo">
