@@ -23,6 +23,7 @@ export default function Bloqueado() {
             type="button"
             className="btn btn-pri btn-bloco"
             onClick={() => {
+              if (!s.sessao.demo) return avisar('O pagamento pelo painel ainda não está ligado. Fale com a gente para liberar.')
               simularStatus('ativa')
               avisar('Pagamento confirmado. Que bom ter você de volta!')
             }}

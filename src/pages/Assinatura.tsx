@@ -26,6 +26,7 @@ export default function Assinatura() {
   }[a.status]
 
   const pagar = () => {
+    if (!s.sessao.demo) return avisar('A cobrança ainda não está ligada. Seu acesso segue liberado no teste.')
     mut((x) => ({ ...x, assinatura: { ...x.assinatura, plano, faturas: [{ id: `f-${Date.now()}`, data: hoje(), valor: plano === 'anual' ? PRECO_ANUAL : PRECO_MENSAL, status: 'paga' as const }, ...x.assinatura.faturas] } }))
     simularStatus('ativa')
     avisar('Pagamento confirmado. Obrigada!')
@@ -120,6 +121,7 @@ export default function Assinatura() {
               type="button"
               className="btn btn-pri btn-bloco"
               onClick={() => {
+                if (!s.sessao.demo) return avisar('A troca de plano entra junto com a cobrança.')
                 mut((x) => ({ ...x, assinatura: { ...x.assinatura, plano } }))
                 avisar(plano === 'anual' ? 'Plano anual ativado na próxima cobrança' : 'Plano mensal ativado na próxima cobrança')
               }}
@@ -186,6 +188,7 @@ export default function Assinatura() {
               style={{ color: 'var(--out)' }}
               onClick={() => {
                 setCancelar(false)
+                if (!s.sessao.demo) return avisar('O cancelamento entra junto com a cobrança.')
                 avisar(`Assinatura cancelada. Você usa até ${diaCurto(a.proxCobranca)}.`)
               }}
             >

@@ -2,7 +2,7 @@ import { ArrowLeft, ArrowRight, Brush, Car, Check, HardHat, MessageCircle, Plus,
 import { useMemo, useState } from 'react'
 import { Conversa } from '../components/Conversa'
 import { IconeCarteira } from '../components/Shell'
-import { CampoDinheiro, Chave, Codigo, Mascote, Seg, type Pose } from '../components/ui'
+import { CampoDinheiro, Chave, Mascote, Seg, type Pose } from '../components/ui'
 import { linkWhats, RAMOS } from '../lib/config'
 import { DIAS_SEMANA, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaMeses } from '../lib/format'
 import { categoriasPadrao } from '../lib/seed'
@@ -42,13 +42,11 @@ const GUIA: { pose: Pose; titulo: string; texto: string }[] = [
 
 export default function Onboarding() {
   const { s, mut, sair } = useApp()
-  const [passo, setPasso] = useState(0)
+  const [passo, setPassoLocal] = useState(0)
 
   const [negocio, setNegocio] = useState('')
   const [cnpj, setCnpj] = useState('')
   const [fone, setFone] = useState('')
-  const [enviado, setEnviado] = useState(false)
-  const [codigo, setCodigo] = useState('')
   const [ramo, setRamo] = useState('')
   const [carteiras, setCarteiras] = useState<CarteiraOb[]>([
     { tipo: 'banco', nome: 'Conta do banco', dica: 'Pix, transferência e cartão de débito', on: true, saldo: 0 },
@@ -69,7 +67,6 @@ export default function Onboarding() {
   const [antecedencia, setAntecedencia] = useState('1')
 
   const foneOk = fone.replace(/\D/g, '').length >= 10
-  const verificado = enviado && codigo.length === 6
   const cnpjOk = cnpj === '' || cnpj.replace(/\D/g, '').length === 14
 
   /** O que ainda falta no passo atual. Vazio = pode avançar. */
@@ -78,8 +75,6 @@ export default function Onboarding() {
       if (negocio.trim().length < 2) return 'Diga o nome do seu negócio.'
       if (!cnpjOk) return 'O CNPJ tem 14 números. Se preferir, deixe em branco.'
       if (!foneOk) return 'Digite seu WhatsApp com DDD.'
-      if (!enviado) return 'Peça o código para confirmar seu WhatsApp.'
-      if (!verificado) return 'Digite os 6 números do código.'
     }
     if (passo === 1 && !ramo) return 'Escolha o ramo mais parecido com o seu.'
     if (passo === 2) {
@@ -93,7 +88,7 @@ export default function Onboarding() {
       if (semValor) return `Falta o valor de ${semValor.nome}.`
     }
     return ''
-  }, [passo, negocio, cnpjOk, foneOk, enviado, verificado, ramo, carteiras, padrao, fixas])
+  }, [passo, negocio, cnpjOk, foneOk, ramo, carteiras, padrao, fixas])
 
   const concluir = () =>
     mut((a) => {
@@ -110,7 +105,7 @@ export default function Onboarding() {
       }
       return {
         ...a,
-        sessao: { ...a.sessao, onboarding: true },
+        sessao: { ...a.sessao, onboarding: true, passo: 6 },
         usuario: { ...a.usuario, negocio: negocio.trim(), cnpj, whats: fone, ramo },
         categorias: categoriasPadrao(ramo),
         carteiras: cs,
@@ -119,6 +114,12 @@ export default function Onboarding() {
         prefs: { ...a.prefs, resumoDia, resumoHora, lembreteHora, antecedencia: Number(antecedencia) },
       }
     })
+
+  /** Guarda o passo mais avançado que a pessoa alcançou, para medir onde o cadastro trava. */
+  const setPasso = (p: number) => {
+    setPassoLocal(p)
+    if (p > s.sessao.passo) mut((a) => ({ ...a, sessao: { ...a.sessao, passo: p } }))
+  }
 
   const g = GUIA[passo]
   const nome = primeiroNome(s.usuario.nome)
@@ -178,27 +179,11 @@ export default function Onboarding() {
                 inputMode="tel"
                 autoComplete="tel-national"
                 value={fone}
-                onChange={(e) => {
-                  setFone(mascaraFone(e.target.value))
-                  setEnviado(false)
-                  setCodigo('')
-                }}
+                onChange={(e) => setFone(mascaraFone(e.target.value))}
                 placeholder="(81) 90000-0000"
               />
-              <small>É por este número que você vai conversar comigo.</small>
+              <small>É por este número que você vai conversar comigo. Eu confirmo com você por lá.</small>
             </label>
-            {!enviado ? (
-              <button type="button" className="btn btn-wa" disabled={!foneOk} onClick={() => setEnviado(true)}>
-                <MessageCircle size={19} />
-                Receber código no WhatsApp
-              </button>
-            ) : (
-              <div className="campo">
-                <span>{verificado ? 'WhatsApp confirmado' : 'Digite o código que eu te mandei'}</span>
-                <Codigo valor={codigo} onChange={setCodigo} />
-                <small>{verificado ? 'Pronto, já sei que é você.' : 'Demonstração: qualquer código de 6 números vale.'}</small>
-              </div>
-            )}
           </div>
         )}
 

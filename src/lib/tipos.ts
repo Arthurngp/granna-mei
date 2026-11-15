@@ -33,6 +33,8 @@ export interface Lancamento {
   hora: string
   origem: Origem
   anexo?: boolean
+  /** Caminho do comprovante no armazenamento privado (conta de verdade) */
+  anexoPath?: string
   pessoal?: boolean
 }
 
@@ -69,7 +71,7 @@ export interface Fatura {
 
 export interface Estado {
   versao: number
-  sessao: { logado: boolean; onboarding: boolean; demo: boolean }
+  sessao: { logado: boolean; onboarding: boolean; demo: boolean; passo: number }
   usuario: { nome: string; email: string; negocio: string; cnpj: string; whats: string; ramo: string }
   carteiras: Carteira[]
   categorias: Categoria[]
