@@ -9,7 +9,8 @@ import './styles.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter basename="/painel">
+    {/* Funciona em /painel (endereço definitivo) e também na raiz, enquanto o domínio não muda no Coolify. */}
+    <BrowserRouter basename={window.location.pathname.startsWith('/painel') ? '/painel' : ''}>
       <AvisoProvider>
         <AppProvider>
           <App />
