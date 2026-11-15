@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, Check, ChevronRight, Eye, EyeOff, MessageCircle } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { FaixaWhats } from '../components/ConfirmarWhats'
 import { Conversa } from '../components/Conversa'
 import { AreaLinhas, Medidor, Rosca } from '../components/Graficos'
 import { BotaoZap, FaixaAssinatura, IconeCarteira, SeloCategoria, Topo } from '../components/Shell'
@@ -63,6 +64,7 @@ export default function Inicio() {
     <div className="pagina">
       <Topo titulo={nome ? `Oi, ${nome}` : 'Início'} sub={s.usuario.negocio || undefined} />
       <FaixaAssinatura />
+      <FaixaWhats />
 
       <div className="grade">
         <section className="heroi g-5 estica" aria-label="Resumo do mês">

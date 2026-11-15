@@ -1,5 +1,5 @@
 """Teste de ponta a ponta com conta de verdade. Uso: real.py <base_url>. Apaga o usuário de teste no fim."""
-import sys, os, time, json
+import sys, os, re, time, json
 sys.path.insert(0, os.path.dirname(__file__))
 from supa import http, sql, chave
 from playwright.sync_api import sync_playwright
@@ -57,7 +57,7 @@ with sync_playwright() as p:
         page.get_by_role('button', name='Continuar').click()
         page.get_by_role('button', name='Concluir').click()
         page.get_by_role('button', name='Ver meu painel').click()
-        page.wait_for_url(BASE + '/'); page.wait_for_timeout(2500)
+        page.wait_for_url(re.compile(re.escape(BASE) + r'/?$')); page.wait_for_timeout(2500)
         page.screenshot(path=OUT + '/03-inicio-novo.png')
         r = banco(f"select (select onboarding_feito from perfis where id='{uid}') feito, (select negocio from perfis where id='{uid}') negocio, (select whats_verificado from perfis where id='{uid}') verif, (select count(*) from carteiras where user_id='{uid}') cart, (select saldo_inicial from carteiras where user_id='{uid}' limit 1) saldo, (select count(*) from categorias where user_id='{uid}') cat, (select count(*) from fixas where user_id='{uid}') fix, (select count(*) from contas where user_id='{uid}') contas")[0]
         ok('boas-vindas gravadas no banco', r['feito'] is True and r['negocio'] == 'Oficina de Teste' and r['cart'] == 1 and float(r['saldo']) == 1500 and r['cat'] == 13 and r['fix'] == 2 and r['contas'] >= 4, r)
@@ -99,12 +99,12 @@ with sync_playwright() as p:
         page.get_by_placeholder('voce@email.com').fill(EMAIL)
         page.locator('input[type=password]').fill(SENHA)
         page.get_by_role('button', name='Entrar', exact=True).click()
-        page.wait_for_url(BASE + '/', timeout=20000); page.wait_for_timeout(2000)
+        page.wait_for_url(re.compile(re.escape(BASE) + r'/?$'), timeout=20000); page.wait_for_timeout(2000)
         ok('sair e entrar de novo abre direto o painel', 'Oficina de Teste' in page.locator('.topo').inner_text())
 
         # bloqueio: so a tela de acesso pausado; e o banco recusa gravacao mesmo forçando
         banco(f"update assinaturas set status='bloqueada' where user_id='{uid}'")
-        page.reload(); page.wait_for_url('**/bloqueado', timeout=20000)
+        page.goto(BASE + '/'); page.wait_for_url('**/bloqueado', timeout=20000)
         page.goto(BASE + '/lancamentos'); page.wait_for_url('**/bloqueado')
         page.wait_for_timeout(800); page.screenshot(path=OUT + '/06-bloqueado.png')
         ok('bloqueado cai na tela de acesso pausado', True)
@@ -119,7 +119,7 @@ with sync_playwright() as p:
         page.get_by_role('button', name='Sair').click(); page.wait_for_url('**/entrar')
         antes = banco("select count(*) n from lancamentos")[0]['n']
         page.get_by_role('button', name='Ver uma demonstração').click()
-        page.wait_for_url(BASE + '/'); page.wait_for_timeout(1500)
+        page.wait_for_url(re.compile(re.escape(BASE) + r'/?$')); page.wait_for_timeout(1500)
         ok('demonstracao abre a conta de exemplo', 'Studio Camila' in page.locator('.topo').inner_text())
         page.goto(BASE + '/contas'); page.wait_for_timeout(800)
         page.locator('.marca:not(.ok)').first.click(); page.wait_for_timeout(1500)

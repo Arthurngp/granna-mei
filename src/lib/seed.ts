@@ -2,7 +2,7 @@ import { MATERIAL_POR_RAMO } from './config'
 import { hoje, iso, mesDe, parse, somaDias, somaMeses } from './format'
 import type { Categoria, Conta, Estado, Fixa, Lancamento, Origem } from './tipos'
 
-export const VERSAO = 7
+export const VERSAO = 8
 
 export function categoriasPadrao(ramo: string): Categoria[] {
   return [
@@ -29,7 +29,7 @@ export function estadoVazio(): Estado {
   return {
     versao: VERSAO,
     sessao: { logado: false, onboarding: false, demo: false, passo: 0 },
-    usuario: { nome: '', email: '', negocio: '', cnpj: '', whats: '', ramo: '' },
+    usuario: { nome: '', email: '', negocio: '', cnpj: '', whats: '', ramo: '', verificado: false },
     carteiras: [],
     categorias: categoriasPadrao('outro'),
     lancamentos: [],
@@ -161,7 +161,7 @@ export function estadoDemo(): Estado {
   return {
     versao: VERSAO,
     sessao: { logado: true, onboarding: true, demo: true, passo: 6 },
-    usuario: { nome: 'Camila Duarte', email: 'camila@studiocamila.com.br', negocio: 'Studio Camila', cnpj: '41.287.553/0001-90', whats: '(81) 98765-4321', ramo: 'beleza' },
+    usuario: { nome: 'Camila Duarte', email: 'camila@studiocamila.com.br', negocio: 'Studio Camila', cnpj: '41.287.553/0001-90', whats: '(81) 98765-4321', ramo: 'beleza', verificado: true },
     carteiras: [
       { id: 'banco', nome: 'Conta do banco', tipo: 'banco', saldoInicial: inicial('banco', 3842.5), padrao: true },
       { id: 'dinheiro', nome: 'Dinheiro', tipo: 'dinheiro', saldoInicial: inicial('dinheiro', 415), padrao: false },

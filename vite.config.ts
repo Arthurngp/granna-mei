@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig({ plugins: [react()], server: { port: 5199 } })
+// O painel do cliente mora em grannamei.amplasoft.me/painel (a raiz é o site do produto).
+export default defineConfig({ base: '/painel/', plugins: [react()], server: { port: 5199 } })

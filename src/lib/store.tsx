@@ -48,6 +48,8 @@ interface Ctx {
   entrar: (email: string, senha: string) => Promise<string | null>
   criarConta: (nome: string, email: string, senha: string) => Promise<string | null>
   recuperarSenha: (email: string) => Promise<string | null>
+  /** Código de 6 números para o cliente mandar à Granninha e confirmar o WhatsApp. */
+  gerarCodigo: () => Promise<string | null>
   entrarDemo: () => void
   sair: () => void
   pagarConta: (id: string, carteiraId?: string) => void
@@ -67,11 +69,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /** Último estado que o banco já conhece. A diferença para o estado atual é o que falta gravar. */
   const gravado = useRef<Estado | null>(null)
   const fila = useRef<Promise<void>>(Promise.resolve())
+  /** Gravações ainda não terminadas. Só recarrega do banco quando não há nada pendente. */
+  const pendentes = useRef(0)
+  const carregadoEm = useRef(0)
 
   const abrirConta = useCallback(async (id: string, email: string) => {
     userId.current = id
     const e = await carregar(email)
     gravado.current = e
+    carregadoEm.current = Date.now()
     setS(e)
   }, [])
 
@@ -117,8 +123,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const antes = gravado.current
     if (!id || !antes || antes === s || !s.sessao.logado) return
     gravado.current = s
+    pendentes.current++
     fila.current = fila.current
       .then(() => enviar(antes, s, id))
+      .finally(() => pendentes.current--)
       .catch(async () => {
         // O banco recusou (sem internet, sessão vencida ou acesso bloqueado): volta ao que está salvo de verdade.
         avisar('Não consegui salvar a última mudança. Recarreguei seus dados.')
@@ -131,6 +139,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       })
   }, [s, avisar])
+
+  // A Granninha também grava (pelo WhatsApp). Ao voltar para o painel, relê o banco para não
+  // sobrescrever com uma cópia velha o que ela anotou enquanto a tela estava em segundo plano.
+  useEffect(() => {
+    const recarregar = async () => {
+      if (document.visibilityState !== 'visible' || !userId.current || pendentes.current > 0) return
+      if (Date.now() - carregadoEm.current < 15_000) return
+      try {
+        const e = await carregar(gravado.current?.usuario.email ?? '')
+        if (pendentes.current === 0 && userId.current) {
+          gravado.current = e
+          carregadoEm.current = Date.now()
+          setS(e)
+        }
+      } catch {
+        /* sem conexão: tenta na próxima volta */
+      }
+    }
+    document.addEventListener('visibilitychange', recarregar)
+    window.addEventListener('focus', recarregar)
+    return () => {
+      document.removeEventListener('visibilitychange', recarregar)
+      window.removeEventListener('focus', recarregar)
+    }
+  }, [])
 
   const mut = useCallback((fn: (s: Estado) => Estado) => setS((a) => fn(a)), [])
 
@@ -213,8 +246,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       recuperarSenha: async (email) => {
         if (!supabase) return 'A troca de senha ainda não está ligada neste endereço.'
-        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + import.meta.env.BASE_URL })
         return error ? 'O envio de e-mail ainda não está ligado. Fale com a gente para trocar a senha.' : null
+      },
+      gerarCodigo: async () => {
+        if (s.sessao.demo || !supabase) return String(Math.floor(100000 + Math.random() * 900000))
+        const { data, error } = await supabase.rpc('gerar_codigo_whats')
+        return error ? null : (data as string)
       },
       entrarDemo: () => {
         userId.current = null

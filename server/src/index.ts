@@ -7,6 +7,7 @@
 import { createServer, type IncomingMessage } from 'node:http'
 import './env.ts'
 import { sb } from './banco.ts'
+import { rotaAdmin } from './admin.ts'
 import { assinaturaValida, enviarTexto, statusSessao } from './gateway.ts'
 import { processar, type EventoGateway } from './granninha.ts'
 
@@ -43,6 +44,7 @@ export function iniciar(porta = PORTA) {
   const srv = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://x')
     try {
+      if (await rotaAdmin(req, res, url.pathname, () => corpo(req))) return
       if (req.method === 'POST' && url.pathname === '/webhook') {
         const bruto = await corpo(req)
         if (!assinaturaValida(bruto, req.headers['x-webhook-signature'] as string | undefined)) {
@@ -83,6 +85,20 @@ export function iniciar(porta = PORTA) {
     }
   })
   srv.listen(porta, () => console.log(`Granninha ouvindo na porta ${porta}`))
+  // Batimento: a cada minuto grava o estado do número para o painel admin (e para o alerta de "parou").
+  const bater = async () => {
+    try {
+      const wa = await statusSessao().catch((e) => ({ estado: 'gateway fora: ' + (e as Error).message.slice(0, 80), numero: null }))
+      await sb.from('granninha_saude').upsert({ id: 1, whatsapp_estado: wa.estado, whatsapp_numero: wa.numero, fila: filas.size, atualizado_em: new Date().toISOString() })
+    } catch (e) {
+      console.error('[saude]', (e as Error).message)
+    }
+  }
+  if (process.env.SEM_BATIMENTO !== '1') {
+    void bater()
+    const t = setInterval(bater, 60_000)
+    srv.on('close', () => clearInterval(t))
+  }
   return srv
 }
 

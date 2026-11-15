@@ -1,6 +1,7 @@
 import { Bell, CalendarClock, ChevronRight, CreditCard, Download, LogOut, MessageCircle, Plus, Send, Tags, Trash2, UserRound, Wallet } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { ConfirmarWhats } from '../components/ConfirmarWhats'
 import { FaixaAssinatura, IconeCarteira, Topo } from '../components/Shell'
 import { CampoDinheiro, Chave, Codigo, Folha, Seg, useAviso } from '../components/ui'
 import { saldos } from '../lib/calc'
@@ -137,7 +138,7 @@ export default function Ajustes() {
             <Item
               I={MessageCircle}
               titulo="WhatsApp conectado"
-              det={u.whats || 'Nenhum número'}
+              det={u.whats ? `${u.whats}${s.sessao.demo || u.verificado ? '' : ' · falta confirmar'}` : 'Nenhum número'}
               onClick={() => {
                 setNovoFone('')
                 setEnviado(false)
@@ -261,9 +262,43 @@ export default function Ajustes() {
         </div>
       </Folha>
 
-      {/* ---------- WhatsApp ---------- */}
+      {/* ---------- WhatsApp (conta de verdade) ---------- */}
+      {!s.sessao.demo && (
+        <Folha aberta={aba === 'whats'} onFechar={fechar} titulo="WhatsApp conectado" pe={<button type="button" className="btn btn-sec btn-bloco" onClick={fechar}>Fechar</button>}>
+          <div className="pilha">
+            <label className="campo">
+              <span>Seu número</span>
+              <input
+                className="entrada num"
+                type="tel"
+                inputMode="tel"
+                value={novoFone || u.whats}
+                onChange={(e) => setNovoFone(mascaraFone(e.target.value))}
+                placeholder="(81) 90000-0000"
+              />
+              <small>Só este número consegue lançar e consultar pela Granninha.</small>
+            </label>
+            {novoFone && novoFone !== u.whats && novoFone.replace(/\D/g, '').length >= 10 && (
+              <button
+                type="button"
+                className="btn btn-sec"
+                onClick={() => {
+                  usuario({ whats: novoFone, verificado: false })
+                  setNovoFone('')
+                  avisar('Número salvo. Agora confirme pelo WhatsApp.')
+                }}
+              >
+                Salvar número novo
+              </button>
+            )}
+            <ConfirmarWhats />
+          </div>
+        </Folha>
+      )}
+
+      {/* ---------- WhatsApp (demonstração) ---------- */}
       <Folha
-        aberta={aba === 'whats'}
+        aberta={aba === 'whats' && s.sessao.demo}
         onFechar={fechar}
         titulo="WhatsApp conectado"
         pe={

@@ -10,8 +10,8 @@ export const PRECO_ANUAL = 197
 export const LIMITE_LANCAMENTOS = 300
 export const LIMITE_MIDIAS = 100
 
-/** Número do WhatsApp da Granninha. PROVISÓRIO: trocar quando o chip dedicado existir. */
-export const WHATS_GRANNINHA = '5581900000000'
+/** Número do WhatsApp da Granninha, definido no build (VITE_WHATS_GRANNINHA). Sem ele, usa um número provisório. */
+export const WHATS_GRANNINHA = (import.meta.env.VITE_WHATS_GRANNINHA as string | undefined) || '5581900000000'
 export const linkWhats = (texto = 'Oi, Granninha!') => `https://wa.me/${WHATS_GRANNINHA}?text=${encodeURIComponent(texto)}`
 
 export const RAMOS = [

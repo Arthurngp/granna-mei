@@ -23,7 +23,7 @@ export function Shell() {
     <div className="app">
       <aside className="lateral">
         <div className="marca-topo">
-          <img src="/logo-96.png" alt="" />
+          <img src={`${import.meta.env.BASE_URL}logo-96.png`} alt="" />
           Granna Mei
         </div>
         {NAV.map(({ para, rotulo, I }) => (
