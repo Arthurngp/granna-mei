@@ -71,6 +71,14 @@ export async function processar(ev: EventoGateway): Promise<Saida> {
   const telefone = de.split('@')[0].split(':')[0].replace(/\D/g, '')
   if (!msgId || !telefone || !chaveDoNumero(de)) return { status: 'ignorada' }
 
+  // Modo teste: com WA_SOMENTE_NUMEROS preenchido, só esses números conversam. O resto é ignorado em silêncio
+  // (sem resposta, sem IA, sem gravar nada além do registro de que chegou).
+  const liberados = (process.env.WA_SOMENTE_NUMEROS ?? '').split(',').map((n) => chaveDoNumero(n.trim())).filter(Boolean)
+  if (liberados.length && !liberados.includes(chaveDoNumero(de))) {
+    await sb.from('mensagens').insert({ id: msgId, telefone, tipo: 'outro', texto: '', status: 'ignorada', resposta: null, erro: 'fora da lista de números liberados' })
+    return { status: 'ignorada' }
+  }
+
   const tipo = tipoDaMensagem(d)
   const t0 = Date.now()
   let tokens = 0
