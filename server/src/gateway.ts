@@ -79,7 +79,14 @@ export async function neutralizarRobo(): Promise<void> {
 export async function qrDaSessao(): Promise<{ conectado: boolean; imagem: string | null; estado: string; numero: string | null }> {
   const st = await statusSessao()
   if (st.estado === 'CONNECTED') return { conectado: true, imagem: null, estado: st.estado, numero: st.numero }
-  const r = await fetch(`${base()}/api/sessions/${sessao()}/qr`, { headers: cabecalhos(), signal: AbortSignal.timeout(15_000) })
-  const j = (await r.json().catch(() => ({}))) as { base64?: string; data?: { base64?: string } }
-  return { conectado: false, imagem: j.data?.base64 ?? j.base64 ?? null, estado: st.estado, numero: null }
+  // A sessão existe no banco do gateway, mas pode não estar iniciada (depois de um reinício, por exemplo): inicia e espera o QR.
+  for (let i = 0; i < 6; i++) {
+    const r = await fetch(`${base()}/api/sessions/${sessao()}/qr`, { headers: cabecalhos(), signal: AbortSignal.timeout(15_000) })
+    const j = (await r.json().catch(() => ({}))) as { base64?: string; data?: { base64?: string } }
+    const imagem = j.data?.base64 ?? j.base64 ?? null
+    if (imagem) return { conectado: false, imagem, estado: (await statusSessao()).estado, numero: null }
+    if (i === 0) await fetch(`${base()}/api/sessions/${sessao()}/start`, { method: 'POST', headers: cabecalhos(), signal: AbortSignal.timeout(15_000) })
+    await new Promise((ok) => setTimeout(ok, 3000))
+  }
+  return { conectado: false, imagem: null, estado: (await statusSessao()).estado, numero: null }
 }
