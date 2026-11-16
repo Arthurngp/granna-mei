@@ -77,6 +77,8 @@
   .plano { background: #fff; border-radius: 18px; padding: 24px; border: 1.5px solid var(--line); display: grid; gap: 6px; }
   .plano.destaque { border: 2px solid var(--indigo); box-shadow: 0 16px 36px rgba(41,45,84,.14); }
   .plano h3 { font-size: 18px; font-weight: 750; }
+  .plano .de { color: var(--muted); font-size: 15px; font-weight: 600; margin-top: 4px; }
+  .plano .de s { text-decoration-thickness: 2px; }
   .plano .preco { font-size: 40px; font-weight: 800; letter-spacing: -.03em; line-height: 1.1; margin-top: 4px; }
   .plano .preco small { font-size: 16px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
   .plano .economia { color: var(--in); font-weight: 700; font-size: 15px; }
@@ -102,6 +104,7 @@
   footer .assina { border-top: 1px solid rgba(177,185,216,.18); padding-top: 14px; width: 100%; }
   footer .assina a { color: #b1b9d8; font-weight: 700; text-decoration: none; }
   footer .assina a:hover { color: #fff; }
+  footer .assina .cnpj { display: block; margin-top: 6px; font-size: 12px; letter-spacing: .02em; opacity: .7; }
 
   @media (min-width: 860px) {
     .heroi { padding-top: 64px; }
