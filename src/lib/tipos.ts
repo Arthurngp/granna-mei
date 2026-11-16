@@ -1,4 +1,4 @@
-export type TipoCarteira = 'banco' | 'dinheiro' | 'maquininha' | 'outro'
+export type TipoCarteira = 'banco' | 'dinheiro' | 'maquininha' | 'outro' | 'cartao' | 'investimento'
 export type Origem = 'texto' | 'audio' | 'foto' | 'pdf' | 'painel'
 /** cortesia: acesso liberado pelo admin, sem cobrança (parceiro). */
 export type StatusAssinatura = 'trial' | 'ativa' | 'atrasada' | 'bloqueada' | 'cortesia'
@@ -9,6 +9,13 @@ export interface Carteira {
   tipo: TipoCarteira
   saldoInicial: number
   padrao: boolean
+  /** Cartão de crédito: dia em que a fatura fecha */
+  fechamento?: number
+  /** Cartão de crédito: dia em que a fatura vence */
+  vencimento?: number
+  /** Cartão de crédito: conta de onde sai o pagamento da fatura */
+  contaPagamentoId?: string
+  limite?: number
 }
 
 export interface Categoria {
@@ -24,7 +31,8 @@ export interface Categoria {
 
 export interface Lancamento {
   id: string
-  tipo: 'entrada' | 'saida' | 'transferencia'
+  /** compra_cartao: compra no cartão de crédito, que só vira gasto quando a fatura é paga */
+  tipo: 'entrada' | 'saida' | 'transferencia' | 'compra_cartao'
   valor: number
   descricao: string
   categoriaId?: string
@@ -37,6 +45,9 @@ export interface Lancamento {
   /** Caminho do comprovante no armazenamento privado (conta de verdade) */
   anexoPath?: string
   pessoal?: boolean
+  /** Compra no cartão ou pagamento de fatura: mês de vencimento da fatura (AAAA-MM) */
+  fatura?: string
+  parcela?: { n: number; total: number }
 }
 
 export interface Conta {
@@ -73,7 +84,7 @@ export interface Fatura {
 export interface Estado {
   versao: number
   sessao: { logado: boolean; onboarding: boolean; demo: boolean; passo: number }
-  usuario: { nome: string; email: string; negocio: string; cnpj: string; whats: string; ramo: string; verificado: boolean }
+  usuario: { nome: string; email: string; negocio: string; cnpj: string; whats: string; ramo: string; verificado: boolean; foto?: string }
   carteiras: Carteira[]
   categorias: Categoria[]
   lancamentos: Lancamento[]

@@ -2,18 +2,19 @@ import { ArrowRight, MessageCircle, Paperclip, Search, Trash2 } from 'lucide-rea
 import { useMemo, useState } from 'react'
 import { BotaoZap, FaixaAssinatura, SeloCategoria, Topo } from '../components/Shell'
 import { Chave, Folha, IconeOrigem, MesNav, NOME_ORIGEM, useAviso, Vazio } from '../components/ui'
-import { doMes, totais } from '../lib/calc'
+import { caixa, doMes, totais } from '../lib/calc'
 import { linkWhats } from '../lib/config'
 import { linkComprovante } from '../lib/remoto'
 import { brl, capitaliza, diaExtenso, mesAtual, nomeMes } from '../lib/format'
 import { useApp } from '../lib/store'
 import type { Lancamento } from '../lib/tipos'
 
-type Filtro = 'tudo' | 'entrada' | 'saida' | 'transferencia' | 'anexo'
+type Filtro = 'tudo' | 'entrada' | 'saida' | 'compra_cartao' | 'transferencia' | 'anexo'
 const FILTROS: { v: Filtro; r: string }[] = [
   { v: 'tudo', r: 'Tudo' },
   { v: 'entrada', r: 'Entradas' },
   { v: 'saida', r: 'Saídas' },
+  { v: 'compra_cartao', r: 'Cartão' },
   { v: 'transferencia', r: 'Transferências' },
   { v: 'anexo', r: 'Com comprovante' },
 ]
@@ -42,7 +43,10 @@ export default function Lancamentos() {
     })
   }, [doMesAtual, filtro, carteira, busca, s.categorias])
 
-  const t = useMemo(() => totais(lista), [lista])
+  // Sem filtro, o resumo segue o caixa (compra no cartão conta quando a fatura é paga). Com filtro, soma o que está na lista.
+  const cxMes = useMemo(() => doMes(caixa(s), ym).filter((l) => carteira === 'todas' || l.carteiraId === carteira || l.carteiraDestinoId === carteira), [s.lancamentos, s.carteiras, ym, carteira])
+  const t = useMemo(() => totais(filtro === 'tudo' && !busca.trim() ? cxMes : lista), [cxMes, lista, filtro, busca])
+  const mesBR = (f?: string) => (f ? `${['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'][Number(f.slice(5, 7)) - 1]}/${f.slice(2, 4)}` : '')
   const grupos = useMemo(() => {
     const g: { data: string; itens: Lancamento[]; saldo: number }[] = []
     for (const l of lista) {
@@ -158,12 +162,18 @@ export default function Lancamentos() {
                         <div className="tit">{l.descricao}</div>
                         <div className="det">
                           <IconeOrigem origem={l.origem} />
-                          <span>{l.tipo === 'transferencia' ? `${nomeCarteira(l.carteiraId)} para ${nomeCarteira(l.carteiraDestinoId)}` : `${cat?.nome ?? 'Sem categoria'} · ${nomeCarteira(l.carteiraId)}`}</span>
+                          <span>
+                            {l.tipo === 'transferencia'
+                              ? `${nomeCarteira(l.carteiraId)} para ${nomeCarteira(l.carteiraDestinoId)}${l.fatura ? ` · fatura ${mesBR(l.fatura)}` : ''}`
+                              : l.tipo === 'compra_cartao'
+                                ? `${cat?.nome ?? 'Sem categoria'} · ${nomeCarteira(l.carteiraId)} · fatura ${mesBR(l.fatura)}`
+                                : `${cat?.nome ?? 'Sem categoria'} · ${nomeCarteira(l.carteiraId)}`}
+                          </span>
                           {l.anexo && <Paperclip size={12} />}
                         </div>
                       </div>
-                      <div className={`val num ${l.tipo === 'entrada' ? 'cor-in' : ''}`}>
-                        {l.tipo === 'entrada' ? '+ ' : l.tipo === 'saida' ? '- ' : ''}
+                      <div className={`val num ${l.tipo === 'entrada' ? 'cor-in' : l.tipo === 'compra_cartao' ? 'suave' : ''}`}>
+                        {l.tipo === 'entrada' ? '+ ' : l.tipo === 'saida' || l.tipo === 'compra_cartao' ? '- ' : ''}
                         {brl(l.valor)}
                       </div>
                     </button>
@@ -178,7 +188,7 @@ export default function Lancamentos() {
       <Folha
         aberta={!!aberto}
         onFechar={fechar}
-        titulo={aberto?.tipo === 'entrada' ? 'Entrada' : aberto?.tipo === 'saida' ? 'Saída' : 'Transferência'}
+        titulo={aberto?.tipo === 'entrada' ? 'Entrada' : aberto?.tipo === 'saida' ? 'Saída' : aberto?.tipo === 'compra_cartao' ? 'Compra no cartão' : aberto?.carteiraDestinoId && s.carteiras.find((c) => c.id === aberto.carteiraDestinoId)?.tipo === 'cartao' ? 'Pagamento de fatura' : 'Transferência'}
         pe={
           aberto &&
           (confirma ? (
@@ -216,7 +226,7 @@ export default function Lancamentos() {
           <>
             <div className="detalhe-valor">
               <strong className={`num ${aberto.tipo === 'entrada' ? 'cor-in' : ''}`}>
-                {aberto.tipo === 'entrada' ? '+ ' : aberto.tipo === 'saida' ? '- ' : ''}
+                {aberto.tipo === 'entrada' ? '+ ' : aberto.tipo === 'saida' || aberto.tipo === 'compra_cartao' ? '- ' : ''}
                 {brl(aberto.valor)}
               </strong>
               <span className="suave">{aberto.descricao}</span>
@@ -250,7 +260,7 @@ export default function Lancamentos() {
                       }}
                     >
                       {s.categorias
-                        .filter((c) => c.tipo === aberto.tipo)
+                        .filter((c) => c.tipo === (aberto.tipo === 'compra_cartao' ? 'saida' : aberto.tipo))
                         .map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.nome}
@@ -262,7 +272,16 @@ export default function Lancamentos() {
                     <span>Carteira</span>
                     <span>{nomeCarteira(aberto.carteiraId)}</span>
                   </div>
-                  {aberto.tipo === 'saida' && (
+                  {aberto.tipo === 'compra_cartao' && (
+                    <div>
+                      <span>Fatura</span>
+                      <span>
+                        {mesBR(aberto.fatura)}
+                        {aberto.parcela ? ` · parcela ${aberto.parcela.n} de ${aberto.parcela.total}` : ''}
+                      </span>
+                    </div>
+                  )}
+                  {(aberto.tipo === 'saida' || aberto.tipo === 'compra_cartao') && (
                     <div>
                       <span>Gasto pessoal (retirada)</span>
                       <Chave
@@ -282,6 +301,7 @@ export default function Lancamentos() {
                 </span>
               </div>
             </div>
+            {aberto.tipo === 'compra_cartao' && <p className="suave pq" style={{ marginTop: 10 }}>Compra no cartão entra nos gastos do mês em que você paga a fatura.</p>}
             {aberto.pessoal && <p className="suave pq" style={{ marginTop: 10 }}>Gasto pessoal sai do caixa, mas não entra na conta do lucro da empresa.</p>}
             {aberto.anexoPath && (
               <button

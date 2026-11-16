@@ -6,7 +6,8 @@ import { Conversa } from '../components/Conversa'
 import { AreaLinhas, Medidor, Rosca } from '../components/Graficos'
 import { BotaoZap, FaixaAssinatura, IconeCarteira, SeloCategoria, Topo } from '../components/Shell'
 import { IconeOrigem, Mascote, MesNav, Seg, useAviso, Valor, type Pose } from '../components/ui'
-import { doMes, faturamentoAno, porCategoria, saldos, serieDiaria, serieMensal, totais } from '../lib/calc'
+import { caixa, disponivel, doMes, faturamentoAno, porCategoria, saldos, serieDiaria, serieMensal, totais } from '../lib/calc'
+import { faturas } from '../lib/cartao'
 import { LIMITE_MEI, linkWhats } from '../lib/config'
 import { brl, brlCurto, capitaliza, diaCurto, difDias, hoje, mesAtual, nomeMes, pct, prazo, primeiroNome, somaDias, somaMeses } from '../lib/format'
 import { useApp } from '../lib/store'
@@ -20,13 +21,16 @@ export default function Inicio() {
   const oculto = s.prefs.ocultar
   const h = hoje()
 
-  const lancsMes = useMemo(() => doMes(s.lancamentos, ym), [s.lancamentos, ym])
+  // Caixa: compra no cartão só conta quando a fatura é paga.
+  const cx = useMemo(() => caixa(s), [s.lancamentos, s.carteiras])
+  const lancsMes = useMemo(() => doMes(cx, ym), [cx, ym])
   const t = useMemo(() => totais(lancsMes), [lancsMes])
-  const tAnt = useMemo(() => totais(doMes(s.lancamentos, somaMeses(ym, -1))), [s.lancamentos, ym])
+  const tAnt = useMemo(() => totais(doMes(cx, somaMeses(ym, -1))), [cx, ym])
   const sal = useMemo(() => saldos(s), [s])
-  const emCarteiras = Object.values(sal).reduce((a, b) => a + b, 0)
-  const diaria = useMemo(() => serieDiaria(s.lancamentos, ym), [s.lancamentos, ym])
-  const mensal = useMemo(() => serieMensal(s.lancamentos, ym, 6), [s.lancamentos, ym])
+  const emCarteiras = disponivel(s, sal)
+  const abertas = useMemo(() => faturas(s.lancamentos, s.carteiras).filter((f) => f.falta > 0), [s.lancamentos, s.carteiras])
+  const diaria = useMemo(() => serieDiaria(cx, ym), [cx, ym])
+  const mensal = useMemo(() => serieMensal(cx, ym, 6), [cx, ym])
   const fatias = useMemo(() => porCategoria(lancsMes, s.categorias, lado), [lancsMes, s.categorias, lado])
   const fat = useMemo(() => faturamentoAno(s, h.slice(0, 4)), [s, h])
   const proximas = useMemo(
@@ -170,17 +174,23 @@ export default function Inicio() {
 
             <section className="g-12" aria-label="Carteiras">
               <div className="trilho">
-                {s.carteiras.map((c) => (
-                  <div className="carteira" key={c.id}>
-                    <div className="n">
-                      <IconeCarteira tipo={c.tipo} />
-                      {c.nome}
+                {s.carteiras.map((c) => {
+                  // Cartão mostra o que está em aberto nas faturas (dívida), não um "saldo".
+                  const devendo = c.tipo === 'cartao' ? abertas.filter((f) => f.cartaoId === c.id).reduce((a, f) => a + f.falta, 0) : 0
+                  return (
+                    <div className="carteira" key={c.id}>
+                      <div className="n">
+                        <IconeCarteira tipo={c.tipo} />
+                        {c.nome}
+                      </div>
+                      <div className="v">
+                        <Valor n={c.tipo === 'cartao' ? devendo : sal[c.id] ?? 0} oculto={oculto} />
+                      </div>
+                      {c.tipo === 'cartao' && <div className="suave pq">em faturas abertas</div>}
+                      {c.tipo === 'investimento' && <div className="suave pq">guardado, fora do caixa</div>}
                     </div>
-                    <div className="v">
-                      <Valor n={sal[c.id] ?? 0} oculto={oculto} />
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </section>
 
@@ -284,11 +294,11 @@ export default function Inicio() {
                         <div className="det">
                           <IconeOrigem origem={l.origem} />
                           <span>
-                            {l.data === h ? 'Hoje' : diaCurto(l.data)} · {l.tipo === 'transferencia' ? 'Transferência' : cat?.nome ?? 'Sem categoria'}
+                            {l.data === h ? 'Hoje' : diaCurto(l.data)} · {l.tipo === 'transferencia' ? 'Transferência' : l.tipo === 'compra_cartao' ? `Cartão · ${cat?.nome ?? 'Sem categoria'}` : cat?.nome ?? 'Sem categoria'}
                           </span>
                         </div>
                       </div>
-                      <div className={`val num ${l.tipo === 'entrada' ? 'cor-in' : ''}`}>{oculto ? '••••' : `${l.tipo === 'entrada' ? '+' : l.tipo === 'saida' ? '-' : ''} ${brl(l.valor)}`}</div>
+                      <div className={`val num ${l.tipo === 'entrada' ? 'cor-in' : ''}`}>{oculto ? '••••' : `${l.tipo === 'entrada' ? '+' : l.tipo === 'saida' || l.tipo === 'compra_cartao' ? '-' : ''} ${brl(l.valor)}`}</div>
                     </div>
                   )
                 })}

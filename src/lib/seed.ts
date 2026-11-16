@@ -18,6 +18,7 @@ export function categoriasPadrao(ramo: string): Categoria[] {
     { id: 'equipamentos', nome: 'Ferramentas e equipamentos', tipo: 'saida', cor: '#3B82C4' },
     { id: 'marketing', nome: 'Divulgação', tipo: 'saida', cor: '#C2528B' },
     { id: 'taxas', nome: 'Taxas e tarifas', tipo: 'saida', cor: '#8A8FA8' },
+    { id: 'outras-saidas', nome: 'Outros gastos', tipo: 'saida', cor: '#A3A8BF' },
     { id: 'retirada', nome: 'Retirada do dono', tipo: 'saida', cor: '#B1B9D8', pessoal: true },
   ]
 }

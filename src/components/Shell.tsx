@@ -1,6 +1,6 @@
 import {
   ArrowLeftRight, Banknote, Briefcase, CalendarClock, Car, ChartPie, CreditCard, House, Landmark, List, Megaphone, MessageCircle, Package, Percent,
-  PlusCircle, Settings, ShoppingBag, Store, Tag, User, Utensils, Wallet, Wrench, Zap, Home,
+  PlusCircle, Settings, ShoppingBag, Store, Tag, User, Utensils, Wallet, Wrench, Zap, Home, PiggyBank, Smartphone,
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
@@ -180,7 +180,7 @@ export function SeloCategoria({ cat, tipo }: { cat?: Categoria; tipo?: Lancament
   )
 }
 
-const ICONE_CARTEIRA: Record<TipoCarteira, typeof Wallet> = { banco: Landmark, dinheiro: Banknote, maquininha: CreditCard, outro: Wallet }
+const ICONE_CARTEIRA: Record<TipoCarteira, typeof Wallet> = { banco: Landmark, dinheiro: Banknote, maquininha: Smartphone, outro: Wallet, cartao: CreditCard, investimento: PiggyBank }
 export function IconeCarteira({ tipo, size = 16 }: { tipo: TipoCarteira; size?: number }) {
   const I = ICONE_CARTEIRA[tipo]
   return <I size={size} />

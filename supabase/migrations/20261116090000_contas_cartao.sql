@@ -34,3 +34,18 @@ alter table public.mensagens
   add column if not exists tokens_saida integer,
   add column if not exists audio_seg numeric(8, 1),
   add column if not exists audio_tokens integer;
+
+-- Foto de perfil: pasta privada por cliente (avatares/<user_id>/...), até 2 MB, só imagem.
+alter table public.perfis add column if not exists foto_path text;
+grant update (foto_path) on public.perfis to authenticated;
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('avatares', 'avatares', false, 2097152, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do nothing;
+create policy avatar_le on storage.objects for select to authenticated
+  using (bucket_id = 'avatares' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy avatar_cria on storage.objects for insert to authenticated
+  with check (bucket_id = 'avatares' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy avatar_muda on storage.objects for update to authenticated
+  using (bucket_id = 'avatares' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy avatar_apaga on storage.objects for delete to authenticated
+  using (bucket_id = 'avatares' and (storage.foldername(name))[1] = (select auth.uid())::text);
