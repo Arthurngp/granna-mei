@@ -31,6 +31,10 @@ async function pedir(caminho: string, init: RequestInit, tentativas = 3): Promis
 export interface Uso {
   entrada: number
   saida: number
+  /** Tokens de áudio da transcrição (cobrados à parte) */
+  audio?: number
+  /** Duração do áudio, quando a API devolve em segundos */
+  audioSeg?: number
 }
 
 /** Chamada com resposta em JSON validado por esquema. */
@@ -54,13 +58,20 @@ export async function jsonEstruturado<T>(sistema: string, usuario: string | { ty
   return { dados: JSON.parse(msg.content) as T, uso: { entrada: j.usage?.prompt_tokens ?? 0, saida: j.usage?.completion_tokens ?? 0 } }
 }
 
-/** Transcreve um áudio (ogg/opus do WhatsApp). */
-export async function transcrever(audio: Buffer, mime = 'audio/ogg'): Promise<string> {
+/** Transcreve um áudio (ogg/opus do WhatsApp) e devolve o consumo, para o custo no admin. */
+export async function transcrever(audio: Buffer, mime = 'audio/ogg'): Promise<{ texto: string; uso: Uso }> {
   const form = new FormData()
   form.append('model', MODELO_AUDIO)
   form.append('language', 'pt')
   form.append('file', new Blob([new Uint8Array(audio)], { type: mime }), mime.includes('mpeg') ? 'audio.mp3' : 'audio.ogg')
   const r = await pedir('/audio/transcriptions', { method: 'POST', body: form })
-  const j = (await r.json()) as { text: string }
-  return j.text.trim()
+  const j = (await r.json()) as {
+    text: string
+    usage?: { type?: string; seconds?: number; input_tokens?: number; output_tokens?: number; input_token_details?: { audio_tokens?: number; text_tokens?: number } }
+  }
+  const u = j.usage
+  const uso: Uso = { entrada: u?.input_token_details?.text_tokens ?? 0, saida: u?.output_tokens ?? 0 }
+  if (u?.type === 'duration' && u.seconds) uso.audioSeg = u.seconds
+  else if (u) uso.audio = u.input_token_details?.audio_tokens ?? u.input_tokens ?? 0
+  return { texto: j.text.trim(), uso }
 }

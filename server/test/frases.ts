@@ -15,7 +15,10 @@ const CTX: Contexto = {
     { id: 'banco', nome: 'Conta do banco', tipo: 'banco', padrao: true },
     { id: 'dinheiro', nome: 'Dinheiro', tipo: 'dinheiro', padrao: false },
     { id: 'maquininha', nome: 'Maquininha', tipo: 'maquininha', padrao: false },
+    { id: 'nubank', nome: 'Cartão Nubank', tipo: 'cartao', padrao: false, fechamento: 3, vencimento: 10, conta_pagamento_id: 'banco' },
+    { id: 'xp', nome: 'XP Investimentos', tipo: 'investimento', padrao: false },
   ],
+  faturasAbertas: [{ cartaoId: 'nubank', fatura: '2026-12', vence: '2026-12-10', falta: 640 }],
   contasAbertas: [
     { id: 'c-agua', descricao: 'Conta de água', valor: 85, vencimento: '2026-11-18', tipo: 'pagar' },
     { id: 'c-aluguel', descricao: 'Aluguel da sala', valor: 900, vencimento: '2026-12-10', tipo: 'pagar' },
@@ -85,7 +88,7 @@ const CASOS: Caso[] = [
   { f: 'panfletos 90 reais', a: [S(90, { c: 'marketing' })] },
   { f: 'gastei 23,50 no ifood almoçando no trabalho', a: [S(23.5, { c: 'alimentacao', p: false })] },
   { f: 'tarifa do banco 19,90', a: [S(19.9, { c: 'taxas', w: 'banco' })] },
-  { f: 'comprei shampoo pra revender 300 no cartão', a: [S(300, { c: 'material', w: 'maquininha' })] },
+  { f: 'comprei shampoo pra revender 300 no cartão', a: [S(300, { c: 'material', w: 'nubank' })] },
   // Contas, recorrentes e parcelados
   { f: 'boleto do fornecedor de 480 vence dia 20', a: [{ t: 'conta', m: 'saida', v: 480, venc: '2026-11-20' }] },
   { f: 'a Bia me deve 150 pra sexta', a: [{ t: 'conta', m: 'entrada', v: 150, venc: '2026-11-20' }] },
@@ -117,6 +120,16 @@ const CASOS: Caso[] = [
   { f: 'caiu 1.300 da maquininha no banco', a: [{ t: 'transferencia', v: 1300, w: 'maquininha', dest: 'banco' }] },
   { f: 'saquei 200 do banco', a: [{ t: 'transferencia', v: 200, w: 'banco', dest: 'dinheiro' }] },
   { f: 'passei 300 do dinheiro pra conta', a: [{ t: 'transferencia', v: 300, w: 'dinheiro', dest: 'banco' }] },
+  // Cartão, fatura, investimento e categoria (2026-11-16)
+  { f: 'gastei 200 no crédito com material', a: [S(200, { c: 'material', w: 'nubank' })] },
+  { f: 'almoço 45 no cartão nubank', a: [S(45, { c: 'alimentacao', w: 'nubank' })] },
+  { f: 'comprei uma cadeira de 1.200 em 4x no cartão', a: [{ t: 'parcelado', m: 'saida', v: 1200, n: 4, w: 'nubank' }] },
+  { f: 'paguei a fatura do nubank', a: [{ t: 'pagar_fatura', v: 640, dest: 'nubank', w: 'banco' }] },
+  { f: 'paguei 300 da fatura do cartão', a: [{ t: 'pagar_fatura', v: 300, dest: 'nubank' }] },
+  { f: 'guardei 500 na XP', a: [{ t: 'transferencia', v: 500, dest: 'xp' }] },
+  { f: 'criar categoria Combustível', a: [{ t: 'criar_categoria' }] },
+  { f: 'cria a categoria embalagens', a: [{ t: 'criar_categoria' }] },
+  { f: 'quanto tá a fatura do cartão?', i: 'pergunta' },
   // Perguntas
   { f: 'quanto gastei esse mês?', i: 'pergunta' },
   { f: 'o que vence essa semana', i: 'pergunta' },
@@ -189,7 +202,7 @@ async function main() {
       while (prox < lista.length) {
         const i = prox++
         try {
-          res[i] = await interpretar(lista[i].f, CTX)
+          res[i] = await interpretar(lista[i].f, CTX, { perguntarMeio: false })
         } catch (e) {
           res[i] = e as Error
         }
