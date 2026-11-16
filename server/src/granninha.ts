@@ -4,6 +4,7 @@
  * transforma áudio, foto ou PDF em texto → entende → grava → responde.
  */
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, sb, usoDoMes } from './banco.ts'
+import { faturaDe } from './cartao.ts'
 import { executar, reverter, ultimaComEfeito, type Efeitos, type Origem } from './executar.ts'
 import { baixarMidia } from './gateway.ts'
 import { BOLETO, conferir, interpretar, NEGOCIO, opcaoEscolhida, PESSOAL, type Acao, type Contexto, type Opcao } from './interpretar.ts'
@@ -199,7 +200,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
 
   // Pergunta em aberto (ex.: "qual foi o valor?") ou importação de extrato esperando um sim.
   const { data: conv } = await sb.from('conversas').select('pendente,atualizado_em').eq('telefone', telefone).maybeSingle()
-  const pend = conv?.pendente as { tipo?: string; texto?: string; pergunta?: string; transacoes?: Transacao[]; opcoes?: Opcao[]; anexo?: string; forcar?: { carteira?: string; pessoal?: boolean }; documento?: { valor: number; movimento: 'entrada' | 'saida' } } | null
+  const pend = conv?.pendente as { tipo?: string; texto?: string; pergunta?: string; transacoes?: Transacao[]; opcoes?: Opcao[]; anexo?: string; forcar?: { carteira?: string; pessoal?: boolean }; documento?: { valor: number; movimento: 'entrada' | 'saida' }; origem?: Origem } | null
   const fresco = conv && Date.now() - new Date(conv.atualizado_em).getTime() < 30 * 60_000
   if (pend?.tipo) await sb.from('conversas').update({ pendente: null, atualizado_em: new Date().toISOString() }).eq('telefone', telefone)
 
@@ -218,6 +219,22 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     soma(uso)
     if (!leitura.transacoes.length) {
       return { status: 'pergunta', resposta: 'Não consegui ver um valor nesse arquivo. Me diz o que foi e o valor?', efeitos: {}, intencao: 'documento', texto: leitura.resumo, tokens }
+    }
+    if (leitura.tipo === 'fatura_cartao' && leitura.transacoes.length) {
+      // Fatura do cartão: as compras entram no cartão escolhido, na fatura que o documento diz.
+      const cartoes = (await contextoDe(cliente.id, hoje)).carteiras.filter((c) => c.tipo === 'cartao')
+      if (!cartoes.length) {
+        return { status: 'ok', resposta: `Essa é uma fatura de cartão. Para eu importar as compras, cadastre o cartão em ${PAINEL()}/ajustes (Carteiras) e me mande de novo.`, efeitos: {}, intencao: 'fatura', texto: leitura.resumo, tokens }
+      }
+      const total = leitura.transacoes.reduce((a, t) => a + t.valor, 0)
+      const opcoes = cartoes.map((c) => ({ id: c.id, nome: c.nome }))
+      const venc = leitura.vencimento && /^\d{4}-\d{2}-\d{2}$/.test(leitura.vencimento) ? leitura.vencimento : null
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'importar_fatura', transacoes: leitura.transacoes, anexo, opcoes, vencimento: venc }, atualizado_em: new Date().toISOString() })
+      return {
+        status: 'pergunta',
+        resposta: `Achei ${leitura.transacoes.length} compras nessa fatura, somando ${brl(total)}${venc ? ` (vence ${venc.split('-').reverse().slice(0, 2).join('/')})` : ''}.\n\nQuer que eu importe? Responda com o número do cartão, ou NÃO:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`,
+        efeitos: {}, intencao: 'fatura', texto: leitura.resumo, tokens,
+      }
     }
     if (leitura.tipo === 'extrato' && leitura.transacoes.length > 1) {
       const ent = leitura.transacoes.filter((t) => t.movimento === 'entrada').reduce((a, t) => a + t.valor, 0)
@@ -239,6 +256,15 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
 
   const ctx = await contextoDe(cliente.id, hoje)
 
+  if (pend?.tipo === 'importar_fatura' && fresco) {
+    if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei a fatura.', efeitos: {}, intencao: 'fatura', texto, tokens }
+    const esc = opcaoEscolhida(texto, pend.opcoes ?? [])
+    if (esc) return importarFatura(cliente.id, ctx, pend.transacoes ?? [], esc.id, (pend as { vencimento?: string | null }).vencimento ?? null, tipo, pend.anexo ?? null, tokens)
+    if (/^\s*(sim|s|pode|importa|ok|isso|manda|\d+)\b/i.test(texto)) {
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
+      return { status: 'pergunta', resposta: `Em qual cartão? Responda com o número:\n${(pend.opcoes ?? []).map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, efeitos: {}, intencao: 'fatura', texto, tokens }
+    }
+  }
   if (pend?.tipo === 'importar' && fresco) {
     if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei nada.', efeitos: {}, intencao: 'extrato', texto, tokens }
     if (pend.opcoes?.length) {
@@ -252,11 +278,18 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   }
   // Resposta a uma pergunta com opções: o número (ou o nome) decide no código, sem depender da IA.
   // As respostas se acumulam (ex.: "do negócio" e depois "Nubank") até o lançamento fechar.
-  const forcar: { carteira?: string; pessoal?: boolean } = pend?.tipo === 'pergunta' && fresco ? { ...(pend.forcar ?? {}) } : {}
-  if (pend?.tipo === 'pergunta' && fresco && pend.documento && !documento) documento = pend.documento
-  if (pend?.tipo === 'pergunta' && fresco && pend.texto) {
-    const esc = pend.opcoes?.length ? opcaoEscolhida(texto, pend.opcoes) : null
-    if (pend.opcoes?.length && !esc && /^\s*\d{1,2}\s*$/.test(texto)) {
+  // Se a pergunta tinha opções e a pessoa mandou outra coisa (outro lançamento, uma pergunta), a pergunta antiga
+  // é deixada de lado e a mensagem nova vale sozinha: nada de repetir a mesma pergunta para sempre.
+  const escolha = pend?.tipo === 'pergunta' && fresco && pend.opcoes?.length ? opcaoEscolhida(texto, pend.opcoes) : null
+  const continua = pend?.tipo === 'pergunta' && fresco && !!pend.texto && (!pend.opcoes?.length || !!escolha || /^\s*\d{1,2}\s*$/.test(texto))
+  const forcar: { carteira?: string; pessoal?: boolean } = continua ? { ...(pend!.forcar ?? {}) } : {}
+  if (continua && pend!.documento && !documento) documento = pend!.documento
+  // O lançamento guarda de onde veio a primeira mensagem (áudio, foto, PDF) e o comprovante, mesmo depois das perguntas.
+  const origemFinal: Origem = continua && pend!.origem ? pend!.origem : tipo
+  if (continua && pend!.anexo && !anexo) anexo = pend!.anexo
+  if (continua && pend?.texto) {
+    const esc = escolha
+    if (pend.opcoes?.length && !esc) {
       await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
       return { status: 'pergunta', resposta: `Não achei essa opção. ${pend.pergunta}`, efeitos: {}, intencao: 'acoes', texto, tokens }
     }
@@ -270,11 +303,11 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
 
   if (it.intencao === 'acoes') {
     if (it.perguntar) {
-      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta: it.perguntar, opcoes: it.opcoes, forcar, documento }, atualizado_em: new Date().toISOString() })
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta: it.perguntar, opcoes: it.opcoes, forcar, documento, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
       return { status: 'pergunta', resposta: it.perguntar, efeitos: {}, intencao: 'acoes', texto, tokens }
     }
     const anteriores = it.acoes.some((a) => a.tipo_acao === 'criar_categoria') ? (await ultimaComEfeito(cliente.id))?.efeitos : undefined
-    const r = await executar(cliente.id, ctx, it.acoes, tipo, anexo, anteriores)
+    const r = await executar(cliente.id, ctx, it.acoes, origemFinal, anexo, anteriores)
     return { status: 'ok', resposta: `${r.linhas.join('\n\n')}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
   }
   if (it.intencao === 'desfazer') {
@@ -306,6 +339,40 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   if (it.intencao === 'saudacao') return { status: 'ok', resposta: `Oi${nome ? `, ${nome}` : ''}! Me manda o que entrou ou saiu que eu anoto. Pode ser texto, áudio ou foto do comprovante.`, efeitos: {}, intencao: 'saudacao', texto, tokens }
   if (it.intencao === 'ajuda') return { status: 'ok', resposta: AJUDA, efeitos: {}, intencao: 'ajuda', texto, tokens }
   return { status: 'ok', resposta: `Eu cuido do dinheiro do seu negócio. Me conta o que entrou ou saiu, ou pergunte como estão as contas.\n\n${AJUDA}`, efeitos: {}, intencao: 'outro', texto, tokens }
+}
+
+/**
+ * Importa as compras de uma fatura de cartão no cartão escolhido. A fatura vem do vencimento do documento
+ * (ou, sem ele, do dia de fechamento do cartão). Pula compra que já está anotada (mesmo cartão, dia e valor).
+ */
+async function importarFatura(userId: string, ctx: Contexto, ts: Transacao[], cartaoId: string, vencimento: string | null, tipo: Origem, anexo: string | null, tokens: Uso): Promise<Conversa> {
+  const cartao = ctx.carteiras.find((c) => c.id === cartaoId && c.tipo === 'cartao')
+  if (!cartao) return { status: 'ok', resposta: 'Não achei esse cartão. Confira em Ajustes > Carteiras.', efeitos: {}, intencao: 'fatura', texto: 'importar fatura', tokens }
+  const { data: ja, error } = await sb.from('lancamentos').select('data,valor').eq('user_id', userId).eq('tipo', 'compra_cartao').eq('carteira_id', cartaoId)
+  falhou(error, 'fatura: duplicados')
+  const existe = new Set((ja ?? []).map((l) => `${l.data}|${Number(l.valor).toFixed(2)}`))
+  const acoes: Acao[] = []
+  let pulou = 0
+  for (const t of ts) {
+    const data = t.data && /^\d{4}-\d{2}-\d{2}$/.test(t.data) && t.data <= ctx.hoje ? t.data : ctx.hoje
+    if (existe.has(`${data}|${t.valor.toFixed(2)}`)) {
+      pulou++
+      continue
+    }
+    const base = conferir(t.valor.toFixed(2).replace('.', ','), ctx, {
+      intencao: 'acoes', pergunta: null, correcao: null, falta: null,
+      acoes: [{ tipo_acao: 'lancamento', movimento: 'saida', valor: t.valor, descricao: t.descricao, categoria_id: null, carteira_id: cartaoId, carteira_destino_id: null, meio: 'credito', data, pessoal: false, vencimento: null, dia_do_mes: null, parcelas: null, conta_id: null, talvez_pessoal: false }],
+    }, { perguntarMeio: false })
+    for (const a of base.acoes) acoes.push({ ...a, noCartao: true, fatura: vencimento ? vencimento.slice(0, 7) : faturaDe(data, cartao.fechamento ?? 1, cartao.vencimento ?? 10) })
+  }
+  if (!acoes.length) return { status: 'ok', resposta: `Todas as ${ts.length} compras dessa fatura já estavam anotadas.`, efeitos: {}, intencao: 'fatura', texto: 'importar fatura', tokens }
+  const r = await executar(userId, ctx, acoes, tipo, anexo)
+  const total = acoes.reduce((a, x) => a + (x.valor ?? 0), 0)
+  return {
+    status: 'ok',
+    resposta: `Importei ${acoes.length} compras no ${cartao.nome}, somando ${brl(total)}${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Elas entram nos gastos quando você pagar a fatura. Confira as categorias no painel.\n\nErrou? Responda DESFAZER.`,
+    efeitos: r.efeitos, intencao: 'fatura', texto: 'importar fatura', tokens,
+  }
 }
 
 /** Importa as transações de um extrato depois do SIM. Pula as que já existem (mesmo dia, valor e direção). */

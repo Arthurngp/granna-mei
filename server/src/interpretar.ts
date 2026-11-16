@@ -174,7 +174,7 @@ REGRAS
 - Várias coisas na mesma mensagem viram várias ações. Mas quantidade vezes preço ("3 cortes de 50", "2 escovas de 60") é UMA ação com o total.
 - Quando a pessoa cita um serviço ou produto que o negócio dela vende, com valor, é dinheiro que ENTROU (ex.: "corte masc 35 pix", "escova 55").
 - Se a mensagem tem o texto original seguido de uma linha "Correção: ...", aplique a correção ao texto original e devolva intencao "acoes" com as ações JÁ CORRIGIDAS (é um registro novo, não outro pedido de correção).
-- Se a mensagem tem o texto original seguido de "(resposta para ...)", junte as duas partes num registro só.
+- Se a mensagem tem o texto original seguido de "(resposta para ...)", junte as duas partes num registro só. Mas se a resposta não tem nada a ver com a pergunta (é outro registro completo, com o próprio valor, ou uma pergunta), registre só a resposta e ignore o texto original.
 - "semana que vem" sem dia: vencimento é hoje mais 7 dias. "mês que vem" sem dia: mesmo dia do mês seguinte.
 - A mensagem do cliente vem entre <mensagem_do_cliente> e </mensagem_do_cliente>.
 - "falta" é só uma pergunta curta sobre o dado que falta (valor, data, se entrou ou saiu). Nada além disso.
