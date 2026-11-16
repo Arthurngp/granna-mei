@@ -39,6 +39,11 @@ export interface Contexto {
   contasAbertas: { id: string; descricao: string; valor: number; vencimento: string; tipo: 'pagar' | 'receber' }[]
   /** Faturas de cartão com valor em aberto, da mais antiga para a mais nova */
   faturasAbertas?: FaturaAberta[]
+  /**
+   * O que este cliente já decidiu sobre gasto que pode ser da casa ou do negócio, tirado do histórico:
+   * palavra da descrição → true (pessoal) ou false (do negócio). A última decisão vale.
+   */
+  lembrancaPessoal?: Record<string, boolean>
 }
 
 export type TipoAcao = 'lancamento' | 'conta' | 'recorrente' | 'parcelado' | 'baixar_conta' | 'transferencia' | 'pagar_fatura' | 'criar_categoria'
@@ -62,6 +67,8 @@ export interface AcaoIA {
   dia_do_mes: number | null
   parcelas: number | null
   conta_id: string | null
+  /** O gasto pode ser tanto da casa quanto do negócio e a pessoa não disse qual (celular, internet, gasolina...). */
+  talvez_pessoal: boolean
 }
 
 export interface RespostaIA {
@@ -89,6 +96,9 @@ export interface Opcao {
   nome: string
 }
 export const BOLETO = '__boleto'
+/** Opções da pergunta "do negócio ou pessoal?" */
+export const NEGOCIO = '__negocio'
+export const PESSOAL = '__pessoal'
 
 export interface Conferencia {
   acoes: Acao[]
@@ -107,6 +117,8 @@ export interface Interpretacao extends Conferencia {
 export interface Opcoes {
   /** Resposta que a pessoa já deu a uma pergunta de forma de pagamento. */
   forcarCarteira?: string
+  /** Resposta que a pessoa já deu à pergunta "do negócio ou pessoal?". */
+  forcarPessoal?: boolean
   /** false = nunca pergunta a forma de pagamento (usa a principal). Para importação e testes de leitura. */
   perguntarMeio?: boolean
   /**
@@ -155,13 +167,14 @@ REGRAS
 - "vencimento": para conta; "dia 20" é o próximo dia 20; "sexta" é a próxima sexta.
 - categoria_id: escolha a mais adequada da lista, ou null se nenhuma servir. Gasto da casa ou da família (mercado de casa, escola dos filhos, conta de casa, presente) é "pessoal": true e categoria do tipo gasto pessoal.
 - Almoço, lanche e café durante o trabalho são gasto do negócio (alimentação), não pessoal.
+- talvez_pessoal: true só quando o gasto pode ser tanto da casa quanto do negócio e a pessoa NÃO disse qual (ex.: "recarga de celular", "internet" ou "conta da internet" sem dizer de onde, "gasolina", "conserto do carro", "plano de saúde"). Muitos MEIs trabalham em casa: internet e celular sem dizer de onde são sempre talvez_pessoal. Nesse caso pessoal = false. Se a pessoa disse ("do salão", "da loja", "de casa", "pessoal"), talvez_pessoal = false. Material, aluguel do ponto, fornecedor e almoço do trabalho: false.
 - meio: como a pessoa disse que pagou ou recebeu. "pix" → pix; "transferência", "TED" → transferencia; "débito" → debito; "boleto" → boleto; "dinheiro", "em espécie", "na mão" → dinheiro; "cartão de crédito", "crédito", "no cartão", "passei no cartão" → credito; "maquininha" → maquininha. Sem pista → null. NUNCA adivinhe o meio.
 - carteira_id: SÓ se a pessoa citou o nome de uma carteira da lista ("no Nubank", "do Itaú", "no cartão Inter", "na XP"). Senão null. Não escolha carteira pelo meio: o sistema faz isso.
 - descricao: curta, do jeito que a pessoa diria ("Conta de luz", "Corte · Juliana"). Sem valor na descrição.
 - Várias coisas na mesma mensagem viram várias ações. Mas quantidade vezes preço ("3 cortes de 50", "2 escovas de 60") é UMA ação com o total.
 - Quando a pessoa cita um serviço ou produto que o negócio dela vende, com valor, é dinheiro que ENTROU (ex.: "corte masc 35 pix", "escova 55").
 - Se a mensagem tem o texto original seguido de uma linha "Correção: ...", aplique a correção ao texto original e devolva intencao "acoes" com as ações JÁ CORRIGIDAS (é um registro novo, não outro pedido de correção).
-- Se a mensagem tem o texto original seguido de "(resposta para ...)", junte as duas partes num registro só.
+- Se a mensagem tem o texto original seguido de "(resposta para ...)", junte as duas partes num registro só. Mas se a resposta não tem nada a ver com a pergunta (é outro registro completo, com o próprio valor, ou uma pergunta), registre só a resposta e ignore o texto original.
 - "semana que vem" sem dia: vencimento é hoje mais 7 dias. "mês que vem" sem dia: mesmo dia do mês seguinte.
 - A mensagem do cliente vem entre <mensagem_do_cliente> e </mensagem_do_cliente>.
 - "falta" é só uma pergunta curta sobre o dado que falta (valor, data, se entrou ou saiu). Nada além disso.
@@ -199,8 +212,9 @@ function esquema(c: Contexto) {
       dia_do_mes: nulo('integer'),
       parcelas: nulo('integer'),
       conta_id: c.contasAbertas.length ? enumNulo(c.contasAbertas.map((x) => x.id)) : { type: 'null' },
+      talvez_pessoal: { type: 'boolean' },
     },
-    required: ['tipo_acao', 'movimento', 'valor', 'descricao', 'categoria_id', 'carteira_id', 'carteira_destino_id', 'meio', 'data', 'pessoal', 'vencimento', 'dia_do_mes', 'parcelas', 'conta_id'],
+    required: ['tipo_acao', 'movimento', 'valor', 'descricao', 'categoria_id', 'carteira_id', 'carteira_destino_id', 'meio', 'data', 'pessoal', 'vencimento', 'dia_do_mes', 'parcelas', 'conta_id', 'talvez_pessoal'],
   }
   return {
     type: 'object',
@@ -349,6 +363,19 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
     if (a.tipo_acao === 'recorrente' && !(a.dia_do_mes && a.dia_do_mes >= 1 && a.dia_do_mes <= 31)) return { acoes: [], perguntar: `Que dia do mês vence "${a.descricao}"?` }
     if (a.tipo_acao === 'conta' && !dataValida(a.vencimento)) return { acoes: [], perguntar: `Para quando é "${a.descricao}"?` }
 
+    // Gasto que pode ser da casa ou do negócio: usa a resposta dada, depois o que o cliente já decidiu antes, senão pergunta uma vez.
+    let decidiuPessoal: boolean | undefined
+    if (a.tipo_acao === 'lancamento' && a.movimento === 'saida' && a.talvez_pessoal && !a.pessoal) {
+      const lembrada = lembrancaDe(a.descricao, c.lembrancaPessoal)
+      decidiuPessoal = op.forcarPessoal ?? lembrada
+      if (decidiuPessoal === undefined) {
+        if (perguntarMeio) {
+          const opcoes = [{ id: NEGOCIO, nome: 'Do negócio' }, { id: PESSOAL, nome: 'Pessoal (da casa)' }]
+          return { acoes: [], perguntar: `"${a.descricao}" é gasto do negócio ou pessoal? Responda com o número:\n1. Do negócio\n2. Pessoal (da casa)\nDepois eu lembro.`, opcoes }
+        }
+      } else a.pessoal = decidiuPessoal
+    }
+
     // Carteira.
     let carteira = padrao
     let noCartao = false
@@ -397,7 +424,8 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
     const ct = cat(categoria)
     if (!ct || (a.movimento && ct.tipo !== a.movimento)) categoria = null
     let pessoal = a.pessoal && a.movimento === 'saida'
-    if (cat(categoria)?.pessoal) pessoal = true
+    if (cat(categoria)?.pessoal && decidiuPessoal !== false) pessoal = true
+    if (decidiuPessoal === false && cat(categoria)?.pessoal) categoria = null
     if (pessoal) categoria = c.categorias.find((x) => x.pessoal)?.id ?? categoria
     if (!categoria && a.movimento) categoria = c.categorias.find((x) => x.id === (a.movimento === 'entrada' ? 'outras-entradas' : 'outras-saidas'))?.id ?? null
 
@@ -416,6 +444,18 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
     })
   }
   return { acoes: out, perguntar: null }
+}
+
+const SEM_PESO = new Set(['conta', 'contas', 'compra', 'compras', 'pagamento', 'paguei', 'gasto', 'gastei', 'valor', 'parcela', 'fatura', 'outros', 'outro', 'mensal', 'mensalidade', 'novembro', 'dezembro', 'janeiro'])
+/** Palavras que identificam o gasto, para lembrar a decisão do cliente ("recarga de celular" → recarga, celular). */
+export function palavrasChave(descricao: string): string[] {
+  return tira(descricao).split(/[^a-z0-9]+/).filter((p) => p.length >= 4 && !SEM_PESO.has(p))
+}
+/** O cliente já decidiu esse tipo de gasto antes? Começa pela última palavra, onde costuma estar a coisa ("recarga do celular", "conserto do carro"). */
+export function lembrancaDe(descricao: string, mapa?: Record<string, boolean>): boolean | undefined {
+  if (!mapa) return undefined
+  for (const p of palavrasChave(descricao).reverse()) if (p in mapa) return mapa[p]
+  return undefined
 }
 
 /** A resposta da pessoa escolhe uma das opções? Aceita o número ("2") ou o nome ("itaú"). */

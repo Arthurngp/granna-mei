@@ -35,10 +35,10 @@
         <h1>O dinheiro do seu MEI em dia, <em>pelo WhatsApp</em>.</h1>
         <p class="sub">Você manda uma mensagem e a Granninha anota. Entradas, gastos, contas a pagar e o limite do MEI, sem planilha e sem aplicativo novo.</p>
         <div class="acoes">
-          <a class="btn btn-wa" href="/painel/criar-conta" data-fora="Testar 7 dias grátis">Usar grátis até 30/11</a>
+          <a class="btn btn-wa" href="/painel/criar-conta" data-fora="Testar 7 dias grátis">Usar grátis até 31/12</a>
           <a class="btn btn-claro" href="#como-funciona">Como funciona</a>
         </div>
-        <p class="nota">Depois, R$ 19,90 por mês. Cancele quando quiser.</p>
+        <p class="nota" data-fora="Depois, R$ 29,90 por mês. Cancele quando quiser.">Crie sua conta até 30 de novembro e ganhe dezembro grátis. Depois, R$ 29,90 por mês.</p>
       </div>
       <div class="palco" aria-hidden="true">
         <div class="celular">
@@ -98,20 +98,20 @@ Errou? Responda DESFAZER.<small>09:12</small></div>
     <div class="wrap">
       <div class="titulo">
         <h2>Menos que um lanche por semana</h2>
-        <p data-fora="Os dois planos começam com 7 dias grátis.">Crie a conta até 30 de novembro e use grátis até o fim do mês.</p>
+        <p data-fora="Os dois planos começam com 7 dias grátis.">Crie sua conta até 30 de novembro e use grátis até 31 de dezembro, com tudo liberado.</p>
       </div>
       <div class="planos">
         <div class="plano">
           <h3>Mensal</h3>
-          <div class="preco">R$ 19,90 <small>por mês</small></div>
+          <div class="preco">R$ 29,90 <small>por mês</small></div>
           <span style="color:var(--muted)">Sem fidelidade</span>
           <ul><li>Lançamentos pelo WhatsApp</li><li>Painel com gráficos e relatórios</li><li>Lembretes e controle do MEI</li></ul>
           <a class="btn btn-wa" href="/painel/criar-conta">Começar grátis</a>
         </div>
         <div class="plano destaque">
           <h3>Anual</h3>
-          <div class="preco">R$ 197 <small>por ano</small></div>
-          <span class="economia">Economize R$ 41,80 (2 meses gratuitamente)</span>
+          <div class="preco">R$ 299,90 <small>por ano</small></div>
+          <span class="economia">Economize R$ 58,90 (quase 2 meses gratuitamente)</span>
           <ul><li>Tudo do mensal</li><li>Preço travado por 12 meses</li><li>Um pagamento só</li></ul>
           <a class="btn btn-wa" href="/painel/criar-conta">Começar grátis</a>
         </div>
@@ -137,8 +137,8 @@ Errou? Responda DESFAZER.<small>09:12</small></div>
     <div class="wrap">
       <img src="/img/festa.png" alt="" />
       <h2>Comece hoje e veja quanto sobra no fim do mês</h2>
-      <p data-fora="7 dias grátis, sem cartão. Leva menos de 5 minutos.">Grátis até 30 de novembro, sem cartão. Leva menos de 5 minutos.</p>
-      <a class="btn btn-wa" href="/painel/criar-conta" data-fora="Testar 7 dias grátis">Usar grátis até 30/11</a>
+      <p data-fora="7 dias grátis, sem cartão. Leva menos de 5 minutos.">Crie até 30 de novembro e use grátis até 31 de dezembro. Sem cartão, em menos de 5 minutos.</p>
+      <a class="btn btn-wa" href="/painel/criar-conta" data-fora="Testar 7 dias grátis">Usar grátis até 31/12</a>
     </div>
   </section>
 </main>
@@ -152,7 +152,7 @@ Errou? Responda DESFAZER.<small>09:12</small></div>
   </div>
 </footer>
 <script>
-  // Oferta de novembro: até 30/11 o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
+  // Oferta: quem cria a conta até 30/11 usa grátis até 31/12. Até 30/11 o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
   (function () {
     var hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
     if (hoje <= '2026-11-30') return;

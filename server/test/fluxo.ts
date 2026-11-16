@@ -161,15 +161,31 @@ try {
     assert.match(r1.texto, /valor|quanto/i)
     assert.equal((await lancs(uid)).length, 0)
     const r2 = await mandar(FONE, { content: '89' })
-    assert.match(r2.texto, /saída de R\$ 89,00/)
+    assert.match(r2.texto, /Pagou como/)
+    const r3 = await mandar(FONE, { content: '1' })
+    assert.match(r3.texto, /saída de R\$ 89,00/)
     const ls = await lancs(uid)
     assert.equal(ls.length, 1)
     assert.equal(Number(ls[0].valor), 89)
+    assert.equal(ls[0].carteira_id, 'banco')
+  })
+  await caso('pergunta ignorada: a mensagem nova vale sozinha e a pergunta antiga some', async () => {
+    const n = (await lancs(uid)).length
+    const r1 = await mandar(FONE, { content: 'paguei 20 de pão' })
+    assert.match(r1.texto, /Pagou como/)
+    const r2 = await mandar(FONE, { content: 'recebi 300 de uma escova no pix' })
+    assert.match(r2.texto, /entrada de R\$ 300,00/)
+    const novos = (await lancs(uid)).slice(n)
+    assert.equal(novos.length, 1)
+    assert.equal(Number(novos[0].valor), 300)
+    await mandar(FONE, { content: 'desfazer' })
   })
 
   console.log('3. contas, fixas, parcelas, correção e pergunta')
   await caso('"paguei a água" dá baixa na conta aberta e cria o lançamento', async () => {
-    const r = await mandar(FONE, { content: 'paguei a água' })
+    const r0 = await mandar(FONE, { content: 'paguei a água' })
+    assert.match(r0.texto, /Pagou como/)
+    const r = await mandar(FONE, { content: 'Conta do banco' })
     assert.match(r.texto, /pago R\$ 85,00/)
     const c = (await sb.from('contas').select('status,lancamento_id').eq('user_id', uid).eq('id', 'c-agua').single()).data!
     assert.equal(c.status, 'paga')
@@ -209,11 +225,22 @@ try {
     })
     assert.ok(tts.ok, 'gerar áudio de teste')
     midias.set('granninha-AUDIO1.mp3', { buf: Buffer.from(await tts.arrayBuffer()), mime: 'audio/mpeg' })
-    const r = await mandar(FONE, { type: 'AUDIO', content: '', fileUrl: '/api/media/granninha-AUDIO1.mp3' })
+    const r1 = await mandar(FONE, { type: 'AUDIO', content: '', fileUrl: '/api/media/granninha-AUDIO1.mp3' })
+    assert.match(r1.texto, /negócio ou pessoal/)
+    const r2 = await mandar(FONE, { content: '1' })
+    assert.match(r2.texto, /Pagou como/)
+    const r = await mandar(FONE, { content: '2' })
     assert.match(r.texto, /saída de R\$ 50,00/)
+    assert.match(r.texto, /Dinheiro/)
     const l = (await lancs(uid)).at(-1)!
     assert.equal(l.origem, 'audio')
     assert.equal(l.categoria_id, 'transporte')
+  })
+  await caso('gasolina de novo: lembra que é do negócio e não pergunta outra vez', async () => {
+    const r = await mandar(FONE, { content: 'gasolina 40 no pix' })
+    assert.match(r.texto, /saída de R\$ 40,00/)
+    const l = (await lancs(uid)).at(-1)!
+    assert.equal(l.pessoal, false)
   })
   await caso('foto de comprovante vira lançamento, com o arquivo guardado', async () => {
     midias.set('granninha-FOTO1.png', { buf: readFileSync(new URL('./fixtures/comprovante.png', import.meta.url)), mime: 'image/png' })
@@ -236,6 +263,34 @@ try {
     assert.match(r2.texto, /Importei 3/)
     assert.equal((await lancs(uid)).length, antes + 3)
   })
+  await caso('fatura do cartão em foto: pergunta o cartão e importa as 3 compras na fatura de dezembro', async () => {
+    await sb.from('carteiras').insert({ user_id: uid, id: 'cartao-nu', nome: 'Cartão Nubank', tipo: 'cartao', saldo_inicial: 0, padrao: false, fechamento: 3, vencimento: 10, conta_pagamento_id: 'banco' })
+    midias.set('granninha-FAT1.png', { buf: readFileSync(new URL('./fixtures/fatura-cartao.png', import.meta.url)), mime: 'image/png' })
+    const r1 = await mandar(FONE, { type: 'IMAGE', content: '', caption: '', fileUrl: '/api/media/granninha-FAT1.png' })
+    assert.match(r1.texto, /Achei 3 compras/)
+    assert.match(r1.texto, /Cartão Nubank/)
+    const r2 = await mandar(FONE, { content: '1' })
+    assert.match(r2.texto, /Importei 3 compras/)
+    const cs = (await sb.from('lancamentos').select('valor,fatura,tipo').eq('user_id', uid).eq('tipo', 'compra_cartao')).data!
+    assert.equal(cs.length, 3)
+    assert.ok(cs.every((c) => c.fatura === '2026-12'))
+    assert.equal(Math.round(cs.reduce((a, c) => a + Number(c.valor), 0) * 100) / 100, 255.4)
+  })
+  await caso('a mesma fatura de novo não duplica', async () => {
+    const r1 = await mandar(FONE, { type: 'IMAGE', content: '', caption: '', fileUrl: '/api/media/granninha-FAT1.png' })
+    assert.match(r1.texto, /Achei 3 compras/)
+    const r2 = await mandar(FONE, { content: '1' })
+    assert.match(r2.texto, /já estavam anotadas/)
+    assert.equal(((await sb.from('lancamentos').select('id').eq('user_id', uid).eq('tipo', 'compra_cartao')).data ?? []).length, 3)
+  })
+  await caso('"paguei a fatura do nubank" usa o valor em aberto e sai do banco', async () => {
+    const r = await mandar(FONE, { content: 'paguei a fatura do nubank' })
+    assert.match(r.texto, /pagamento de fatura de R\$ 255,40/)
+    const l = (await lancs(uid)).at(-1)!
+    assert.equal(l.tipo, 'transferencia')
+    assert.equal(l.carteira_id, 'banco')
+    assert.equal(l.carteira_destino_id, 'cartao-nu')
+  })
   await caso('figurinha recebe a explicação do que ela entende', async () => {
     const r = await mandar(FONE, { type: 'STICKER', content: '' })
     assert.match(r.texto, /texto, áudio/)
@@ -256,7 +311,7 @@ try {
   })
   await caso('cortesia (parceiro liberado): grava normal', async () => {
     await sb.from('assinaturas').update({ status: 'cortesia' }).eq('user_id', uid)
-    const r = await mandar(FONE, { content: 'paguei 10 de café' })
+    const r = await mandar(FONE, { content: 'paguei 10 de café no pix' })
     assert.match(r.texto, /saída de R\$ 10,00/)
   })
   await caso('mensagem de grupo e mensagem enviada por ela mesma são ignoradas', async () => {
@@ -274,7 +329,7 @@ try {
       assert.equal(r.texto, '')
       const m = (await sb.from('mensagens').select('status,erro').eq('id', r.id).single()).data!
       assert.equal(m.status, 'ignorada')
-      const r2 = await mandar(FONE, { content: 'paguei 12 de pão' })
+      const r2 = await mandar(FONE, { content: 'paguei 12 de pão no pix' })
       assert.match(r2.texto, /R\$ 12,00/)
     } finally {
       delete process.env.WA_SOMENTE_NUMEROS

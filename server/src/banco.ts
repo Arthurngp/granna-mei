@@ -5,7 +5,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { env } from './env.ts'
 import { faturas, type MovCartao } from './cartao.ts'
-import type { Contexto, FaturaAberta } from './interpretar.ts'
+import { palavrasChave, type Contexto, type FaturaAberta } from './interpretar.ts'
 
 export const sb = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false, autoRefreshToken: false } })
 
@@ -88,9 +88,15 @@ export async function contextoDe(userId: string, hoje: string): Promise<Contexto
       .filter((f) => f.falta > 0)
       .map((f) => ({ cartaoId: f.cartaoId, fatura: f.fatura, vence: f.vence, falta: f.falta }))
   }
+  // Lembrança "da casa ou do negócio": como o cliente classificou os últimos gastos (a decisão mais recente vale).
+  const hist = await sb.from('lancamentos').select('descricao,pessoal,data').eq('user_id', userId).in('tipo', ['saida', 'compra_cartao']).order('data', { ascending: false }).limit(300)
+  falhou(hist.error, 'contexto histórico')
+  const lembrancaPessoal: Record<string, boolean> = {}
+  for (const l of [...(hist.data ?? [])].reverse()) for (const w of palavrasChave(l.descricao ?? '')) lembrancaPessoal[w] = !!l.pessoal
   return {
     hoje,
     ramo: p.data?.ramo || undefined,
+    lembrancaPessoal,
     categorias,
     carteiras,
     contasAbertas: (contas.data ?? []).map((c) => ({ ...c, valor: Number(c.valor) })),
