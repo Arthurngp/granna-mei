@@ -25,7 +25,9 @@ export default function Assinatura() {
     ativa: { txt: 'Em dia', cor: 'var(--in)' },
     atrasada: { txt: 'Pagamento em atraso', cor: 'var(--out)' },
     bloqueada: { txt: 'Bloqueada', cor: 'var(--out)' },
-  }[a.status]
+    cortesia: { txt: 'Cortesia: acesso liberado, sem cobrança', cor: 'var(--in)' },
+  }[a.status] ?? { txt: 'Em análise', cor: 'var(--muted)' }
+  const cortesia = a.status === 'cortesia'
 
   const pagar = () => {
     if (!s.sessao.demo) return avisar('A cobrança ainda não está ligada. Seu acesso segue liberado no teste.')
@@ -76,14 +78,23 @@ export default function Assinatura() {
               <span>Plano</span>
               <span>{a.plano === 'anual' ? `Anual · ${brl(PRECO_ANUAL)} por ano` : `Mensal · ${brl(PRECO_MENSAL)} por mês`}</span>
             </div>
-            <div>
-              <span>{a.status === 'trial' ? 'Primeira cobrança' : a.status === 'ativa' ? 'Próxima cobrança' : 'Venceu em'}</span>
-              <span>{diaCurto(a.proxCobranca)}</span>
-            </div>
-            <div style={{ borderBottom: 0 }}>
-              <span>Forma de pagamento</span>
-              <span>Pix automático</span>
-            </div>
+            {cortesia ? (
+              <div style={{ borderBottom: 0 }}>
+                <span>Cobrança</span>
+                <span>Nenhuma</span>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <span>{a.status === 'trial' ? 'Primeira cobrança' : a.status === 'ativa' ? 'Próxima cobrança' : 'Venceu em'}</span>
+                  <span>{diaCurto(a.proxCobranca)}</span>
+                </div>
+                <div style={{ borderBottom: 0 }}>
+                  <span>Forma de pagamento</span>
+                  <span>Pix automático</span>
+                </div>
+              </>
+            )}
           </div>
           {(a.status === 'atrasada' || a.status === 'trial') && (
             <button type="button" className="btn btn-pri btn-bloco" style={{ marginTop: 10 }} onClick={pagar}>
@@ -169,7 +180,7 @@ export default function Assinatura() {
         </section>
       </div>
 
-      {a.status !== 'trial' && (
+      {a.status !== 'trial' && !cortesia && (
         <button type="button" className="btn btn-txt" style={{ color: 'var(--muted)', justifySelf: 'center' }} onClick={() => setCancelar(true)}>
           Cancelar assinatura
         </button>

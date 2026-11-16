@@ -1,6 +1,7 @@
 export type TipoCarteira = 'banco' | 'dinheiro' | 'maquininha' | 'outro'
 export type Origem = 'texto' | 'audio' | 'foto' | 'pdf' | 'painel'
-export type StatusAssinatura = 'trial' | 'ativa' | 'atrasada' | 'bloqueada'
+/** cortesia: acesso liberado pelo admin, sem cobrança (parceiro). */
+export type StatusAssinatura = 'trial' | 'ativa' | 'atrasada' | 'bloqueada' | 'cortesia'
 
 export interface Carteira {
   id: string

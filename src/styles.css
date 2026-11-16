@@ -2184,6 +2184,16 @@ select.entrada {
     font-size: 13px;
     color: var(--indigo-4);
   }
+  .lateral .assinatura-amp {
+    color: var(--indigo-4);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 12px;
+    padding-top: 12px;
+  }
+  .lateral .assinatura-amp a {
+    color: #fff;
+    white-space: nowrap;
+  }
   .lateral .ajuda .disco {
     width: 84px;
     height: 84px;

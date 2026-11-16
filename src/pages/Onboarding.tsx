@@ -4,7 +4,7 @@ import { Conversa } from '../components/Conversa'
 import { IconeCarteira } from '../components/Shell'
 import { CampoDinheiro, Chave, Mascote, Seg, type Pose } from '../components/ui'
 import { linkWhats, RAMOS } from '../lib/config'
-import { DIAS_SEMANA, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaMeses } from '../lib/format'
+import { DIAS_SEMANA, documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaMeses } from '../lib/format'
 import { categoriasPadrao } from '../lib/seed'
 import { novoId, useApp } from '../lib/store'
 import type { Carteira, Conta, Fixa, TipoCarteira } from '../lib/tipos'
@@ -69,13 +69,13 @@ export default function Onboarding() {
   const [antecedencia, setAntecedencia] = useState('1')
 
   const foneOk = fone.replace(/\D/g, '').length >= 10
-  const cnpjOk = cnpj === '' || cnpj.replace(/\D/g, '').length === 14
+  const cnpjOk = documentoValido(cnpj)
 
   /** O que ainda falta no passo atual. Vazio = pode avançar. */
   const falta = useMemo(() => {
     if (passo === 0) {
       if (negocio.trim().length < 2) return 'Diga o nome do seu negócio.'
-      if (!cnpjOk) return 'O CNPJ tem 14 números. Se preferir, deixe em branco.'
+      if (!cnpjOk) return 'Esse CNPJ ou CPF não confere. Revise os números ou deixe em branco.'
       if (!foneOk) return 'Digite seu WhatsApp com DDD.'
     }
     if (passo === 1 && !ramo) return 'Escolha o ramo mais parecido com o seu.'
@@ -188,8 +188,8 @@ export default function Onboarding() {
               <input className="entrada" value={negocio} onChange={(e) => setNegocio(e.target.value)} placeholder="Ex.: Studio Camila" autoComplete="organization" />
             </label>
             <label className="campo">
-              <span>CNPJ do MEI (opcional)</span>
-              <input className="entrada num" inputMode="numeric" value={cnpj} onChange={(e) => setCnpj(mascaraCnpj(e.target.value))} placeholder="00.000.000/0001-00" />
+              <span>CNPJ ou CPF (opcional)</span>
+              <input className="entrada num" inputMode="numeric" value={cnpj} onChange={(e) => setCnpj(mascaraCnpj(e.target.value))} placeholder="CNPJ do MEI ou seu CPF" />
             </label>
             <label className="campo">
               <span>Seu WhatsApp</span>
