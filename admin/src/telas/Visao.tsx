@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AreaLinhas } from '../../../src/components/Graficos'
+import { custoReais, reais, type Consumo } from '../custo'
 import { rpc } from '../sb'
 import { Carregando, Falha, NOME_SITUACAO } from './comum'
 
@@ -22,6 +23,28 @@ export interface Painel {
   saude: { whatsapp_estado: string | null; whatsapp_numero: string | null; fila: number | null; atualizado_em: string } | null
 }
 
+interface Custo {
+  mes: Consumo & { mensagens: number; estimadas: number; audios_sem_medida: number }
+  hoje: Consumo & { mensagens: number }
+  por_cliente: (Consumo & { nome: string; negocio: string; mensagens: number })[]
+}
+
+/** Custo de IA. Se a função ainda não existe no banco, devolve null e o painel segue sem o quadro. */
+function useCusto() {
+  const [c, setC] = useState<Custo | null>(null)
+  const [falhou, setFalhou] = useState(false)
+  useEffect(() => {
+    const ler = () => rpc<Custo>('admin_custo_ia').then(setC).catch(() => setFalhou(true))
+    void ler()
+    const t = setInterval(ler, 60_000)
+    return () => clearInterval(t)
+  }, [])
+  return { c, falhou }
+}
+
+/** Nome de cada passo das boas-vindas (o número é o passo mais avançado que a pessoa alcançou). */
+const NOME_PASSO = ['Dados do negócio', 'Ramo', 'Contas', 'Cartões', 'Contas fixas', 'Horários', 'Confirmar WhatsApp', 'Terminou']
+
 export function usePainel() {
   const [p, setP] = useState<Painel | null>(null)
   const [erro, setErro] = useState('')
@@ -38,10 +61,11 @@ const n = (x: number) => x.toLocaleString('pt-BR')
 
 export function Visao() {
   const { p, erro } = usePainel()
+  const { c: custo, falhou: custoFalhou } = useCusto()
   if (erro) return <Falha texto={erro} />
   if (!p) return <Carregando />
   const dias = p.mensagens_por_dia
-  const passos = ['0', '1', '2', '3', '4', '5', '6']
+  const passos = ['0', '1', '2', '3', '4', '5', '6', '7']
   const total = Math.max(1, p.clientes)
   return (
     <div className="pagina">
@@ -75,13 +99,13 @@ export function Visao() {
         </section>
         <section className="card g-6">
           <div className="card-cab"><h2>Onde as boas-vindas param</h2></div>
-          <p className="suave pq" style={{ marginBottom: 10 }}>Passo mais avançado que cada pessoa alcançou (6 = terminou).</p>
+          <p className="suave pq" style={{ marginBottom: 10 }}>Passo mais avançado que cada pessoa alcançou. Quem terminou antes de 16/11 (6 passos) aparece em "Confirmar WhatsApp".</p>
           <div className="pilha" style={{ gap: 8 }}>
             {passos.map((ps) => {
               const q = p.onboarding[ps] ?? 0
               return (
                 <div key={ps}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span>Passo {ps}</span><b className="num">{n(q)}</b></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span>{NOME_PASSO[Number(ps)] ?? `Passo ${ps}`}</span><b className="num">{n(q)}</b></div>
                   <div className="prog"><i style={{ width: `${(q / total) * 100}%` }} /></div>
                 </div>
               )
@@ -91,6 +115,11 @@ export function Visao() {
         <section className="card g-6">
           <div className="card-cab"><h2>Uso deste mês</h2></div>
           <div className="fatos">
+            <div><span>Custo de IA no mês</span><span className="num">{custo ? reais(custoReais(custo.mes)) : custoFalhou ? 'indisponível' : '...'}</span></div>
+            <div><span>Custo de IA hoje</span><span className="num">{custo ? reais(custoReais(custo.hoje)) : custoFalhou ? 'indisponível' : '...'}</span></div>
+            {custo && custo.mes.mensagens > 0 && (
+              <div><span>Custo médio por mensagem</span><span className="num">{reais(custoReais(custo.mes) / custo.mes.mensagens)}</span></div>
+            )}
             <div><span>Tokens de IA no mês</span><span className="num">{n(p.tokens_mes)}</span></div>
             <div><span>Tokens hoje</span><span className="num">{n(p.tokens_hoje)}</span></div>
             <div><span>Áudios, fotos e PDFs</span><span className="num">{n(p.midias_mes)}</span></div>
@@ -101,12 +130,27 @@ export function Visao() {
               {p.maiores_consumidores.map((c) => (
                 <div className="linha" key={c.nome + c.negocio}>
                   <div className="meio"><div className="tit">{c.nome}</div><div className="det"><span>{c.negocio}</span></div></div>
-                  <div className="val num">{n(c.mensagens)} msg<small>{n(c.tokens)} tokens</small></div>
+                  <div className="val num">
+                    {(() => {
+                      const k = custo?.por_cliente.find((x) => x.nome === c.nome && x.negocio === c.negocio)
+                      return k ? reais(custoReais(k)) : `${n(c.mensagens)} msg`
+                    })()}
+                    <small>
+                      {n(c.mensagens)} msg · {n(c.tokens)} tokens
+                    </small>
+                  </div>
                 </div>
               ))}
             </div>
           ) : (
             <p className="suave">Ninguém usou a Granninha este mês ainda.</p>
+          )}
+          {custo && (
+            <p className="suave pq" style={{ marginTop: 10 }}>
+              Custo estimado pelo preço de tabela da OpenAI e dólar a R$ 5,50 (ajuste em admin/src/custo.ts).
+              {custo.mes.estimadas > 0 ? ` ${n(custo.mes.estimadas)} mensagens antigas entram com a divisão estimada entre entrada e saída.` : ''}
+              {custo.mes.audios_sem_medida > 0 ? ` ${n(custo.mes.audios_sem_medida)} áudios antigos não foram medidos e ficam de fora.` : ''}
+            </p>
           )}
         </section>
       </div>

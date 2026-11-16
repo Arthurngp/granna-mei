@@ -153,6 +153,36 @@ export async function enviar(antes: Estado, depois: Estado, userId: string) {
   await gravaLista('contas', antes.contas, depois.contas, paraConta)
 }
 
+/** Sobe a foto de perfil para a pasta privada do cliente (avatares/<user_id>/...) e grava o caminho no perfil. */
+export async function enviarFoto(foto: Blob, anterior?: string): Promise<string> {
+  const sb = supabase!
+  const { data, error: e1 } = await sb.auth.getUser()
+  erro(e1)
+  const id = data.user!.id
+  const path = `${id}/foto-${Date.now()}.jpg`
+  erro((await sb.storage.from('avatares').upload(path, foto, { contentType: 'image/jpeg', upsert: true })).error)
+  erro((await sb.from('perfis').update({ foto_path: path }).eq('id', id)).error)
+  // A foto antiga sai da pasta (falhar aqui não atrapalha: a nova já está no perfil).
+  if (anterior && anterior.startsWith(id + '/')) await sb.storage.from('avatares').remove([anterior])
+  return path
+}
+
+/** Tira a foto de perfil. */
+export async function removerFoto(anterior?: string) {
+  const sb = supabase!
+  const { data, error: e1 } = await sb.auth.getUser()
+  erro(e1)
+  const id = data.user!.id
+  erro((await sb.from('perfis').update({ foto_path: null }).eq('id', id)).error)
+  if (anterior && anterior.startsWith(id + '/')) await sb.storage.from('avatares').remove([anterior])
+}
+
+/** Endereço temporário (1 hora) para mostrar a foto de perfil, que fica em pasta privada. */
+export async function linkFoto(path: string): Promise<string | null> {
+  const { data, error } = await supabase!.storage.from('avatares').createSignedUrl(path, 3600)
+  return error ? null : data.signedUrl
+}
+
 /** Endereço temporário (10 minutos) para abrir um comprovante guardado. */
 export async function linkComprovante(path: string): Promise<string | null> {
   const { data, error } = await supabase!.storage.from('comprovantes').createSignedUrl(path, 600)

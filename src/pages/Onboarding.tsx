@@ -12,12 +12,24 @@ import type { Carteira, Conta, Fixa, TipoCarteira } from '../lib/tipos'
 const ICONE_RAMO: Record<string, typeof Brush> = { beleza: Brush, alimentacao: Utensils, comercio: ShoppingBag, servicos: Wrench, obras: HardHat, transporte: Car, moda: Shirt, outro: Sparkles }
 
 interface CarteiraOb {
+  id: string
   tipo: TipoCarteira
   nome: string
   dica: string
   on: boolean
   saldo: number
+  /** Conta acrescentada pela pessoa (segundo banco, investimento): pode remover e renomear */
+  livre?: boolean
 }
+interface CartaoOb {
+  id: string
+  nome: string
+  /** 0 = ainda não escolheu */
+  fechamento: number
+  vencimento: number
+  pagaCom: string
+}
+const DIAS_MES = Array.from({ length: 31 }, (_, i) => i + 1)
 interface FixaOb {
   id: string
   nome: string
@@ -34,7 +46,8 @@ const HORAS = Array.from({ length: 16 }, (_, i) => `${String(i + 6).padStart(2, 
 const GUIA: { pose: Pose; titulo: string; texto: string }[] = [
   { pose: 'laptop', titulo: 'Prazer, eu sou a Granninha!', texto: 'Vou cuidar do dinheiro do seu negócio com você. Primeiro, me conta do seu negócio.' },
   { pose: 'loja', titulo: 'Qual é o seu ramo?', texto: 'Assim eu já separo seus ganhos e gastos do jeito certo.' },
-  { pose: 'moedas', titulo: 'Onde fica o seu dinheiro?', texto: 'Marque onde você guarda e quanto tem em cada lugar hoje.' },
+  { pose: 'moedas', titulo: 'Onde fica o seu dinheiro?', texto: 'Marque as contas que você usa e quanto tem em cada uma hoje. Pode pôr mais de um banco.' },
+  { pose: 'calculadora', titulo: 'Você usa cartão de crédito?', texto: 'Me conta seus cartões e os dias da fatura. A compra no cartão entra nos seus gastos quando você paga a fatura.' },
   { pose: 'calendario', titulo: 'Quais contas chegam todo mês?', texto: 'Eu aviso antes de vencer, para você não pagar multa por esquecimento.' },
   { pose: 'sino', titulo: 'Quando eu posso te chamar?', texto: 'Escolha o melhor horário para o resumo e os lembretes.' },
   { pose: 'hero', titulo: 'Último passo: confirme seu WhatsApp', texto: 'É assim que eu sei que o número é seu. Sem isso, eu não consigo anotar o que você me mandar.' },
@@ -51,11 +64,15 @@ export default function Onboarding() {
   const [fone, setFone] = useState('')
   const [ramo, setRamo] = useState('')
   const [carteiras, setCarteiras] = useState<CarteiraOb[]>([
-    { tipo: 'banco', nome: 'Conta do banco', dica: 'Pix, transferência e cartão de débito', on: true, saldo: 0 },
-    { tipo: 'dinheiro', nome: 'Dinheiro', dica: 'O que fica na gaveta ou na carteira', on: false, saldo: 0 },
-    { tipo: 'maquininha', nome: 'Maquininha', dica: 'Vendas no cartão que ainda vão cair', on: false, saldo: 0 },
+    { id: 'banco', tipo: 'banco', nome: 'Conta do banco', dica: 'Pix, transferência e cartão de débito', on: true, saldo: 0 },
+    { id: 'dinheiro', tipo: 'dinheiro', nome: 'Dinheiro', dica: 'O que fica na gaveta ou na carteira', on: false, saldo: 0 },
+    { id: 'maquininha', tipo: 'maquininha', nome: 'Maquininha', dica: 'Vendas no cartão que ainda vão cair', on: false, saldo: 0 },
   ])
-  const [padrao, setPadrao] = useState<TipoCarteira>('banco')
+  const [padrao, setPadrao] = useState('banco')
+  const [usaCartao, setUsaCartao] = useState<boolean | null>(null)
+  const [cartoes, setCartoes] = useState<CartaoOb[]>([])
+  const pagadoras = carteiras.filter((c) => c.on && (c.tipo === 'banco' || c.tipo === 'dinheiro'))
+  const novoCartao = (): CartaoOb => ({ id: novoId('k'), nome: '', fechamento: 0, vencimento: 0, pagaCom: pagadoras.find((c) => c.id === padrao)?.id ?? pagadoras[0]?.id ?? '' })
   const [fixas, setFixas] = useState<FixaOb[]>([
     { id: 'das', nome: 'DAS do MEI', categoriaId: 'impostos', on: true, valor: 86.05, dia: 20, das: true },
     { id: 'aluguel', nome: 'Aluguel', categoriaId: 'aluguel', on: false, valor: 0, dia: 10 },
@@ -80,22 +97,37 @@ export default function Onboarding() {
     }
     if (passo === 1 && !ramo) return 'Escolha o ramo mais parecido com o seu.'
     if (passo === 2) {
-      if (!carteiras.some((c) => c.on)) return 'Marque pelo menos um lugar.'
-      if (!carteiras.find((c) => c.tipo === padrao)?.on) return 'Escolha qual é a principal.'
+      if (!carteiras.some((c) => c.on && c.tipo !== 'investimento')) return 'Marque pelo menos uma conta ou o dinheiro.'
+      if (carteiras.some((c) => c.on && !c.nome.trim())) return 'Dê um nome para cada conta (ex.: Nubank).'
+      const p = carteiras.find((c) => c.id === padrao)
+      if (!p?.on || p.tipo === 'investimento') return 'Escolha qual é a principal.'
     }
     if (passo === 3) {
+      if (usaCartao === null) return 'Me diga se você usa cartão de crédito.'
+      if (usaCartao) {
+        if (!cartoes.length) return 'Acrescente pelo menos um cartão.'
+        const c = cartoes.find((x) => !x.nome.trim() || !x.fechamento || !x.vencimento || !x.pagaCom)
+        if (c) return !c.nome.trim() ? 'Dê um nome para o cartão (ex.: Nubank).' : !c.fechamento ? 'Falta o dia em que a fatura fecha.' : !c.vencimento ? 'Falta o dia em que a fatura vence.' : 'Escolha de qual conta sai o pagamento da fatura.'
+      }
+    }
+    if (passo === 4) {
       const semNome = fixas.find((f) => f.on && !f.nome.trim())
       if (semNome) return 'Dê um nome para a conta nova, ou remova.'
       const semValor = fixas.find((f) => f.on && f.valor <= 0)
       if (semValor) return `Falta o valor de ${semValor.nome}.`
     }
     return ''
-  }, [passo, negocio, cnpjOk, foneOk, ramo, carteiras, padrao, fixas])
+  }, [passo, negocio, cnpjOk, foneOk, ramo, carteiras, padrao, fixas, usaCartao, cartoes])
 
   const salvarDados = () =>
     mut((a) => {
       const h = hoje()
-      const cs: Carteira[] = carteiras.filter((c) => c.on).map((c) => ({ id: c.tipo, nome: c.nome, tipo: c.tipo, saldoInicial: c.saldo, padrao: c.tipo === padrao }))
+      const cs: Carteira[] = carteiras.filter((c) => c.on).map((c) => ({ id: c.id, nome: c.nome.trim(), tipo: c.tipo, saldoInicial: c.saldo, padrao: c.id === padrao }))
+      if (usaCartao) {
+        for (const k of cartoes) {
+          cs.push({ id: k.id, nome: k.nome.trim().toLowerCase().startsWith('cartão') ? k.nome.trim() : `Cartão ${k.nome.trim()}`, tipo: 'cartao', saldoInicial: 0, padrao: false, fechamento: k.fechamento, vencimento: k.vencimento, contaPagamentoId: k.pagaCom })
+        }
+      }
       const fx: Fixa[] = fixas.filter((f) => f.on).map((f) => ({ id: `fx-${f.id}`, descricao: f.nome.trim(), valor: f.valor, dia: f.dia, categoriaId: f.categoriaId, das: f.das }))
       const contas: Conta[] = []
       for (const f of fx) {
@@ -107,7 +139,7 @@ export default function Onboarding() {
       }
       return {
         ...a,
-        sessao: { ...a.sessao, passo: 5 },
+        sessao: { ...a.sessao, passo: 6 },
         usuario: { ...a.usuario, negocio: negocio.trim(), cnpj, whats: fone, ramo },
         categorias: categoriasPadrao(ramo),
         carteiras: cs,
@@ -123,14 +155,14 @@ export default function Onboarding() {
     if (p > s.sessao.passo) mut((a) => ({ ...a, sessao: { ...a.sessao, passo: p } }))
   }
 
-  const concluir = () => mut((a) => ({ ...a, sessao: { ...a.sessao, onboarding: true, passo: 6 } }))
+  const concluir = () => mut((a) => ({ ...a, sessao: { ...a.sessao, onboarding: true, passo: 7 } }))
 
   // Último passo: gera o código e fica conferindo no banco até a Granninha confirmar o número.
   useEffect(() => {
-    if (passo === 5 && !codigo) void gerarCodigo().then(setCodigo)
+    if (passo === 6 && !codigo) void gerarCodigo().then(setCodigo)
   }, [passo, codigo, gerarCodigo])
   useEffect(() => {
-    if (passo !== 5 || confirmado) return
+    if (passo !== 6 || confirmado) return
     let vivo = true
     const t = setInterval(async () => {
       if (vivo && (await checarConfirmado())) setConfirmado(true)
@@ -146,13 +178,15 @@ export default function Onboarding() {
   const mudaCarteira = (i: number, p: Partial<CarteiraOb>) => {
     setCarteiras((cs) => {
       const novo = cs.map((c, k) => (k === i ? { ...c, ...p } : c))
-      if (!novo.find((c) => c.tipo === padrao)?.on) {
-        const prim = novo.find((c) => c.on)
-        if (prim) setPadrao(prim.tipo)
+      const atual = novo.find((c) => c.id === padrao)
+      if (!atual?.on || atual.tipo === 'investimento') {
+        const prim = novo.find((c) => c.on && c.tipo !== 'investimento')
+        if (prim) setPadrao(prim.id)
       }
       return novo
     })
   }
+  const mudaCartao = (id: string, p: Partial<CartaoOb>) => setCartoes((cs) => cs.map((c) => (c.id === id ? { ...c, ...p } : c)))
   const mudaFixa = (id: string, p: Partial<FixaOb>) => setFixas((fs) => fs.map((f) => (f.id === id ? { ...f, ...p } : f)))
 
   return (
@@ -163,21 +197,21 @@ export default function Onboarding() {
           <button type="button" className="icone-btn" aria-label={passo === 0 ? 'Sair' : 'Voltar'} onClick={() => (passo === 0 ? sair() : setPasso(passo - 1))}>
             <ArrowLeft size={22} />
           </button>
-          <div className="ob-passos" role="progressbar" aria-valuemin={1} aria-valuemax={6} aria-valuenow={passo + 1} aria-label="Progresso do cadastro">
+          <div className="ob-passos" role="progressbar" aria-valuemin={1} aria-valuemax={GUIA.length} aria-valuenow={passo + 1} aria-label="Progresso do cadastro">
             {GUIA.map((_, i) => (
               <i key={i} className={i < passo ? 'feito' : i === passo ? 'atual' : ''} />
             ))}
           </div>
-          <span className="ob-cont num">{passo + 1} de 6</span>
+          <span className="ob-cont num">{passo + 1} de {GUIA.length}</span>
         </div>
       </div>
 
       <div className="ob-corpo" key={passo}>
         <div className="ob-guia">
-          <Mascote pose={passo === 5 && confirmado ? 'festa' : g.pose} tam={104} anim={confirmado ? 'pula' : 'flutua'} />
+          <Mascote pose={passo === 6 && confirmado ? 'festa' : g.pose} tam={104} anim={confirmado ? 'pula' : 'flutua'} />
           <div className="balao">
-            <h1>{passo === 5 && confirmado ? `Tudo pronto${nome ? `, ${nome}` : ''}!` : passo === 0 && nome ? `Prazer, ${nome}! Eu sou a Granninha.` : g.titulo}</h1>
-            <p>{passo === 5 && confirmado ? 'Seu número está confirmado e eu já te respondi no WhatsApp. Agora é só me mandar o que entrou ou saiu.' : g.texto}</p>
+            <h1>{passo === 6 && confirmado ? `Tudo pronto${nome ? `, ${nome}` : ''}!` : passo === 0 && nome ? `Prazer, ${nome}! Eu sou a Granninha.` : g.titulo}</h1>
+            <p>{passo === 6 && confirmado ? 'Seu número está confirmado e eu já te respondi no WhatsApp. Agora é só me mandar o que entrou ou saiu.' : g.texto}</p>
           </div>
         </div>
 
@@ -232,35 +266,151 @@ export default function Onboarding() {
         {passo === 2 && (
           <div className="pilha">
             {carteiras.map((c, i) => (
-              <div key={c.tipo} className={`item-ob ${c.on ? 'ligado' : ''}`}>
+              <div key={c.id} className={`item-ob ${c.on ? 'ligado' : ''}`}>
                 <div className="cab">
                   <span className="selo" style={{ background: 'var(--mist)', color: 'var(--indigo)' }}>
                     <IconeCarteira tipo={c.tipo} size={19} />
                   </span>
                   <div className="cresce">
-                    <b>{c.nome}</b>
+                    <b>{c.nome || (c.tipo === 'investimento' ? 'Investimento' : 'Outro banco')}</b>
                     <small>{c.dica}</small>
                   </div>
-                  <Chave ligado={c.on} onChange={(v) => mudaCarteira(i, { on: v })} rotulo={`Usar ${c.nome}`} />
+                  {c.livre ? (
+                    <button type="button" className="icone-btn" aria-label={`Remover ${c.nome || 'conta'}`} onClick={() => setCarteiras((cs) => cs.filter((x) => x.id !== c.id))}>
+                      <Trash2 size={19} />
+                    </button>
+                  ) : (
+                    <Chave ligado={c.on} onChange={(v) => mudaCarteira(i, { on: v })} rotulo={`Usar ${c.nome}`} />
+                  )}
                 </div>
                 {c.on && (
                   <div className="abre">
+                    {(c.tipo === 'banco' || c.tipo === 'investimento') && (
+                      <label className="campo">
+                        <span>{c.tipo === 'investimento' ? 'Onde? (ex.: XP, poupança)' : 'Qual banco? (ex.: Nubank, Itaú)'}</span>
+                        <input className="entrada" value={c.nome} onChange={(e) => mudaCarteira(i, { nome: e.target.value })} placeholder={c.tipo === 'investimento' ? 'XP' : 'Nubank'} />
+                      </label>
+                    )}
                     <label className="campo">
                       <span>Quanto tem aí hoje?</span>
                       <CampoDinheiro valor={c.saldo} onChange={(v) => mudaCarteira(i, { saldo: v })} />
                     </label>
-                    <button type="button" className="radio-linha" aria-pressed={padrao === c.tipo} onClick={() => setPadrao(c.tipo)}>
-                      <i />
-                      Principal: uso esta quando você não disser de onde saiu
-                    </button>
+                    {c.tipo !== 'investimento' && (
+                      <button type="button" className="radio-linha" aria-pressed={padrao === c.id} onClick={() => setPadrao(c.id)}>
+                        <i />
+                        Principal: a conta que você mais usa
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             ))}
+            <div className="dupla">
+              <button type="button" className="btn btn-sec" onClick={() => setCarteiras((cs) => [...cs, { id: novoId('w'), tipo: 'banco', nome: '', dica: 'Outra conta de banco', on: true, saldo: 0, livre: true }])}>
+                <Plus size={18} />
+                Outro banco
+              </button>
+              <button type="button" className="btn btn-sec" onClick={() => setCarteiras((cs) => [...cs, { id: novoId('w'), tipo: 'investimento', nome: '', dica: 'Dinheiro guardado. Fica fora do caixa do mês.', on: true, saldo: 0, livre: true }])}>
+                <Plus size={18} />
+                Investimento
+              </button>
+            </div>
           </div>
         )}
 
         {passo === 3 && (
+          <div className="pilha">
+            <div className="opcoes duas">
+              <button type="button" className="opcao" aria-pressed={usaCartao === true} onClick={() => { setUsaCartao(true); if (!cartoes.length) setCartoes([novoCartao()]) }}>
+                {usaCartao === true && (
+                  <span className="visto">
+                    <Check size={14} strokeWidth={3} />
+                  </span>
+                )}
+                <span className="ic">
+                  <IconeCarteira tipo="cartao" size={19} />
+                </span>
+                <b>Uso cartão de crédito</b>
+                <small>No negócio ou misturado</small>
+              </button>
+              <button type="button" className="opcao" aria-pressed={usaCartao === false} onClick={() => setUsaCartao(false)}>
+                {usaCartao === false && (
+                  <span className="visto">
+                    <Check size={14} strokeWidth={3} />
+                  </span>
+                )}
+                <span className="ic">
+                  <Check size={19} />
+                </span>
+                <b>Não uso</b>
+                <small>Dá para cadastrar depois</small>
+              </button>
+            </div>
+            {usaCartao &&
+              cartoes.map((k) => (
+                <div key={k.id} className="item-ob ligado">
+                  <div className="cab">
+                    <span className="selo" style={{ background: 'var(--mist)', color: 'var(--indigo)' }}>
+                      <IconeCarteira tipo="cartao" size={19} />
+                    </span>
+                    <div className="cresce">
+                      <input className="entrada" aria-label="Nome do cartão" value={k.nome} onChange={(e) => mudaCartao(k.id, { nome: e.target.value })} placeholder="Nome do cartão (ex.: Nubank)" />
+                    </div>
+                    {cartoes.length > 1 && (
+                      <button type="button" className="icone-btn" aria-label="Remover cartão" onClick={() => setCartoes((cs) => cs.filter((x) => x.id !== k.id))}>
+                        <Trash2 size={19} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="abre">
+                    <div className="dupla">
+                      <label className="campo">
+                        <span>A fatura fecha dia</span>
+                        <select className="entrada num" value={k.fechamento} onChange={(e) => mudaCartao(k.id, { fechamento: Number(e.target.value) })}>
+                          <option value={0}>Escolha</option>
+                          {DIAS_MES.map((d) => (
+                            <option key={d} value={d}>
+                              {d}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="campo">
+                        <span>E vence dia</span>
+                        <select className="entrada num" value={k.vencimento} onChange={(e) => mudaCartao(k.id, { vencimento: Number(e.target.value) })}>
+                          <option value={0}>Escolha</option>
+                          {DIAS_MES.map((d) => (
+                            <option key={d} value={d}>
+                              {d}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <label className="campo">
+                      <span>A fatura é paga com</span>
+                      <select className="entrada" value={k.pagaCom} onChange={(e) => mudaCartao(k.id, { pagaCom: e.target.value })}>
+                        {pagadoras.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.nome || 'Conta do banco'}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <small className="suave">Os dois dias estão no app do banco, na tela da fatura.</small>
+                  </div>
+                </div>
+              ))}
+            {usaCartao && (
+              <button type="button" className="btn btn-sec" onClick={() => setCartoes((cs) => [...cs, novoCartao()])}>
+                <Plus size={18} />
+                Outro cartão
+              </button>
+            )}
+          </div>
+        )}
+
+        {passo === 4 && (
           <div className="pilha">
             {fixas.map((f) => (
               <div key={f.id} className={`item-ob ${f.on ? 'ligado' : ''}`}>
@@ -310,7 +460,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {passo === 4 && (
+        {passo === 5 && (
           <div className="pilha">
             <div className="card pilha">
               <div>
@@ -359,7 +509,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {passo === 5 && !confirmado && (
+        {passo === 6 && !confirmado && (
           <div className="card pilha confirma">
             <div className="codigo-grande">
               <small>Seu código</small>
@@ -375,12 +525,12 @@ export default function Onboarding() {
             </div>
           </div>
         )}
-        {passo === 5 && confirmado && <Conversa />}
+        {passo === 6 && confirmado && <Conversa />}
       </div>
 
       <div className="ob-pe">
         <div>
-          {passo < 5 ? (
+          {passo < 6 ? (
             <>
               <div className="falta" aria-live="polite">
                 {falta}
@@ -390,12 +540,12 @@ export default function Onboarding() {
                 className="btn btn-pri btn-bloco"
                 disabled={!!falta}
                 onClick={() => {
-                  // Ao concluir o passo 5, grava tudo antes de mandar a pessoa ao WhatsApp.
-                  if (passo === 4) salvarDados()
+                  // Ao concluir o último passo de dados, grava tudo antes de mandar a pessoa ao WhatsApp.
+                  if (passo === 5) salvarDados()
                   setPasso(passo + 1)
                 }}
               >
-                {passo === 4 ? 'Concluir' : 'Continuar'}
+                {passo === 5 ? 'Concluir' : 'Continuar'}
                 <ArrowRight size={18} />
               </button>
             </>

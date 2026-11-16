@@ -2,9 +2,10 @@ import {
   ArrowLeftRight, Banknote, Briefcase, CalendarClock, Car, ChartPie, CreditCard, House, Landmark, List, Megaphone, MessageCircle, Package, Percent,
   PlusCircle, Settings, ShoppingBag, Store, Tag, User, Utensils, Wallet, Wrench, Zap, Home, PiggyBank, Smartphone,
 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { linkWhats } from '../lib/config'
+import { linkFoto } from '../lib/remoto'
 import { difDias, hoje, primeiroNome } from '../lib/format'
 import { useApp } from '../lib/store'
 import type { Categoria, Lancamento, TipoCarteira } from '../lib/tipos'
@@ -72,8 +73,29 @@ export function Shell() {
   )
 }
 
-export function Topo({ titulo, sub, children }: { titulo: string; sub?: string; children?: ReactNode }) {
+const cacheFoto = new Map<string, string>()
+/** Foto de perfil (ou a inicial do nome, se não tiver). A foto fica em pasta privada: o endereço é temporário. */
+export function FotoPerfil() {
   const { s } = useApp()
+  const foto = s.usuario.foto
+  const [url, setUrl] = useState<string | null>(foto?.startsWith('data:') ? foto : foto ? cacheFoto.get(foto) ?? null : null)
+  useEffect(() => {
+    if (!foto) return setUrl(null)
+    if (foto.startsWith('data:')) return setUrl(foto)
+    if (cacheFoto.has(foto)) return setUrl(cacheFoto.get(foto)!)
+    let vivo = true
+    void linkFoto(foto).then((u) => {
+      if (u) cacheFoto.set(foto, u)
+      if (vivo) setUrl(u)
+    })
+    return () => {
+      vivo = false
+    }
+  }, [foto])
+  return url ? <img src={url} alt="" /> : <>{(primeiroNome(s.usuario.nome)[0] ?? 'G').toUpperCase()}</>
+}
+
+export function Topo({ titulo, sub, children }: { titulo: string; sub?: string; children?: ReactNode }) {
   return (
     <header className="topo">
       <div className="cresce">
@@ -82,7 +104,7 @@ export function Topo({ titulo, sub, children }: { titulo: string; sub?: string; 
       </div>
       {children}
       <Link to="/ajustes" className="avatar so-mobile" aria-label="Ajustes da conta">
-        {(primeiroNome(s.usuario.nome)[0] ?? 'G').toUpperCase()}
+        <FotoPerfil />
       </Link>
     </header>
   )

@@ -1,8 +1,9 @@
+import { faturaDe, vencimentoDaFatura } from './cartao'
 import { MATERIAL_POR_RAMO } from './config'
 import { hoje, iso, mesDe, parse, somaDias, somaMeses } from './format'
 import type { Categoria, Conta, Estado, Fixa, Lancamento, Origem } from './tipos'
 
-export const VERSAO = 8
+export const VERSAO = 9
 
 export function categoriasPadrao(ramo: string): Categoria[] {
   return [
@@ -146,8 +147,33 @@ export function estadoDemo(): Estado {
     { id: id('c'), tipo: 'receber', descricao: 'Comissão do salão parceiro', valor: 320, vencimento: somaDias(h, 9), status: 'aberta', categoriaId: 'outras-entradas' },
   )
 
+  // Cartão de crédito: compras do mês passado (fatura deste mês) e deste mês (fatura em aberto).
+  // A fatura que já venceu entra paga pelo banco no dia do vencimento: é aí que essas compras viram gasto.
+  const CARTAO = { id: 'cartao-nu', fechamento: 3, vencimento: 10 }
+  const comprasCartao: [number, string, string, number][] = [
+    [-1, 'Secador profissional', 'equipamentos', 389.9],
+    [-1, 'Tinta e oxidante', 'material', 214.5],
+    [-1, 'Anúncio no Instagram', 'marketing', 120],
+    [0, 'Creme de progressiva', 'material', 176.8],
+    [0, 'Almoço com fornecedor', 'alimentacao', 58.4],
+  ]
+  const pagas = new Set<string>()
+  for (const [k, descricao, categoriaId, valor] of comprasCartao) {
+    const m = somaMeses(mes, k)
+    const dia = String(k === 0 ? Math.min(4, Number(h.slice(8))) : 18).padStart(2, '0')
+    const data = `${m}-${dia}`
+    if (data > h) continue
+    const fatura = faturaDe(data, CARTAO.fechamento, CARTAO.vencimento)
+    add({ tipo: 'compra_cartao', valor, descricao, categoriaId, carteiraId: CARTAO.id, data, origem: origem(), fatura })
+    if (vencimentoDaFatura(fatura, CARTAO.vencimento) <= h) pagas.add(fatura)
+  }
+  for (const f of pagas) {
+    const total = lancs.filter((l) => l.tipo === 'compra_cartao' && l.fatura === f).reduce((a, l) => a + l.valor, 0)
+    add({ tipo: 'transferencia', valor: Math.round(total * 100) / 100, descricao: 'Fatura Cartão Nubank', carteiraId: 'banco', carteiraDestinoId: CARTAO.id, data: vencimentoDaFatura(f, CARTAO.vencimento), origem: 'texto', fatura: f })
+  }
+
   // O saldo inicial é calculado de trás para frente, para cada carteira fechar hoje num valor plausível.
-  const mov: Record<string, number> = { banco: 0, dinheiro: 0, maquininha: 0 }
+  const mov: Record<string, number> = { banco: 0, dinheiro: 0, maquininha: 0, [CARTAO.id]: 0, xp: 0 }
   for (const l of lancs) {
     if (l.tipo === 'entrada') mov[l.carteiraId] += l.valor
     else mov[l.carteiraId] -= l.valor
@@ -167,6 +193,8 @@ export function estadoDemo(): Estado {
       { id: 'banco', nome: 'Conta do banco', tipo: 'banco', saldoInicial: inicial('banco', 3842.5), padrao: true },
       { id: 'dinheiro', nome: 'Dinheiro', tipo: 'dinheiro', saldoInicial: inicial('dinheiro', 415), padrao: false },
       { id: 'maquininha', nome: 'Maquininha', tipo: 'maquininha', saldoInicial: inicial('maquininha', 968.4), padrao: false },
+      { id: 'cartao-nu', nome: 'Cartão Nubank', tipo: 'cartao', saldoInicial: 0, padrao: false, fechamento: 3, vencimento: 10, contaPagamentoId: 'banco' },
+      { id: 'xp', nome: 'XP Investimentos', tipo: 'investimento', saldoInicial: 2500, padrao: false },
     ],
     categorias: categoriasPadrao('beleza'),
     lancamentos: lancs,

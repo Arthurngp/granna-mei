@@ -1,3 +1,4 @@
+import { faturaDe } from './cartao'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAviso } from '../components/ui'
 import { hoje, somaDias, somaMeses } from './format'
@@ -174,12 +175,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       mut((a) => {
         const c = a.contas.find((x) => x.id === id)
         if (!c || c.status === 'paga') return a
-        const carteira = carteiraId ?? a.carteiras.find((w) => w.padrao)?.id ?? a.carteiras[0]?.id
+        const carteira = carteiraId ?? a.carteiras.find((w) => w.padrao && w.tipo !== 'cartao' && w.tipo !== 'investimento')?.id ?? a.carteiras.find((w) => w.tipo !== 'cartao' && w.tipo !== 'investimento')?.id
         if (!carteira) return a
+        const cart = a.carteiras.find((w) => w.id === carteira)
+        // Conta paga no cartão vira compra na fatura (só conta como gasto quando a fatura for paga).
+        const noCartao = c.tipo === 'pagar' && cart?.tipo === 'cartao'
         const agora = new Date()
         const l: Lancamento = {
           id: novoId('l'),
-          tipo: c.tipo === 'pagar' ? 'saida' : 'entrada',
+          tipo: c.tipo === 'pagar' ? (noCartao ? 'compra_cartao' : 'saida') : 'entrada',
+          fatura: noCartao ? faturaDe(hoje(), cart!.fechamento ?? 1, cart!.vencimento ?? 10) : undefined,
           valor: c.valor,
           descricao: c.parcela ? `${c.descricao} (${c.parcela.n}/${c.parcela.total})` : c.descricao,
           categoriaId: c.categoriaId,
