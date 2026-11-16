@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import { Barras } from '../components/Graficos'
 import { FaixaAssinatura, Topo } from '../components/Shell'
 import { Chave, Folha, Mascote, Seg, useAviso } from '../components/ui'
-import { doPeriodo, porCategoria, serieMensal, totais } from '../lib/calc'
+import { caixa, doPeriodo, porCategoria, serieMensal, totais } from '../lib/calc'
 import { baixar, csvLancamentos } from '../lib/exportar'
 import { brl, capitaliza, diaCurto, diasNoMes, hoje, mascaraFone, mesAtual, mesDe, nomeMes, somaMeses } from '../lib/format'
 import { useApp } from '../lib/store'
@@ -40,10 +40,12 @@ export default function Relatorios() {
     return de <= ate ? [de, ate] : [ate, de]
   }, [periodo, de, ate, h])
 
-  const lancs = useMemo(() => doPeriodo(s.lancamentos, ini, fim), [s.lancamentos, ini, fim])
+  // Caixa: compra no cartão entra no período em que a fatura foi paga, com a categoria da compra.
+  const cx = useMemo(() => caixa(s), [s.lancamentos, s.carteiras])
+  const lancs = useMemo(() => doPeriodo(cx, ini, fim), [cx, ini, fim])
   const t = useMemo(() => totais(lancs), [lancs])
   const fatias = useMemo(() => porCategoria(lancs, s.categorias, lado), [lancs, s.categorias, lado])
-  const mensal = useMemo(() => serieMensal(s.lancamentos, mesDe(fim), 6), [s.lancamentos, fim])
+  const mensal = useMemo(() => serieMensal(cx, mesDe(fim), 6), [cx, fim])
   const rotuloPeriodo = `${diaCurto(ini)} a ${diaCurto(fim)} de ${fim.slice(0, 4)}`
   const margem = t.entrou > 0 ? t.sobrou / t.entrou : 0
   const iSel = mesSel ?? mensal.meses.length - 1

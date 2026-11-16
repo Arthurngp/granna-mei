@@ -2,22 +2,47 @@
  * Entende a mensagem do MEI e devolve o que fazer.
  * A IA só propõe; o código confere: valor que não está na frase vira pergunta (nunca zero nem chute),
  * carteira e categoria só valem se forem do cliente, e data sem menção vira hoje.
+ *
+ * Forma de pagamento (decisão do Arthur, 2026-11-16): a IA diz o MEIO que a pessoa citou (pix, crédito,
+ * dinheiro...). O CÓDIGO escolhe a carteira: se só uma serve, usa; se mais de uma serve, PERGUNTA com
+ * opções numeradas; quem só tem uma conta nunca é incomodado.
  */
+import { faturaDe } from './cartao.ts'
 import { valorConfere, temDigito } from './numeros.ts'
 import { jsonEstruturado, type Uso } from './openai.ts'
+
+export interface CarteiraCtx {
+  id: string
+  nome: string
+  tipo: string
+  padrao: boolean
+  fechamento?: number | null
+  vencimento?: number | null
+  conta_pagamento_id?: string | null
+}
+
+export interface FaturaAberta {
+  cartaoId: string
+  fatura: string
+  vence: string
+  falta: number
+}
 
 export interface Contexto {
   hoje: string // AAAA-MM-DD
   /** Ramo do negócio, para saber o que é serviço dele (entrada) */
   ramo?: string
   categorias: { id: string; nome: string; tipo: 'entrada' | 'saida'; pessoal?: boolean }[]
-  carteiras: { id: string; nome: string; tipo: string; padrao: boolean }[]
+  carteiras: CarteiraCtx[]
   /** Contas em aberto, para "paguei a luz" achar a conta certa */
   contasAbertas: { id: string; descricao: string; valor: number; vencimento: string; tipo: 'pagar' | 'receber' }[]
+  /** Faturas de cartão com valor em aberto, da mais antiga para a mais nova */
+  faturasAbertas?: FaturaAberta[]
 }
 
-export type TipoAcao = 'lancamento' | 'conta' | 'recorrente' | 'parcelado' | 'baixar_conta' | 'transferencia'
+export type TipoAcao = 'lancamento' | 'conta' | 'recorrente' | 'parcelado' | 'baixar_conta' | 'transferencia' | 'pagar_fatura' | 'criar_categoria'
 export type Intencao = 'acoes' | 'pergunta' | 'desfazer' | 'corrigir' | 'saudacao' | 'ajuda' | 'outro'
+export type Meio = 'pix' | 'dinheiro' | 'debito' | 'credito' | 'boleto' | 'transferencia' | 'maquininha'
 
 export interface AcaoIA {
   tipo_acao: TipoAcao
@@ -25,8 +50,11 @@ export interface AcaoIA {
   valor: number | null
   descricao: string
   categoria_id: string | null
+  /** Só quando a pessoa NOMEIA a conta ("no Nubank", "no cartão do Itaú"). */
   carteira_id: string | null
   carteira_destino_id: string | null
+  /** Como pagou ou recebeu, do jeito que a pessoa disse. */
+  meio: Meio | null
   data: string | null
   pessoal: boolean
   vencimento: string | null
@@ -48,25 +76,47 @@ export interface Acao extends AcaoIA {
   movimento: 'entrada' | 'saida' | null
   carteira_id: string
   data: string
+  /** Compra no cartão: fatura (AAAA-MM de vencimento) da primeira parcela */
+  fatura: string | null
+  /** Parcelado que vira contas a pagar/receber (boleto, carnê, fiado) em vez de parcelas no cartão */
+  noCartao: boolean
 }
 
-export interface Interpretacao {
-  intencao: Intencao
+/** Opção de uma pergunta de forma de pagamento. O id especial BOLETO quer dizer "boleto ou carnê". */
+export interface Opcao {
+  id: string
+  nome: string
+}
+export const BOLETO = '__boleto'
+
+export interface Conferencia {
   acoes: Acao[]
+  perguntar: string | null
+  opcoes?: Opcao[]
+}
+
+export interface Interpretacao extends Conferencia {
+  intencao: Intencao
   pergunta: string | null
   correcao: string | null
-  /** Se preenchido, não grava nada e devolve esta pergunta ao cliente. */
-  perguntar: string | null
   uso: Uso
   ms: number
 }
 
+export interface Opcoes {
+  /** Resposta que a pessoa já deu a uma pergunta de forma de pagamento. */
+  forcarCarteira?: string
+  /** false = nunca pergunta a forma de pagamento (usa a principal). Para importação e testes de leitura. */
+  perguntarMeio?: boolean
+}
+
 const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
+const NOME_TIPO: Record<string, string> = { banco: 'banco', dinheiro: 'dinheiro', maquininha: 'maquininha', outro: 'outro', cartao: 'cartão de crédito', investimento: 'investimento' }
 
 function sistema(c: Contexto) {
   const d = new Date(c.hoje + 'T12:00:00')
   const cats = c.categorias.map((x) => `- ${x.id} (${x.tipo}): ${x.nome}${x.pessoal ? ' [gasto pessoal do dono]' : ''}`).join('\n')
-  const carts = c.carteiras.map((x) => `- ${x.id}: ${x.nome} (${x.tipo})${x.padrao ? ' [principal]' : ''}`).join('\n')
+  const carts = c.carteiras.map((x) => `- ${x.id}: ${x.nome} (${NOME_TIPO[x.tipo] ?? x.tipo})${x.padrao ? ' [principal]' : ''}`).join('\n')
   const contas = c.contasAbertas.length
     ? c.contasAbertas.slice(0, 40).map((x) => `- ${x.id}: ${x.tipo === 'pagar' ? 'a pagar' : 'a receber'} "${x.descricao}" R$ ${x.valor.toFixed(2)} vence ${x.vencimento}`).join('\n')
     : '(nenhuma)'
@@ -74,19 +124,21 @@ function sistema(c: Contexto) {
 Hoje é ${DIAS[d.getDay()]}, ${c.hoje}.${c.ramo ? ` O negócio é do ramo: ${c.ramo}.` : ''} Responda só no formato pedido.
 
 INTENÇÃO
-- "acoes": a mensagem registra dinheiro (uma ou mais ações).
-- "pergunta": quer saber algo dos próprios números ou do MEI dele ("quanto gastei", "o que vence", "quanto sobrou", "quanto falta pro limite do MEI", "quando vence o DAS"). Reescreva a pergunta clara em "pergunta".
+- "acoes": a mensagem registra dinheiro (uma ou mais ações), ou pede para criar uma categoria.
+- "pergunta": quer saber algo dos próprios números ou do MEI dele ("quanto gastei", "o que vence", "quanto sobrou", "quanto falta pro limite do MEI", "quando vence o DAS", "quanto está a fatura"). Reescreva a pergunta clara em "pergunta".
 - "desfazer": quer anular o último registro ("desfazer", "apaga o último", "cancela isso", "errei, apaga").
 - "corrigir": quer mudar o último registro ("não foi 50, foi 60", "era dinheiro, não pix"). Descreva a correção em "correcao".
 - "saudacao": só cumprimento ou agradecimento. "ajuda": pergunta como usar. "outro": nada a ver com dinheiro.
 
 TIPOS DE AÇÃO
-- "lancamento": dinheiro que JÁ entrou ou saiu. movimento entrada/saida.
+- "lancamento": dinheiro que JÁ entrou ou saiu, inclusive compra no cartão de crédito à vista. movimento entrada/saida.
 - "conta": dinheiro que VAI entrar ou sair numa data (boleto, fiado, "me deve", "vou receber", "vence dia"). movimento entrada = a receber, saida = a pagar. Preencha "vencimento".
 - "recorrente": conta que se repete todo mês ("aluguel 900 todo dia 10"). Preencha "dia_do_mes".
-- "parcelado": compra ou venda em parcelas ("em 4x", "4 vezes de 300"). "valor" = TOTAL; "parcelas" = quantidade.
+- "parcelado": compra ou venda em parcelas ("em 4x", "4 vezes de 300"). "valor" = TOTAL; "parcelas" = quantidade. Se foi no cartão, meio = "credito".
 - "baixar_conta": pagou ou recebeu uma conta que JÁ está na lista abaixo e que a pessoa NOMEOU ("paguei a água", "a Mariana pagou"). Preencha "conta_id"; "valor" só se a pessoa disse um valor. Se nenhuma conta da lista tem o nome do que a pessoa disse, NÃO é baixa: é lançamento (e se faltar o valor, pergunte). Se o valor dito é diferente do valor da conta, é lançamento novo, não baixa. Baixa de conta sem valor dito NÃO precisa perguntar o valor: usa o valor da conta.
-- "transferencia": dinheiro passando de uma carteira do próprio dono para outra ("depositei o dinheiro do caixa no banco", "a maquininha caiu no banco"). Use carteira_id (origem) e carteira_destino_id.
+- "transferencia": dinheiro passando de uma carteira do próprio dono para outra ("depositei o dinheiro do caixa no banco", "a maquininha caiu no banco", "guardei 500 na XP"). Use carteira_id (origem) e carteira_destino_id.
+- "pagar_fatura": pagou a fatura do cartão de crédito ("paguei a fatura do Nubank", "paguei 800 do cartão"). carteira_destino_id = o cartão (null se não disse qual); carteira_id = a conta de onde saiu o dinheiro, só se disse; "valor" só se disse. Pagar fatura sem valor dito NÃO precisa perguntar o valor (nem preencher "falta"): o sistema usa o valor da fatura.
+- "criar_categoria": pede para criar uma categoria ("criar categoria Combustível", "cria a categoria Embalagens"). "descricao" = nome da categoria; movimento = saida (gasto) ou entrada (recebimento), saida se não ficar claro.
 
 REGRAS
 - "valor" é exatamente o que a pessoa disse. NUNCA invente valor. Se não disse valor e ele é necessário, use null e preencha "falta" com uma pergunta curta ("Qual foi o valor da luz?").
@@ -95,11 +147,13 @@ REGRAS
 - "vencimento": para conta; "dia 20" é o próximo dia 20; "sexta" é a próxima sexta.
 - categoria_id: escolha a mais adequada da lista, ou null se nenhuma servir. Gasto da casa ou da família (mercado de casa, escola dos filhos, conta de casa, presente) é "pessoal": true e categoria do tipo gasto pessoal.
 - Almoço, lanche e café durante o trabalho são gasto do negócio (alimentação), não pessoal.
-- carteira_id: "pix", "transferência", "débito", "boleto" → banco; "dinheiro", "em espécie", "na mão" → dinheiro; "cartão", "crédito", "maquininha" → maquininha. Sem pista → null.
+- meio: como a pessoa disse que pagou ou recebeu. "pix" → pix; "transferência", "TED" → transferencia; "débito" → debito; "boleto" → boleto; "dinheiro", "em espécie", "na mão" → dinheiro; "cartão de crédito", "crédito", "no cartão", "passei no cartão" → credito; "maquininha" → maquininha. Sem pista → null. NUNCA adivinhe o meio.
+- carteira_id: SÓ se a pessoa citou o nome de uma carteira da lista ("no Nubank", "do Itaú", "no cartão Inter", "na XP"). Senão null. Não escolha carteira pelo meio: o sistema faz isso.
 - descricao: curta, do jeito que a pessoa diria ("Conta de luz", "Corte · Juliana"). Sem valor na descrição.
 - Várias coisas na mesma mensagem viram várias ações. Mas quantidade vezes preço ("3 cortes de 50", "2 escovas de 60") é UMA ação com o total.
 - Quando a pessoa cita um serviço ou produto que o negócio dela vende, com valor, é dinheiro que ENTROU (ex.: "corte masc 35 pix", "escova 55").
 - Se a mensagem tem o texto original seguido de uma linha "Correção: ...", aplique a correção ao texto original e devolva intencao "acoes" com as ações JÁ CORRIGIDAS (é um registro novo, não outro pedido de correção).
+- Se a mensagem tem o texto original seguido de "(resposta para ...)", junte as duas partes num registro só.
 - "semana que vem" sem dia: vencimento é hoje mais 7 dias. "mês que vem" sem dia: mesmo dia do mês seguinte.
 
 CATEGORIAS DO CLIENTE
@@ -119,13 +173,14 @@ function esquema(c: Contexto) {
     type: 'object',
     additionalProperties: false,
     properties: {
-      tipo_acao: { type: 'string', enum: ['lancamento', 'conta', 'recorrente', 'parcelado', 'baixar_conta', 'transferencia'] },
+      tipo_acao: { type: 'string', enum: ['lancamento', 'conta', 'recorrente', 'parcelado', 'baixar_conta', 'transferencia', 'pagar_fatura', 'criar_categoria'] },
       movimento: enumNulo(['entrada', 'saida']),
       valor: nulo('number'),
       descricao: { type: 'string' },
       categoria_id: enumNulo(c.categorias.map((x) => x.id)),
       carteira_id: enumNulo(c.carteiras.map((x) => x.id)),
       carteira_destino_id: enumNulo(c.carteiras.map((x) => x.id)),
+      meio: enumNulo(['pix', 'dinheiro', 'debito', 'credito', 'boleto', 'transferencia', 'maquininha']),
       data: nulo('string'),
       pessoal: { type: 'boolean' },
       vencimento: nulo('string'),
@@ -133,7 +188,7 @@ function esquema(c: Contexto) {
       parcelas: nulo('integer'),
       conta_id: c.contasAbertas.length ? enumNulo(c.contasAbertas.map((x) => x.id)) : { type: 'null' },
     },
-    required: ['tipo_acao', 'movimento', 'valor', 'descricao', 'categoria_id', 'carteira_id', 'carteira_destino_id', 'data', 'pessoal', 'vencimento', 'dia_do_mes', 'parcelas', 'conta_id'],
+    required: ['tipo_acao', 'movimento', 'valor', 'descricao', 'categoria_id', 'carteira_id', 'carteira_destino_id', 'meio', 'data', 'pessoal', 'vencimento', 'dia_do_mes', 'parcelas', 'conta_id'],
   }
   return {
     type: 'object',
@@ -149,7 +204,7 @@ function esquema(c: Contexto) {
   }
 }
 
-const tira = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+const tira = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 const VAZIAS = new Set(['conta', 'contas', 'de', 'da', 'do', 'das', 'dos', 'para', 'pra', 'com', 'pacote', 'parcela'])
 /** A frase cita a conta? Alguma palavra significativa da descrição aparece na mensagem. */
 function nomeada(texto: string, descricao: string) {
@@ -159,15 +214,92 @@ function nomeada(texto: string, descricao: string) {
 
 const dataValida = (s: string | null) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(new Date(s + 'T12:00:00').getTime())
 
+const BANCARIOS: Meio[] = ['pix', 'debito', 'boleto', 'transferencia']
+
+/**
+ * Carteiras que servem para um movimento com aquele meio.
+ * Investimento nunca é opção de gasto ou recebimento; cartão só para gasto; maquininha só para recebimento.
+ */
+export function candidatas(cs: CarteiraCtx[], movimento: 'entrada' | 'saida', meio: Meio | null): CarteiraCtx[] {
+  const usaveis = cs.filter((c) => c.tipo !== 'investimento')
+  if (meio && BANCARIOS.includes(meio)) return usaveis.filter((c) => c.tipo === 'banco')
+  if (meio === 'dinheiro') return usaveis.filter((c) => c.tipo === 'dinheiro')
+  if (meio === 'credito' || meio === 'maquininha') return usaveis.filter((c) => c.tipo === (movimento === 'saida' ? 'cartao' : 'maquininha'))
+  return usaveis.filter((c) => (movimento === 'saida' ? c.tipo !== 'maquininha' : c.tipo !== 'cartao'))
+}
+
+/** Monta a pergunta numerada. */
+export function perguntaDeOpcoes(movimento: 'entrada' | 'saida', descricao: string, opcoes: Opcao[]) {
+  const titulo = movimento === 'entrada' ? `Onde caiu${descricao ? ` "${descricao}"` : ''}?` : `Pagou como${descricao ? ` "${descricao}"` : ''}?`
+  return `${titulo} Responda com o número:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`
+}
+
+const PAINEL = () => (process.env.PAINEL_URL ?? 'https://grannamei.amplasoft.me/painel').replace(/\/+$/, '')
+
 /** Confere cada ação. Devolve a pergunta a fazer, se algo não fecha. */
-export function conferir(texto: string, c: Contexto, r: RespostaIA): { acoes: Acao[]; perguntar: string | null } {
+export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes = {}): Conferencia {
   if (r.intencao !== 'acoes') return { acoes: [], perguntar: r.falta }
   if (r.falta) return { acoes: [], perguntar: r.falta }
   if (!r.acoes.length) return { acoes: [], perguntar: 'Não entendi o que registrar. Me conta de novo, com o valor?' }
-  const padrao = c.carteiras.find((x) => x.padrao)?.id ?? c.carteiras[0]?.id ?? ''
+  const perguntarMeio = op.perguntarMeio !== false
+  const padrao = c.carteiras.find((x) => x.padrao && x.tipo !== 'cartao' && x.tipo !== 'investimento')?.id ?? c.carteiras.find((x) => x.tipo !== 'cartao' && x.tipo !== 'investimento')?.id ?? c.carteiras[0]?.id ?? ''
   const cat = (id: string | null) => c.categorias.find((x) => x.id === id)
+  const cart = (id: string | null) => c.carteiras.find((x) => x.id === id)
+  const forcada = op.forcarCarteira && op.forcarCarteira !== BOLETO ? cart(op.forcarCarteira) : undefined
   const out: Acao[] = []
+
+  /** Escolhe a carteira de um gasto ou recebimento, ou devolve a pergunta. */
+  const escolher = (a: AcaoIA, movimento: 'entrada' | 'saida'): { id: string } | Conferencia => {
+    const nomeada = cart(a.carteira_id)
+    const lista = candidatas(c.carteiras, movimento, a.meio)
+    if (nomeada && nomeada.tipo !== 'investimento' && !(movimento === 'saida' && nomeada.tipo === 'maquininha') && !(movimento === 'entrada' && nomeada.tipo === 'cartao')) return { id: nomeada.id }
+    if (forcada && candidatas(c.carteiras, movimento, null).some((x) => x.id === forcada.id)) return { id: forcada.id }
+    if (!perguntarMeio) return { id: lista[0]?.id ?? padrao }
+    if (lista.length === 1) return { id: lista[0].id }
+    if (lista.length === 0 && a.meio === 'credito' && movimento === 'saida') {
+      return { acoes: [], perguntar: `Você ainda não cadastrou cartão de crédito. Cadastre em ${PAINEL()}/ajustes (Carteiras) e me mande de novo, ou me diga se "${a.descricao}" foi pix ou dinheiro.` }
+    }
+    const opcoes = (lista.length ? lista : candidatas(c.carteiras, movimento, null)).map((x) => ({ id: x.id, nome: x.nome }))
+    if (opcoes.length <= 1) return { id: opcoes[0]?.id ?? padrao }
+    return { acoes: [], perguntar: perguntaDeOpcoes(movimento, a.descricao, opcoes), opcoes }
+  }
+  const ehPergunta = (x: { id: string } | Conferencia): x is Conferencia => !('id' in x)
+
   for (const a of r.acoes) {
+    if (a.tipo_acao === 'criar_categoria') {
+      const nome = a.descricao.trim().replace(/^categoria\s+/i, '').slice(0, 40)
+      if (!nome) return { acoes: [], perguntar: 'Qual o nome da categoria?' }
+      out.push({ ...a, descricao: nome, movimento: a.movimento ?? 'saida', valor: null, categoria_id: null, carteira_id: '', data: c.hoje, fatura: null, noCartao: false })
+      continue
+    }
+
+    if (a.tipo_acao === 'pagar_fatura') {
+      const cartoes = c.carteiras.filter((x) => x.tipo === 'cartao')
+      if (!cartoes.length) return { acoes: [], perguntar: `Você ainda não tem cartão de crédito cadastrado. Cadastre em ${PAINEL()}/ajustes (Carteiras).` }
+      let cartaoId = cart(a.carteira_destino_id)?.tipo === 'cartao' ? a.carteira_destino_id! : cartoes.length === 1 ? cartoes[0].id : forcada?.tipo === 'cartao' ? forcada.id : null
+      if (!cartaoId) {
+        const opcoes = cartoes.map((x) => ({ id: x.id, nome: x.nome }))
+        return { acoes: [], perguntar: `Qual fatura você pagou? Responda com o número:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, opcoes }
+      }
+      const aberta = (c.faturasAbertas ?? []).find((f) => f.cartaoId === cartaoId && f.falta > 0)
+      if (a.valor === null && !aberta) return { acoes: [], perguntar: `Não achei fatura em aberto no ${cart(cartaoId)!.nome}. Quanto você pagou?` }
+      const valor = a.valor ?? aberta!.falta
+      if (a.valor !== null && temDigito(texto) && !valorConfere(texto, a.valor, null)) return { acoes: [], perguntar: 'Só para conferir: quanto você pagou da fatura?' }
+      // De onde saiu: a conta citada, a resposta à pergunta, a conta que paga o cartão, ou pergunta entre os bancos.
+      const bancos = c.carteiras.filter((x) => x.tipo === 'banco' || x.tipo === 'dinheiro')
+      const citada = cart(a.carteira_id)
+      const origem = citada && citada.tipo !== 'cartao' ? citada.id
+        : forcada && forcada.tipo !== 'cartao' ? forcada.id
+        : cart(cartoes.find((x) => x.id === cartaoId)?.conta_pagamento_id ?? null)?.id
+        ?? (bancos.length === 1 || !perguntarMeio ? bancos[0]?.id ?? padrao : null)
+      if (!origem) {
+        const opcoes = bancos.map((x) => ({ id: x.id, nome: x.nome }))
+        return { acoes: [], perguntar: `De qual conta saiu o pagamento da fatura? Responda com o número:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, opcoes }
+      }
+      out.push({ ...a, valor, movimento: null, categoria_id: null, carteira_id: origem, carteira_destino_id: cartaoId, data: dataValida(a.data) && a.data! <= c.hoje ? a.data! : c.hoje, fatura: aberta?.fatura ?? null, noCartao: false, descricao: `Fatura ${cart(cartaoId)!.nome}` })
+      continue
+    }
+
     const precisaValor = a.tipo_acao !== 'baixar_conta'
     if (precisaValor && (a.valor === null || !(a.valor > 0))) return { acoes: [], perguntar: `Qual foi o valor${a.descricao ? ` de "${a.descricao}"` : ''}?` }
     if (a.valor !== null && temDigito(texto) && !valorConfere(texto, a.valor, a.parcelas)) {
@@ -185,9 +317,7 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA): { acoes: Ac
     if (a.tipo_acao === 'baixar_conta' && !conta) {
       return { acoes: [], perguntar: `Não achei essa conta em aberto. Qual conta você ${a.movimento === 'entrada' ? 'recebeu' : 'pagou'}, e de quanto?` }
     }
-    if (a.tipo_acao === 'transferencia' && (!a.carteira_destino_id || a.carteira_destino_id === (a.carteira_id ?? padrao))) {
-      return { acoes: [], perguntar: 'De qual carteira para qual? Ex.: "do dinheiro para o banco".' }
-    }
+    if (a.tipo_acao === 'baixar_conta' && conta) a.movimento = conta.tipo === 'receber' ? 'entrada' : 'saida'
     if (a.tipo_acao !== 'transferencia' && a.tipo_acao !== 'baixar_conta' && !a.movimento) {
       return { acoes: [], perguntar: `"${a.descricao}" foi dinheiro que entrou ou que saiu?` }
     }
@@ -195,32 +325,90 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA): { acoes: Ac
     if (a.tipo_acao === 'recorrente' && !(a.dia_do_mes && a.dia_do_mes >= 1 && a.dia_do_mes <= 31)) return { acoes: [], perguntar: `Que dia do mês vence "${a.descricao}"?` }
     if (a.tipo_acao === 'conta' && !dataValida(a.vencimento)) return { acoes: [], perguntar: `Para quando é "${a.descricao}"?` }
 
-    // Categoria só vale se for do cliente e do mesmo tipo do movimento.
+    // Carteira.
+    let carteira = padrao
+    let noCartao = false
+    if (a.tipo_acao === 'transferencia') {
+      const destino = cart(a.carteira_destino_id)
+      if (!destino) return { acoes: [], perguntar: 'De qual carteira para qual? Ex.: "do dinheiro para o banco".' }
+      let origem = cart(a.carteira_id)?.id ?? (forcada && forcada.id !== destino.id ? forcada.id : undefined)
+      if (!origem) {
+        const possiveis = c.carteiras.filter((x) => x.id !== destino.id && x.tipo !== 'cartao')
+        if (possiveis.length === 1 || !perguntarMeio) origem = possiveis[0]?.id ?? padrao
+        else {
+          const opcoes = possiveis.map((x) => ({ id: x.id, nome: x.nome }))
+          return { acoes: [], perguntar: `De qual conta saiu o dinheiro para ${destino.nome}? Responda com o número:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, opcoes }
+        }
+      }
+      if (origem === destino.id) return { acoes: [], perguntar: 'De qual carteira para qual? Ex.: "do dinheiro para o banco".' }
+      if (destino.tipo === 'cartao') return conferir(texto, c, { ...r, acoes: [{ ...a, tipo_acao: 'pagar_fatura', carteira_id: origem }] }, op)
+      carteira = origem
+    } else if (a.tipo_acao === 'lancamento' || a.tipo_acao === 'baixar_conta') {
+      const e = escolher(a, a.movimento!)
+      if (ehPergunta(e)) return e
+      carteira = e.id
+      noCartao = cart(carteira)?.tipo === 'cartao'
+    } else if (a.tipo_acao === 'parcelado' && a.movimento === 'saida') {
+      // Parcelado: no cartão vira parcelas nas faturas; no boleto/carnê vira contas a pagar.
+      const cartoes = c.carteiras.filter((x) => x.tipo === 'cartao')
+      const citada = cart(a.carteira_id)
+      if (op.forcarCarteira === BOLETO || a.meio === 'boleto') noCartao = false
+      else if (citada?.tipo === 'cartao') ((noCartao = true), (carteira = citada.id))
+      else if (forcada?.tipo === 'cartao') ((noCartao = true), (carteira = forcada.id))
+      else if (a.meio === 'credito' || a.meio === 'maquininha') {
+        if (!cartoes.length) return { acoes: [], perguntar: `Você ainda não cadastrou cartão de crédito. Cadastre em ${PAINEL()}/ajustes (Carteiras) e me mande de novo, ou me diga se foi no boleto ou carnê.` }
+        if (cartoes.length === 1 || !perguntarMeio) ((noCartao = true), (carteira = cartoes[0].id))
+        else {
+          const opcoes = cartoes.map((x) => ({ id: x.id, nome: x.nome }))
+          return { acoes: [], perguntar: perguntaDeOpcoes('saida', a.descricao, opcoes), opcoes }
+        }
+      } else if (cartoes.length && perguntarMeio) {
+        const opcoes = [...cartoes.map((x) => ({ id: x.id, nome: x.nome })), { id: BOLETO, nome: 'Boleto ou carnê' }]
+        return { acoes: [], perguntar: perguntaDeOpcoes('saida', a.descricao, opcoes), opcoes }
+      }
+    }
+
+    // Categoria: só vale se for do cliente e do mesmo tipo do movimento. Sem nenhuma, vai para "Outros".
     let categoria = a.categoria_id
     const ct = cat(categoria)
     if (!ct || (a.movimento && ct.tipo !== a.movimento)) categoria = null
     let pessoal = a.pessoal && a.movimento === 'saida'
     if (cat(categoria)?.pessoal) pessoal = true
     if (pessoal) categoria = c.categorias.find((x) => x.pessoal)?.id ?? categoria
-    if (!categoria && a.movimento) categoria = a.movimento === 'entrada' ? c.categorias.find((x) => x.id === 'outras-entradas')?.id ?? null : null
+    if (!categoria && a.movimento) categoria = c.categorias.find((x) => x.id === (a.movimento === 'entrada' ? 'outras-entradas' : 'outras-saidas'))?.id ?? null
 
     const data = dataValida(a.data) && a.data! <= c.hoje ? a.data! : c.hoje
+    const ccart = cart(carteira)
     out.push({
       ...a,
       descricao: a.descricao.trim().slice(0, 120) || (a.movimento === 'entrada' ? 'Entrada' : 'Saída'),
       categoria_id: a.tipo_acao === 'transferencia' ? null : categoria,
-      carteira_id: a.carteira_id ?? padrao,
+      carteira_id: carteira,
       pessoal,
       data,
       dia_do_mes: a.dia_do_mes ? Math.min(28, a.dia_do_mes) : null,
+      noCartao,
+      fatura: noCartao && ccart ? faturaDe(data, ccart.fechamento ?? 1, ccart.vencimento ?? 10) : null,
     })
   }
   return { acoes: out, perguntar: null }
 }
 
-export async function interpretar(texto: string, c: Contexto): Promise<Interpretacao> {
+/** A resposta da pessoa escolhe uma das opções? Aceita o número ("2") ou o nome ("itaú"). */
+export function opcaoEscolhida(resposta: string, opcoes: Opcao[]): Opcao | null {
+  const t = tira(resposta).trim()
+  const n = t.match(/^\s*(?:op[cç][aã]o\s*)?(\d{1,2})\s*[.)]?\s*$/)
+  if (n) return opcoes[Number(n[1]) - 1] ?? null
+  const achadas = opcoes.filter((o) => {
+    const nome = tira(o.nome)
+    return t === nome || (t.length >= 3 && nome.includes(t)) || (nome.length >= 3 && t.includes(nome))
+  })
+  return achadas.length === 1 ? achadas[0] : null
+}
+
+export async function interpretar(texto: string, c: Contexto, op: Opcoes = {}): Promise<Interpretacao> {
   const t0 = Date.now()
   const { dados, uso } = await jsonEstruturado<RespostaIA>(sistema(c), texto.slice(0, 2000), 'interpretacao', esquema(c))
-  const { acoes, perguntar } = conferir(texto, c, dados)
-  return { intencao: dados.intencao, acoes, pergunta: dados.pergunta, correcao: dados.correcao, perguntar, uso, ms: Date.now() - t0 }
+  const conf = conferir(texto, c, dados, op)
+  return { intencao: dados.intencao, ...conf, pergunta: dados.pergunta, correcao: dados.correcao, uso, ms: Date.now() - t0 }
 }

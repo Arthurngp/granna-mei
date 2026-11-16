@@ -1,13 +1,16 @@
-import { Bell, CalendarClock, ChevronRight, CreditCard, Download, LogOut, MessageCircle, Plus, Send, Tags, Trash2, UserRound, Wallet } from 'lucide-react'
+import { Bell, CalendarClock, Camera, ChevronRight, CreditCard, Download, LogOut, MessageCircle, Plus, Send, Tags, Trash2, UserRound, Wallet } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { ConfirmarWhats } from '../components/ConfirmarWhats'
-import { FaixaAssinatura, IconeCarteira, Topo } from '../components/Shell'
+import { FaixaAssinatura, FotoPerfil, IconeCarteira, Topo } from '../components/Shell'
+import { faturas } from '../lib/cartao'
+import { blobParaDataUrl, prepararFoto } from '../lib/foto'
+import { enviarFoto, removerFoto } from '../lib/remoto'
 import { CampoDinheiro, Chave, Codigo, Folha, Seg, useAviso } from '../components/ui'
 import { saldos } from '../lib/calc'
 import { PRECO_ANUAL, PRECO_MENSAL, RAMOS } from '../lib/config'
 import { baixar, csvLancamentos } from '../lib/exportar'
-import { brl, DIAS_SEMANA, diaCurto, documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaDias, somaMeses } from '../lib/format'
+import { brl, DIAS_SEMANA, diaCurto, documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, somaDias, somaMeses } from '../lib/format'
 import { novoId, useApp } from '../lib/store'
 import type { Carteira, Categoria, Conta, Estado, Fixa, StatusAssinatura, TipoCarteira } from '../lib/tipos'
 
@@ -46,7 +49,38 @@ export default function Ajustes() {
   const [enviado, setEnviado] = useState(false)
   const [codigo, setCodigo] = useState('')
   // Nova carteira / categoria / conta fixa
-  const [nCarteira, setNCarteira] = useState<{ nome: string; tipo: TipoCarteira }>({ nome: '', tipo: 'banco' })
+  const [nCarteira, setNCarteira] = useState<{ nome: string; tipo: TipoCarteira; fechamento: number; vencimento: number; paga: string }>({ nome: '', tipo: 'banco', fechamento: 0, vencimento: 0, paga: '' })
+  const [subindoFoto, setSubindoFoto] = useState(false)
+  const trocarFoto = async (arquivo?: File) => {
+    if (!arquivo) return
+    setSubindoFoto(true)
+    try {
+      const foto = await prepararFoto(arquivo)
+      // Na demonstração a foto fica só no navegador; na conta de verdade, vai para a pasta privada.
+      const caminho = s.sessao.demo ? await blobParaDataUrl(foto) : await enviarFoto(foto, s.usuario.foto)
+      mut((a) => ({ ...a, usuario: { ...a.usuario, foto: caminho } }))
+      avisar('Foto atualizada')
+    } catch (e) {
+      avisar((e as Error).message || 'Não consegui trocar a foto agora.')
+    } finally {
+      setSubindoFoto(false)
+    }
+  }
+  const tirarFoto = async () => {
+    try {
+      if (!s.sessao.demo) await removerFoto(s.usuario.foto)
+      mut((a) => ({ ...a, usuario: { ...a.usuario, foto: undefined } }))
+      avisar('Foto removida')
+    } catch {
+      avisar('Não consegui remover a foto agora.')
+    }
+  }
+  const pagadoras = s.carteiras.filter((c) => c.tipo === 'banco' || c.tipo === 'dinheiro' || c.tipo === 'outro')
+  const abertasCartao = faturas(s.lancamentos, s.carteiras).filter((f) => f.falta > 0)
+  const mudaCarteira = (id: string, p: Partial<Carteira>) => mut((a) => ({ ...a, carteiras: a.carteiras.map((x): Carteira => (x.id === id ? { ...x, ...p } : x)) }))
+  const DIAS_MES = Array.from({ length: 31 }, (_, i) => i + 1)
+  const novaOk =
+    nCarteira.nome.trim().length >= 2 && (nCarteira.tipo !== 'cartao' || (nCarteira.fechamento > 0 && nCarteira.vencimento > 0 && !!(nCarteira.paga || pagadoras[0])))
   const [nCat, setNCat] = useState<{ nome: string; tipo: 'entrada' | 'saida' }>({ nome: '', tipo: 'saida' })
   const [nFixa, setNFixa] = useState({ descricao: '', valor: 0, dia: 10 })
   const [confirmaExcluir, setConfirmaExcluir] = useState('')
@@ -116,7 +150,13 @@ export default function Ajustes() {
       <div className="grade">
         <section className="card g-6">
           <div className="perfil">
-            <div className="avatar">{(primeiroNome(u.nome)[0] ?? 'G').toUpperCase()}</div>
+            <label className={`avatar avatar-troca ${subindoFoto ? 'subindo' : ''}`} aria-label="Trocar foto de perfil" title="Trocar foto">
+              <FotoPerfil />
+              <span className="camera" aria-hidden>
+                <Camera size={14} />
+              </span>
+              <input type="file" accept="image/*" hidden disabled={subindoFoto} onChange={(e) => { void trocarFoto(e.target.files?.[0]); e.target.value = '' }} />
+            </label>
             <div style={{ minWidth: 0 }}>
               <b>{u.nome || 'Sua conta'}</b>
               <div className="suave" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -124,6 +164,13 @@ export default function Ajustes() {
                 {u.negocio && u.email ? ' · ' : ''}
                 {u.email}
               </div>
+              {u.foto ? (
+                <button type="button" className="lnk pq" onClick={() => void tirarFoto()}>
+                  Remover foto
+                </button>
+              ) : (
+                <span className="suave pq">Toque no círculo para pôr sua foto</span>
+              )}
             </div>
           </div>
         </section>
@@ -456,38 +503,130 @@ export default function Ajustes() {
                   </button>
                 )}
               </div>
+              {c.tipo === 'cartao' && (
+                <div className="pilha" style={{ gap: 8 }}>
+                  <div className="dupla">
+                    <label className="campo">
+                      <span>Fecha dia</span>
+                      <select className="entrada num" value={c.fechamento ?? 0} onChange={(e) => mudaCarteira(c.id, { fechamento: Number(e.target.value) })}>
+                        {DIAS_MES.map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="campo">
+                      <span>Vence dia</span>
+                      <select className="entrada num" value={c.vencimento ?? 0} onChange={(e) => mudaCarteira(c.id, { vencimento: Number(e.target.value) })}>
+                        {DIAS_MES.map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <label className="campo">
+                    <span>A fatura é paga com</span>
+                    <select className="entrada" value={c.contaPagamentoId ?? ''} onChange={(e) => mudaCarteira(c.id, { contaPagamentoId: e.target.value || undefined })}>
+                      <option value="">Perguntar na hora</option>
+                      {pagadoras.map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.nome}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <button type="button" className="radio-linha" aria-pressed={c.padrao} onClick={() => mut((a) => ({ ...a, carteiras: a.carteiras.map((x): Carteira => ({ ...x, padrao: x.id === c.id })) }))}>
-                  <i />
-                  Principal
-                </button>
+                {c.tipo === 'cartao' || c.tipo === 'investimento' ? (
+                  <span className="suave pq">{c.tipo === 'cartao' ? 'Cartão de crédito' : 'Investimento, fora do caixa'}</span>
+                ) : (
+                  <button type="button" className="radio-linha" aria-pressed={c.padrao} onClick={() => mut((a) => ({ ...a, carteiras: a.carteiras.map((x): Carteira => ({ ...x, padrao: x.id === c.id })) }))}>
+                    <i />
+                    Principal
+                  </button>
+                )}
                 <span className="suave pq">
-                  Saldo: <b className="num" style={{ color: 'var(--text)' }}>{brl(sal[c.id] ?? 0)}</b>
+                  {c.tipo === 'cartao' ? 'Em faturas abertas: ' : 'Saldo: '}
+                  <b className="num" style={{ color: 'var(--text)' }}>
+                    {brl(c.tipo === 'cartao' ? abertasCartao.filter((f) => f.cartaoId === c.id).reduce((a, f) => a + f.falta, 0) : sal[c.id] ?? 0)}
+                  </b>
                 </span>
               </div>
             </div>
           ))}
           <div className="item-ob">
             <div className="rotulo" style={{ marginBottom: 0 }}>Nova carteira</div>
-            <input className="entrada" placeholder="Ex.: Conta poupança" value={nCarteira.nome} onChange={(e) => setNCarteira({ ...nCarteira, nome: e.target.value })} />
-            <Seg
-              bloco
-              valor={nCarteira.tipo}
-              onChange={(v) => setNCarteira({ ...nCarteira, tipo: v })}
-              opcoes={[
-                { v: 'banco', r: 'Banco' },
-                { v: 'dinheiro', r: 'Dinheiro' },
-                { v: 'maquininha', r: 'Maquininha' },
-                { v: 'outro', r: 'Outro' },
-              ]}
-            />
+            <select className="entrada" aria-label="Tipo da carteira" value={nCarteira.tipo} onChange={(e) => setNCarteira({ ...nCarteira, tipo: e.target.value as TipoCarteira })}>
+              <option value="banco">Conta de banco</option>
+              <option value="cartao">Cartão de crédito</option>
+              <option value="dinheiro">Dinheiro</option>
+              <option value="maquininha">Maquininha</option>
+              <option value="investimento">Investimento (fica fora do caixa)</option>
+              <option value="outro">Outro</option>
+            </select>
+            <input className="entrada" placeholder={nCarteira.tipo === 'cartao' ? 'Ex.: Nubank' : nCarteira.tipo === 'investimento' ? 'Ex.: XP' : 'Ex.: Itaú'} value={nCarteira.nome} onChange={(e) => setNCarteira({ ...nCarteira, nome: e.target.value })} />
+            {nCarteira.tipo === 'cartao' && (
+              <>
+                <div className="dupla">
+                  <label className="campo">
+                    <span>Fecha dia</span>
+                    <select className="entrada num" value={nCarteira.fechamento} onChange={(e) => setNCarteira({ ...nCarteira, fechamento: Number(e.target.value) })}>
+                      <option value={0}>Escolha</option>
+                      {DIAS_MES.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="campo">
+                    <span>Vence dia</span>
+                    <select className="entrada num" value={nCarteira.vencimento} onChange={(e) => setNCarteira({ ...nCarteira, vencimento: Number(e.target.value) })}>
+                      <option value={0}>Escolha</option>
+                      {DIAS_MES.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <label className="campo">
+                  <span>A fatura é paga com</span>
+                  <select className="entrada" value={nCarteira.paga || pagadoras[0]?.id || ''} onChange={(e) => setNCarteira({ ...nCarteira, paga: e.target.value })}>
+                    {pagadoras.map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.nome}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
             <button
               type="button"
               className="btn btn-sec"
-              disabled={nCarteira.nome.trim().length < 2}
+              disabled={!novaOk}
               onClick={() => {
-                mut((a) => ({ ...a, carteiras: [...a.carteiras, { id: novoId('w'), nome: nCarteira.nome.trim(), tipo: nCarteira.tipo, saldoInicial: 0, padrao: a.carteiras.length === 0 }] }))
-                setNCarteira({ nome: '', tipo: 'banco' })
+                const n = nCarteira
+                const ehCartao = n.tipo === 'cartao'
+                const nome = ehCartao && !n.nome.trim().toLowerCase().startsWith('cartão') ? `Cartão ${n.nome.trim()}` : n.nome.trim()
+                mut((a) => ({
+                  ...a,
+                  carteiras: [
+                    ...a.carteiras,
+                    {
+                      id: novoId('w'), nome, tipo: n.tipo, saldoInicial: 0,
+                      padrao: !a.carteiras.some((x) => x.padrao) && n.tipo !== 'cartao' && n.tipo !== 'investimento',
+                      ...(ehCartao ? { fechamento: n.fechamento, vencimento: n.vencimento, contaPagamentoId: n.paga || pagadoras[0]?.id } : {}),
+                    },
+                  ],
+                }))
+                setNCarteira({ nome: '', tipo: 'banco', fechamento: 0, vencimento: 0, paga: '' })
               }}
             >
               <Plus size={18} />

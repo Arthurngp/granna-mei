@@ -4,7 +4,8 @@
  */
 import { createClient } from '@supabase/supabase-js'
 import { env } from './env.ts'
-import type { Contexto } from './interpretar.ts'
+import { faturas, type MovCartao } from './cartao.ts'
+import type { Contexto, FaturaAberta } from './interpretar.ts'
 
 export const sb = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false, autoRefreshToken: false } })
 
@@ -60,16 +61,48 @@ export async function contextoDe(userId: string, hoje: string): Promise<Contexto
   const [p, cats, carts, contas] = await Promise.all([
     sb.from('perfis').select('ramo').eq('id', userId).single(),
     sb.from('categorias').select('id,nome,tipo,pessoal').eq('user_id', userId),
-    sb.from('carteiras').select('id,nome,tipo,padrao').eq('user_id', userId),
+    sb.from('carteiras').select('id,nome,tipo,padrao,fechamento,vencimento,conta_pagamento_id').eq('user_id', userId),
     sb.from('contas').select('id,descricao,valor,vencimento,tipo').eq('user_id', userId).eq('status', 'aberta').order('vencimento').limit(40),
   ])
   for (const [r, n] of [[p, 'perfil'], [cats, 'categorias'], [carts, 'carteiras'], [contas, 'contas']] as const) falhou(r.error, 'contexto ' + n)
+  const categorias = (cats.data ?? []).map((c) => ({ ...c, pessoal: !!c.pessoal }))
+  // Categoria obrigatória: sem nenhuma que sirva, o gasto vai para "Outros gastos". Se o cliente não tem, cria agora.
+  if (categorias.length && !categorias.some((c) => c.id === 'outras-saidas')) {
+    const r = await sb.from('categorias').upsert({ user_id: userId, id: 'outras-saidas', nome: 'Outros gastos', tipo: 'saida', cor: '#8A8FA8' }, { onConflict: 'user_id,id', ignoreDuplicates: true })
+    falhou(r.error, 'criar Outros gastos')
+    categorias.push({ id: 'outras-saidas', nome: 'Outros gastos', tipo: 'saida', pessoal: false })
+  }
+  const carteiras = carts.data ?? []
+  let faturasAbertas: FaturaAberta[] = []
+  const cartoes = carteiras.filter((c) => c.tipo === 'cartao')
+  if (cartoes.length) {
+    const ids = cartoes.map((c) => c.id)
+    const [compras, pagos] = await Promise.all([
+      sb.from('lancamentos').select('id,tipo,valor,data,descricao,carteira_id,carteira_destino_id,fatura').eq('user_id', userId).eq('tipo', 'compra_cartao').in('carteira_id', ids),
+      sb.from('lancamentos').select('id,tipo,valor,data,descricao,carteira_id,carteira_destino_id,fatura').eq('user_id', userId).eq('tipo', 'transferencia').in('carteira_destino_id', ids),
+    ])
+    falhou(compras.error, 'contexto compras no cartão')
+    falhou(pagos.error, 'contexto pagamentos de fatura')
+    const movs = [...(compras.data ?? []), ...(pagos.data ?? [])].map(paraMov)
+    faturasAbertas = faturas(movs, cartoes.map((c) => ({ id: c.id, tipo: c.tipo, fechamento: c.fechamento ?? undefined, vencimento: c.vencimento ?? undefined })))
+      .filter((f) => f.falta > 0)
+      .map((f) => ({ cartaoId: f.cartaoId, fatura: f.fatura, vence: f.vence, falta: f.falta }))
+  }
   return {
     hoje,
     ramo: p.data?.ramo || undefined,
-    categorias: (cats.data ?? []).map((c) => ({ ...c, pessoal: !!c.pessoal })),
-    carteiras: carts.data ?? [],
+    categorias,
+    carteiras,
     contasAbertas: (contas.data ?? []).map((c) => ({ ...c, valor: Number(c.valor) })),
+    faturasAbertas,
+  }
+}
+
+/** Linha do banco no formato do módulo do cartão. */
+export function paraMov(l: { id: string; tipo: string; valor: number | string; data: string; descricao: string; carteira_id: string; carteira_destino_id?: string | null; categoria_id?: string | null; pessoal?: boolean | null; fatura?: string | null }): MovCartao {
+  return {
+    id: l.id, tipo: l.tipo as MovCartao['tipo'], valor: Number(l.valor), data: l.data, descricao: l.descricao, carteiraId: l.carteira_id,
+    carteiraDestinoId: l.carteira_destino_id ?? undefined, categoriaId: l.categoria_id ?? undefined, pessoal: !!l.pessoal, fatura: l.fatura ?? undefined,
   }
 }
 

@@ -1,20 +1,51 @@
-import { Check, ChevronDown, MessageCircle, Repeat } from 'lucide-react'
+import { Check, ChevronDown, CreditCard, MessageCircle, Repeat } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { BotaoZap, FaixaAssinatura, Topo } from '../components/Shell'
 import { Folha, Seg, useAviso, Vazio } from '../components/ui'
 import { linkWhats } from '../lib/config'
-import { brl, capitaliza, diaCurto, diaExtenso, difDias, hoje, prazo, somaDias } from '../lib/format'
-import { useApp } from '../lib/store'
-import type { Conta } from '../lib/tipos'
+import { faturas, type FaturaResumo } from '../lib/cartao'
+import { brl, capitaliza, centavosDe, diaCurto, diaExtenso, difDias, dinheiroCampo, hoje, prazo, somaDias } from '../lib/format'
+import { novoId, useApp } from '../lib/store'
+import type { Conta, Lancamento } from '../lib/tipos'
+
+const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+const mesBR = (f: string) => `${MESES[Number(f.slice(5, 7)) - 1]}/${f.slice(2, 4)}`
 
 export default function Contas() {
-  const { s, pagarConta, reabrirConta } = useApp()
+  const { s, mut, pagarConta, reabrirConta } = useApp()
   const avisar = useAviso()
   const [tipo, setTipo] = useState<'pagar' | 'receber'>('pagar')
   const [verPagas, setVerPagas] = useState(false)
   const [abertaId, setAbertaId] = useState<string | null>(null)
   const [carteira, setCarteira] = useState('')
   const h = hoje()
+
+  // Faturas do cartão com valor em aberto. Pagar a fatura é dinheiro saindo da conta para o cartão:
+  // as compras daquela fatura entram nos gastos no dia do pagamento.
+  const abertasCartao = useMemo(() => faturas(s.lancamentos, s.carteiras).filter((f) => f.falta > 0), [s.lancamentos, s.carteiras])
+  const [faturaSel, setFaturaSel] = useState<FaturaResumo | null>(null)
+  const [pagaDe, setPagaDe] = useState('')
+  const [valorPago, setValorPago] = useState(0)
+  const contasQuePagam = s.carteiras.filter((c) => c.tipo === 'banco' || c.tipo === 'dinheiro' || c.tipo === 'outro')
+  const nomeCart = (id: string) => s.carteiras.find((c) => c.id === id)?.nome ?? 'Cartão'
+  const abrirFatura = (f: FaturaResumo) => {
+    const cartao = s.carteiras.find((c) => c.id === f.cartaoId)
+    setFaturaSel(f)
+    setPagaDe(cartao?.contaPagamentoId ?? contasQuePagam.find((c) => c.padrao)?.id ?? contasQuePagam[0]?.id ?? '')
+    setValorPago(f.falta)
+  }
+  const pagarFatura = () => {
+    if (!faturaSel || !pagaDe || valorPago <= 0) return
+    const agora = new Date()
+    const l: Lancamento = {
+      id: novoId('l'), tipo: 'transferencia', valor: Math.round(valorPago * 100) / 100, descricao: `Fatura ${nomeCart(faturaSel.cartaoId)}`,
+      carteiraId: pagaDe, carteiraDestinoId: faturaSel.cartaoId, data: hoje(), fatura: faturaSel.fatura,
+      hora: `${String(agora.getHours()).padStart(2, '0')}:${String(agora.getMinutes()).padStart(2, '0')}`, origem: 'painel',
+    }
+    mut((a) => ({ ...a, lancamentos: [l, ...a.lancamentos] }))
+    avisar(`Pagamento de ${brl(l.valor)} anotado na fatura de ${mesBR(faturaSel.fatura)}`, { rotulo: 'Desfazer', fn: () => mut((a) => ({ ...a, lancamentos: a.lancamentos.filter((x) => x.id !== l.id) })) })
+    setFaturaSel(null)
+  }
 
   const doTipo = useMemo(() => s.contas.filter((c) => c.tipo === tipo).sort((a, b) => (a.vencimento < b.vencimento ? -1 : 1)), [s.contas, tipo])
   const abertas = doTipo.filter((c) => c.status === 'aberta')
@@ -28,13 +59,16 @@ export default function Contas() {
   ].filter((g) => g.itens.length)
 
   const soma = (cs: Conta[]) => cs.reduce((a, c) => a + c.valor, 0)
-  const totalAberto = soma(abertas.filter((c) => c.vencimento <= somaDias(h, 30)))
-  const totalAtraso = soma(abertas.filter((c) => c.vencimento < h))
-  const totalSemana = soma(abertas.filter((c) => c.vencimento >= h && c.vencimento <= somaDias(h, 7)))
+  // Fatura do cartão em aberto também é conta a pagar: entra no resumo pelo vencimento dela.
+  const fatPagar = tipo === 'pagar' ? faturas(s.lancamentos, s.carteiras).filter((f) => f.falta > 0) : []
+  const somaFat = (de: string | null, ate: string) => fatPagar.filter((f) => (de === null || f.vence >= de) && f.vence <= ate).reduce((a, f) => a + f.falta, 0)
+  const totalAberto = soma(abertas.filter((c) => c.vencimento <= somaDias(h, 30))) + somaFat(null, somaDias(h, 30))
+  const totalAtraso = soma(abertas.filter((c) => c.vencimento < h)) + fatPagar.filter((f) => f.vence < h).reduce((a, f) => a + f.falta, 0)
+  const totalSemana = soma(abertas.filter((c) => c.vencimento >= h && c.vencimento <= somaDias(h, 7))) + somaFat(h, somaDias(h, 7))
 
   const verbo = tipo === 'pagar' ? 'paga' : 'recebida'
   const aberta = s.contas.find((c) => c.id === abertaId)
-  const padrao = s.carteiras.find((c) => c.padrao)?.id ?? s.carteiras[0]?.id ?? ''
+  const padrao = s.carteiras.find((c) => c.padrao && c.tipo !== 'cartao' && c.tipo !== 'investimento')?.id ?? s.carteiras.find((c) => c.tipo !== 'cartao' && c.tipo !== 'investimento')?.id ?? ''
 
   const marcar = (c: Conta, carteiraId?: string) => {
     if (c.status === 'paga') {
@@ -106,6 +140,39 @@ export default function Contas() {
           <b className={`num ${tipo === 'receber' ? 'cor-in' : ''}`}>{brl(totalAberto)}</b>
         </div>
       </div>
+
+      {tipo === 'pagar' && abertasCartao.length > 0 && (
+        <section className="card" style={{ paddingBottom: 6 }} aria-label="Faturas do cartão">
+          <div className="card-cab" style={{ marginBottom: 2 }}>
+            <h2>Faturas do cartão</h2>
+            <span className="suave pq num">{brl(abertasCartao.reduce((a, f) => a + f.falta, 0))}</span>
+          </div>
+          <div className="lista">
+            {abertasCartao.map((f) => {
+              const dif = difDias(f.vence, h)
+              return (
+                <button type="button" className="linha" key={f.cartaoId + f.fatura} onClick={() => abrirFatura(f)}>
+                  <div className="selo" style={{ background: '#E7EAF5', color: '#454C83' }}>
+                    <CreditCard size={19} />
+                  </div>
+                  <div className="meio">
+                    <div className="tit">
+                      {nomeCart(f.cartaoId)} · fatura de {mesBR(f.fatura)}
+                    </div>
+                    <div className="det">
+                      <span className={dif < 0 ? 'atraso' : dif === 0 ? 'hoje' : ''}>
+                        {capitaliza(prazo(f.vence))} · {diaCurto(f.vence)}
+                        {f.pago > 0 ? ` · já pagou ${brl(f.pago)}` : ''}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="val num">{brl(f.falta)}</div>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {grupos.length === 0 ? (
         <div className="card">
@@ -222,15 +289,73 @@ export default function Contas() {
                 <div>
                   <span>{aberta.tipo === 'pagar' ? 'Sai de' : 'Entra em'}</span>
                   <select className="entrada" aria-label="Carteira" style={{ width: 'auto', maxWidth: '62%', minHeight: 40, fontSize: 14.5, fontWeight: 620 }} value={carteira} onChange={(e) => setCarteira(e.target.value)}>
-                    {s.carteiras.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nome}
-                      </option>
-                    ))}
+                    {s.carteiras
+                      .filter((c) => c.tipo !== 'investimento' && (aberta.tipo === 'pagar' ? c.tipo !== 'maquininha' : c.tipo !== 'cartao'))
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nome}
+                        </option>
+                      ))}
                   </select>
                 </div>
               )}
             </div>
+          </>
+        )}
+      </Folha>
+      <Folha
+        aberta={!!faturaSel}
+        onFechar={() => setFaturaSel(null)}
+        titulo="Fatura do cartão"
+        pe={
+          faturaSel && (
+            <button type="button" className="btn btn-pri btn-bloco" disabled={!pagaDe || valorPago <= 0} onClick={pagarFatura}>
+              Registrar pagamento de {brl(valorPago)}
+            </button>
+          )
+        }
+      >
+        {faturaSel && (
+          <>
+            <div className="detalhe-valor">
+              <strong className="num">{brl(faturaSel.falta)}</strong>
+              <span className="suave">
+                {nomeCart(faturaSel.cartaoId)} · fatura de {mesBR(faturaSel.fatura)}
+              </span>
+            </div>
+            <div className="fatos">
+              <div>
+                <span>Vencimento</span>
+                <span>{capitaliza(diaExtenso(faturaSel.vence))}</span>
+              </div>
+              <div>
+                <span>Compras</span>
+                <span>
+                  {faturaSel.compras} · {brl(faturaSel.total)}
+                </span>
+              </div>
+              {faturaSel.pago > 0 && (
+                <div>
+                  <span>Já pago</span>
+                  <span className="cor-in">{brl(faturaSel.pago)}</span>
+                </div>
+              )}
+              <div>
+                <span>Sai de</span>
+                <select className="entrada" aria-label="Conta que paga" style={{ width: 'auto', maxWidth: '62%', minHeight: 40, fontSize: 14.5, fontWeight: 620 }} value={pagaDe} onChange={(e) => setPagaDe(e.target.value)}>
+                  {contasQuePagam.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ borderBottom: 0 }}>
+                <span>Valor pago</span>
+                <input className="entrada num" inputMode="numeric" aria-label="Valor pago" style={{ width: 140, minHeight: 40, textAlign: 'right' }} value={dinheiroCampo(valorPago)} onChange={(e) => setValorPago(centavosDe(e.target.value))} />
+              </div>
+            </div>
+            <p className="suave pq" style={{ marginTop: 10 }}>As compras desta fatura entram nos gastos no dia do pagamento, cada uma na sua categoria. Pagou só uma parte? Ajuste o valor: o resto continua em aberto.</p>
           </>
         )}
       </Folha>

@@ -1,5 +1,17 @@
+import { efetivos, foraDoDisponivel } from './cartao'
 import { diasNoMes, hoje, mesCurto, mesDe, somaMeses } from './format'
 import type { Categoria, Estado, Lancamento } from './tipos'
+
+/**
+ * Lançamentos como contam no CAIXA: compra no cartão sai daqui e volta como gasto no dia em que a fatura é paga.
+ * Use para entrou, saiu, sobrou, séries e categorias. A lista crua (s.lancamentos) é só para mostrar os registros.
+ */
+export const caixa = (s: Pick<Estado, 'lancamentos' | 'carteiras'>): Lancamento[] => efetivos(s.lancamentos, s.carteiras)
+
+/** Dinheiro disponível: soma das contas, sem cartão (é dívida) nem investimento (é guardado). */
+export function disponivel(s: Estado, sal = saldos(s)) {
+  return s.carteiras.filter((c) => !foraDoDisponivel(c.tipo)).reduce((a, c) => a + (sal[c.id] ?? 0), 0)
+}
 
 export interface Totais {
   entrou: number

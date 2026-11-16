@@ -180,7 +180,7 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
           {c.situacao === 'trial' && <div><span>Teste até</span><span>{dataBR(c.trial_fim)}</span></div>}
           {c.motivo && <div><span>Último motivo</span><span>{c.motivo}</span></div>}
           <div><span>Cadastro</span><span>{dataHora(c.criado_em)}</span></div>
-          <div><span>Boas-vindas</span><span>{c.onboarding_feito ? 'terminou' : `parou no passo ${c.onboarding_passo + 1} de 6`}</span></div>
+          <div><span>Boas-vindas</span><span>{c.onboarding_feito ? 'terminou' : `parou no passo ${c.onboarding_passo + 1} de 7`}</span></div>
           <div><span>Lançamentos</span><span className="num">{c.lancamentos}</span></div>
         </div>
 

@@ -6,9 +6,9 @@
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, sb, usoDoMes } from './banco.ts'
 import { executar, reverter, ultimaComEfeito, type Efeitos, type Origem } from './executar.ts'
 import { baixarMidia } from './gateway.ts'
-import { conferir, interpretar, type Acao, type Contexto } from './interpretar.ts'
+import { BOLETO, conferir, interpretar, opcaoEscolhida, type Acao, type Contexto, type Opcao } from './interpretar.ts'
 import { lerDocumento, textoDoDocumento, type Transacao } from './midia.ts'
-import { transcrever } from './openai.ts'
+import { transcrever, type Uso } from './openai.ts'
 import { responderPergunta } from './perguntas.ts'
 
 export const LIMITE_LANCAMENTOS = Number(process.env.LIMITE_LANCAMENTOS ?? 300)
@@ -81,7 +81,7 @@ export async function processar(ev: EventoGateway): Promise<Saida> {
 
   const tipo = tipoDaMensagem(d)
   const t0 = Date.now()
-  let tokens = 0
+  let tokens: Uso = { entrada: 0, saida: 0, audio: 0 }
 
   // Registro com o id do WhatsApp: se a mesma mensagem chegar de novo, para aqui.
   const ins = await sb.from('mensagens').insert({ id: msgId, telefone, tipo: tipo === 'outro' ? 'outro' : tipo, texto: (d.content ?? d.caption ?? '').slice(0, 2000) })
@@ -134,7 +134,10 @@ export async function processar(ev: EventoGateway): Promise<Saida> {
     console.error('[granninha]', msgId, erro)
   }
 
-  const up = await sb.from('mensagens').update({ user_id: userId, intencao, status, resposta, efeitos, erro, texto: textoFinal.slice(0, 2000), ms: Date.now() - t0, tokens }).eq('id', msgId)
+  const up = await sb.from('mensagens').update({
+    user_id: userId, intencao, status, resposta, efeitos, erro, texto: textoFinal.slice(0, 2000), ms: Date.now() - t0,
+    tokens: tokens.entrada + tokens.saida, tokens_entrada: tokens.entrada, tokens_saida: tokens.saida, audio_tokens: tokens.audio || null, audio_seg: tokens.audioSeg ?? null,
+  }).eq('id', msgId)
   if (up.error) console.error('[granninha] atualizar mensagem', up.error.message)
   return { status, para: telefone, resposta }
 }
@@ -178,24 +181,32 @@ interface Conversa {
   efeitos: Efeitos
   intencao: string | null
   texto: string
-  tokens: number
+  tokens: Uso
 }
 
 async function conversar(cliente: { id: string; nome: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string): Promise<Conversa> {
-  let tokens = 0
+  const tokens: Uso = { entrada: 0, saida: 0, audio: 0 }
+  const soma = (u: Uso) => {
+    tokens.entrada += u.entrada
+    tokens.saida += u.saida
+    tokens.audio = (tokens.audio ?? 0) + (u.audio ?? 0)
+    if (u.audioSeg) tokens.audioSeg = (tokens.audioSeg ?? 0) + u.audioSeg
+  }
   let texto = (d.content ?? '').trim()
   let anexo: string | null = null
   const nome = cliente.nome.split(' ')[0]
 
   // Pergunta em aberto (ex.: "qual foi o valor?") ou importação de extrato esperando um sim.
   const { data: conv } = await sb.from('conversas').select('pendente,atualizado_em').eq('telefone', telefone).maybeSingle()
-  const pend = conv?.pendente as { tipo?: string; texto?: string; pergunta?: string; transacoes?: Transacao[] } | null
+  const pend = conv?.pendente as { tipo?: string; texto?: string; pergunta?: string; transacoes?: Transacao[]; opcoes?: Opcao[]; anexo?: string } | null
   const fresco = conv && Date.now() - new Date(conv.atualizado_em).getTime() < 30 * 60_000
   if (pend?.tipo) await sb.from('conversas').update({ pendente: null, atualizado_em: new Date().toISOString() }).eq('telefone', telefone)
 
   if (tipo === 'audio') {
     const m = await baixarMidia(d.fileUrl ?? '')
-    texto = await transcrever(m.buffer, m.mime)
+    const tr = await transcrever(m.buffer, m.mime)
+    texto = tr.texto
+    soma(tr.uso)
   } else if (tipo === 'foto' || tipo === 'pdf') {
     const m = await baixarMidia(d.fileUrl ?? '')
     const ext = tipo === 'pdf' ? 'pdf' : m.mime.includes('png') ? 'png' : 'jpg'
@@ -203,17 +214,21 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     const upl = await sb.storage.from('comprovantes').upload(anexo, m.buffer, { contentType: tipo === 'pdf' ? 'application/pdf' : m.mime, upsert: true })
     falhou(upl.error, 'guardar comprovante')
     const { leitura, uso } = await lerDocumento(m.buffer, tipo === 'pdf' ? 'application/pdf' : m.mime, d.caption ?? '')
-    tokens += uso.entrada + uso.saida
+    soma(uso)
     if (!leitura.transacoes.length) {
       return { status: 'pergunta', resposta: 'Não consegui ver um valor nesse arquivo. Me diz o que foi e o valor?', efeitos: {}, intencao: 'documento', texto: leitura.resumo, tokens }
     }
     if (leitura.tipo === 'extrato' && leitura.transacoes.length > 1) {
       const ent = leitura.transacoes.filter((t) => t.movimento === 'entrada').reduce((a, t) => a + t.valor, 0)
       const sai = leitura.transacoes.filter((t) => t.movimento === 'saida').reduce((a, t) => a + t.valor, 0)
-      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'importar', transacoes: leitura.transacoes, anexo }, atualizado_em: new Date().toISOString() })
+      const bancos = (await contextoDe(cliente.id, hoje)).carteiras.filter((c) => c.tipo === 'banco')
+      const opcoes = bancos.length > 1 ? bancos.map((c) => ({ id: c.id, nome: c.nome })) : undefined
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'importar', transacoes: leitura.transacoes, anexo, opcoes }, atualizado_em: new Date().toISOString() })
       return {
         status: 'pergunta',
-        resposta: `Achei ${leitura.transacoes.length} lançamentos nesse extrato: ${brl(ent)} de entradas e ${brl(sai)} de saídas.\n\nQuer que eu importe? Responda SIM ou NÃO.`,
+        resposta: `Achei ${leitura.transacoes.length} lançamentos nesse extrato: ${brl(ent)} de entradas e ${brl(sai)} de saídas.\n\n` + (opcoes
+          ? `Quer que eu importe? Responda com o número da conta deste extrato, ou NÃO:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`
+          : 'Quer que eu importe? Responda SIM ou NÃO.'),
         efeitos: {}, intencao: 'extrato', texto: leitura.resumo, tokens,
       }
     }
@@ -223,20 +238,38 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   const ctx = await contextoDe(cliente.id, hoje)
 
   if (pend?.tipo === 'importar' && fresco) {
-    if (/^\s*(sim|s|pode|importa|ok|isso|manda)\b/i.test(texto)) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, (pend as { anexo?: string }).anexo ?? null, tokens)
     if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei nada.', efeitos: {}, intencao: 'extrato', texto, tokens }
+    if (pend.opcoes?.length) {
+      const esc = opcaoEscolhida(texto, pend.opcoes)
+      if (esc) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens, esc.id)
+      if (/^\s*(sim|s|pode|importa|ok|isso|manda|\d+)\b/i.test(texto)) {
+        await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
+        return { status: 'pergunta', resposta: `De qual conta é esse extrato? Responda com o número:\n${pend.opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, efeitos: {}, intencao: 'extrato', texto, tokens }
+      }
+    } else if (/^\s*(sim|s|pode|importa|ok|isso|manda)\b/i.test(texto)) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens)
   }
-  if (pend?.tipo === 'pergunta' && fresco && pend.texto) texto = `${pend.texto}\n(resposta para "${pend.pergunta}"): ${texto}`
+  // Resposta a uma pergunta de forma de pagamento: o número (ou o nome) escolhe a carteira no código, sem depender da IA.
+  let forcarCarteira: string | undefined
+  if (pend?.tipo === 'pergunta' && fresco && pend.texto) {
+    const esc = pend.opcoes?.length ? opcaoEscolhida(texto, pend.opcoes) : null
+    if (pend.opcoes?.length && !esc && /^\s*\d{1,2}\s*$/.test(texto)) {
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
+      return { status: 'pergunta', resposta: `Não achei essa opção. ${pend.pergunta}`, efeitos: {}, intencao: 'acoes', texto, tokens }
+    }
+    if (esc) forcarCarteira = esc.id
+    texto = `${pend.texto}\n(resposta para "${(pend.pergunta ?? '').split('\n')[0]}"): ${esc ? (esc.id === BOLETO ? 'no boleto ou carnê' : esc.nome) : texto}`
+  }
 
-  const it = await interpretar(texto, ctx)
-  tokens += it.uso.entrada + it.uso.saida
+  const it = await interpretar(texto, ctx, { forcarCarteira })
+  soma(it.uso)
 
   if (it.intencao === 'acoes') {
     if (it.perguntar) {
-      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta: it.perguntar }, atualizado_em: new Date().toISOString() })
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta: it.perguntar, opcoes: it.opcoes }, atualizado_em: new Date().toISOString() })
       return { status: 'pergunta', resposta: it.perguntar, efeitos: {}, intencao: 'acoes', texto, tokens }
     }
-    const r = await executar(cliente.id, ctx, it.acoes, tipo, anexo)
+    const anteriores = it.acoes.some((a) => a.tipo_acao === 'criar_categoria') ? (await ultimaComEfeito(cliente.id))?.efeitos : undefined
+    const r = await executar(cliente.id, ctx, it.acoes, tipo, anexo, anteriores)
     return { status: 'ok', resposta: `${r.linhas.join('\n\n')}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
   }
   if (it.intencao === 'desfazer') {
@@ -251,7 +284,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     if (!ult) return { status: 'ok', resposta: 'Não achei o lançamento para corrigir. Me manda de novo do jeito certo?', efeitos: {}, intencao: 'corrigir', texto, tokens }
     const novo = `${ult.texto}\nCorreção: ${it.correcao ?? texto}`
     const it2 = await interpretar(novo, ctx)
-    tokens += it2.uso.entrada + it2.uso.saida
+    soma(it2.uso)
     if (it2.intencao !== 'acoes' || it2.perguntar || !it2.acoes.length) {
       return { status: 'pergunta', resposta: it2.perguntar ?? 'Não entendi a correção. Responda DESFAZER e me mande de novo do jeito certo.', efeitos: {}, intencao: 'corrigir', texto, tokens }
     }
@@ -262,7 +295,8 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   }
   if (it.intencao === 'pergunta') {
     const p = await responderPergunta(cliente.id, hoje, it.pergunta ?? texto)
-    return { status: 'ok', resposta: p.texto, efeitos: {}, intencao: 'pergunta', texto, tokens: tokens + p.uso.entrada + p.uso.saida }
+    soma(p.uso)
+    return { status: 'ok', resposta: p.texto, efeitos: {}, intencao: 'pergunta', texto, tokens }
   }
   if (it.intencao === 'saudacao') return { status: 'ok', resposta: `Oi${nome ? `, ${nome}` : ''}! Me manda o que entrou ou saiu que eu anoto. Pode ser texto, áudio ou foto do comprovante.`, efeitos: {}, intencao: 'saudacao', texto, tokens }
   if (it.intencao === 'ajuda') return { status: 'ok', resposta: AJUDA, efeitos: {}, intencao: 'ajuda', texto, tokens }
@@ -270,11 +304,11 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
 }
 
 /** Importa as transações de um extrato depois do SIM. Pula as que já existem (mesmo dia, valor e direção). */
-async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Origem, anexo: string | null, tokens: number): Promise<Conversa> {
+async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Origem, anexo: string | null, tokens: Uso, carteira?: string): Promise<Conversa> {
   const { data: ja, error } = await sb.from('lancamentos').select('data,valor,tipo').eq('user_id', userId).gte('data', ts.map((t) => t.data ?? ctx.hoje).sort()[0])
   falhou(error, 'extrato: duplicados')
   const existe = new Set((ja ?? []).map((l) => `${l.data}|${Number(l.valor).toFixed(2)}|${l.tipo}`))
-  const padrao = ctx.carteiras.find((c) => c.padrao)?.id ?? ctx.carteiras[0]?.id ?? ''
+  const padrao = carteira ?? ctx.carteiras.find((c) => c.tipo === 'banco' && c.padrao)?.id ?? ctx.carteiras.find((c) => c.tipo === 'banco')?.id ?? ctx.carteiras.find((c) => c.padrao)?.id ?? ctx.carteiras[0]?.id ?? ''
   const acoes: Acao[] = []
   let pulou = 0
   for (const t of ts) {
@@ -285,8 +319,8 @@ async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Or
     }
     const base = conferir(`${t.valor.toFixed(2).replace('.', ',')}`, ctx, {
       intencao: 'acoes', pergunta: null, correcao: null, falta: null,
-      acoes: [{ tipo_acao: 'lancamento', movimento: t.movimento, valor: t.valor, descricao: t.descricao, categoria_id: null, carteira_id: padrao, carteira_destino_id: null, data, pessoal: false, vencimento: null, dia_do_mes: null, parcelas: null, conta_id: null }],
-    })
+      acoes: [{ tipo_acao: 'lancamento', movimento: t.movimento, valor: t.valor, descricao: t.descricao, categoria_id: null, carteira_id: padrao, carteira_destino_id: null, meio: null, data, pessoal: false, vencimento: null, dia_do_mes: null, parcelas: null, conta_id: null }],
+    }, { perguntarMeio: false })
     acoes.push(...base.acoes)
   }
   if (!acoes.length) return { status: 'ok', resposta: `Todos os ${ts.length} lançamentos desse extrato já estavam anotados.`, efeitos: {}, intencao: 'extrato', texto: 'importar extrato', tokens }

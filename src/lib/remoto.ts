@@ -10,8 +10,16 @@ import type { Carteira, Categoria, Conta, Estado, Fixa, Lancamento, StatusAssina
 
 type Linha = Record<string, unknown>
 
-const paraCarteira = (c: Carteira): Linha => ({ id: c.id, nome: c.nome, tipo: c.tipo, saldo_inicial: c.saldoInicial, padrao: c.padrao })
-const deCarteira = (r: Linha): Carteira => ({ id: r.id as string, nome: r.nome as string, tipo: r.tipo as Carteira['tipo'], saldoInicial: Number(r.saldo_inicial), padrao: !!r.padrao })
+const paraCarteira = (c: Carteira): Linha => ({
+  id: c.id, nome: c.nome, tipo: c.tipo, saldo_inicial: c.saldoInicial, padrao: c.padrao,
+  fechamento: c.tipo === 'cartao' ? c.fechamento ?? null : null, vencimento: c.tipo === 'cartao' ? c.vencimento ?? null : null,
+  conta_pagamento_id: c.tipo === 'cartao' ? c.contaPagamentoId ?? null : null, limite: c.tipo === 'cartao' ? c.limite ?? null : null,
+})
+const deCarteira = (r: Linha): Carteira => ({
+  id: r.id as string, nome: r.nome as string, tipo: r.tipo as Carteira['tipo'], saldoInicial: Number(r.saldo_inicial), padrao: !!r.padrao,
+  fechamento: r.fechamento != null ? Number(r.fechamento) : undefined, vencimento: r.vencimento != null ? Number(r.vencimento) : undefined,
+  contaPagamentoId: (r.conta_pagamento_id as string) ?? undefined, limite: r.limite != null ? Number(r.limite) : undefined,
+})
 
 const paraCategoria = (c: Categoria): Linha => ({ id: c.id, nome: c.nome, tipo: c.tipo, cor: c.cor, natureza: c.natureza ?? null, pessoal: !!c.pessoal })
 const deCategoria = (r: Linha): Categoria => ({ id: r.id as string, nome: r.nome as string, tipo: r.tipo as Categoria['tipo'], cor: r.cor as string, natureza: (r.natureza as Categoria['natureza']) ?? undefined, pessoal: r.pessoal ? true : undefined })
@@ -20,12 +28,14 @@ const deCategoria = (r: Linha): Categoria => ({ id: r.id as string, nome: r.nome
 const paraLancamento = (l: Lancamento): Linha => ({
   id: l.id, tipo: l.tipo, valor: l.valor, descricao: l.descricao, categoria_id: l.categoriaId ?? null, carteira_id: l.carteiraId,
   carteira_destino_id: l.carteiraDestinoId ?? null, data: l.data, hora: l.hora, origem: l.origem, pessoal: !!l.pessoal,
+  fatura: l.fatura ?? null, parcela_n: l.parcela?.n ?? null, parcela_total: l.parcela?.total ?? null,
 })
 const deLancamento = (r: Linha): Lancamento => ({
   id: r.id as string, tipo: r.tipo as Lancamento['tipo'], valor: Number(r.valor), descricao: r.descricao as string,
   categoriaId: (r.categoria_id as string) ?? undefined, carteiraId: r.carteira_id as string, carteiraDestinoId: (r.carteira_destino_id as string) ?? undefined,
   data: r.data as string, hora: r.hora as string, origem: r.origem as Lancamento['origem'], anexo: r.anexo_path ? true : undefined,
-  anexoPath: (r.anexo_path as string) ?? undefined, pessoal: r.pessoal ? true : undefined,
+  anexoPath: (r.anexo_path as string) ?? undefined, pessoal: r.pessoal ? true : undefined, fatura: (r.fatura as string) ?? undefined,
+  parcela: r.parcela_n && r.parcela_total ? { n: Number(r.parcela_n), total: Number(r.parcela_total) } : undefined,
 })
 
 const paraFixa = (f: Fixa): Linha => ({ id: f.id, descricao: f.descricao, valor: f.valor, dia: f.dia, categoria_id: f.categoriaId ?? null, das: !!f.das })
@@ -95,7 +105,7 @@ export async function carregar(email: string): Promise<Estado> {
   return {
     versao: VERSAO,
     sessao: { logado: true, onboarding: !!p.onboarding_feito, demo: false, passo: Number(p.onboarding_passo ?? 0) },
-    usuario: { nome: (p.nome as string) ?? '', email, negocio: (p.negocio as string) ?? '', cnpj: (p.cnpj as string) ?? '', whats: (p.whats as string) ?? '', ramo, verificado: !!p.whats_verificado },
+    usuario: { nome: (p.nome as string) ?? '', email, negocio: (p.negocio as string) ?? '', cnpj: (p.cnpj as string) ?? '', whats: (p.whats as string) ?? '', ramo, verificado: !!p.whats_verificado, foto: (p.foto_path as string) ?? undefined },
     carteiras: carteiras.map(deCarteira),
     categorias: categorias.length ? categorias.map(deCategoria) : categoriasPadrao(ramo || 'outro'),
     lancamentos: lancs.map(deLancamento).sort((x, y) => (x.data + x.hora < y.data + y.hora ? 1 : -1)),
@@ -141,6 +151,36 @@ export async function enviar(antes: Estado, depois: Estado, userId: string) {
   await gravaLista('fixas', antes.fixas, depois.fixas, paraFixa)
   await gravaLista('lancamentos', antes.lancamentos, depois.lancamentos, paraLancamento)
   await gravaLista('contas', antes.contas, depois.contas, paraConta)
+}
+
+/** Sobe a foto de perfil para a pasta privada do cliente (avatares/<user_id>/...) e grava o caminho no perfil. */
+export async function enviarFoto(foto: Blob, anterior?: string): Promise<string> {
+  const sb = supabase!
+  const { data, error: e1 } = await sb.auth.getUser()
+  erro(e1)
+  const id = data.user!.id
+  const path = `${id}/foto-${Date.now()}.jpg`
+  erro((await sb.storage.from('avatares').upload(path, foto, { contentType: 'image/jpeg', upsert: true })).error)
+  erro((await sb.from('perfis').update({ foto_path: path }).eq('id', id)).error)
+  // A foto antiga sai da pasta (falhar aqui não atrapalha: a nova já está no perfil).
+  if (anterior && anterior.startsWith(id + '/')) await sb.storage.from('avatares').remove([anterior])
+  return path
+}
+
+/** Tira a foto de perfil. */
+export async function removerFoto(anterior?: string) {
+  const sb = supabase!
+  const { data, error: e1 } = await sb.auth.getUser()
+  erro(e1)
+  const id = data.user!.id
+  erro((await sb.from('perfis').update({ foto_path: null }).eq('id', id)).error)
+  if (anterior && anterior.startsWith(id + '/')) await sb.storage.from('avatares').remove([anterior])
+}
+
+/** Endereço temporário (1 hora) para mostrar a foto de perfil, que fica em pasta privada. */
+export async function linkFoto(path: string): Promise<string | null> {
+  const { data, error } = await supabase!.storage.from('avatares').createSignedUrl(path, 3600)
+  return error ? null : data.signedUrl
 }
 
 /** Endereço temporário (10 minutos) para abrir um comprovante guardado. */
