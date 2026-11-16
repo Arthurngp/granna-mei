@@ -16,6 +16,8 @@ export default function Assinatura() {
   const [cancelar, setCancelar] = useState(false)
   const uso = usoDoMes(s, mesAtual())
   const economia = PRECO_MENSAL * 12 - PRECO_ANUAL
+  // Quantas mensalidades inteiras a economia paga (arredonda para baixo: nunca promete mais que o real).
+  const mesesGratis = Math.floor(economia / PRECO_MENSAL + 1e-9)
   const diasTrial = Math.max(0, difDias(a.trialFim, hoje()))
 
   const situacao = {
@@ -108,7 +110,7 @@ export default function Assinatura() {
             <div className="cresce">
               <b>Anual</b>
               <small>
-                <span className="economia">Economize {brl(economia)}</span>, sai por {brl(PRECO_ANUAL / 12)} ao mês
+                <span className="economia">Economize {brl(economia)}</span> ({mesesGratis} meses gratuitamente)
               </small>
             </div>
             <div className="preco num">
