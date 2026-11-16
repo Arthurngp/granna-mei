@@ -50,7 +50,7 @@ export function ConfirmarWhats({ compacto }: { compacto?: boolean }) {
             </div>
             <div style={{ fontSize: 12.5 }}>vale por 30 minutos</div>
           </div>
-          <a className="btn btn-wa btn-bloco" href={linkWhats(`Meu código Granna Mei: ${codigo}`)} target="_blank" rel="noopener noreferrer">
+          <a className="btn btn-wa btn-bloco" href={linkWhats(`Meu código Granninha: ${codigo}`)} target="_blank" rel="noopener noreferrer">
             <MessageCircle size={18} />
             Abrir o WhatsApp e enviar
           </a>

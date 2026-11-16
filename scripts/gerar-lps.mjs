@@ -63,7 +63,7 @@ function montarLp(lp) {
 // ---------- 2. SEO de cauda longa: cabeçalho indexável, guia e dados estruturados ----------
 function aplicarSeo(s, chave, seo) {
   const url = `${BASE}/mei/${seo.slug}`
-  s = trocaRe(s, /<title>.*?<\/title>/, `<title>${esc(seo.titulo)} | Granna Mei</title>`)
+  s = trocaRe(s, /<title>.*?<\/title>/, `<title>${esc(seo.titulo)} | Granninha</title>`)
   s = trocaRe(s, /<meta name="description" content="[^"]*" \/>/, `<meta name="description" content="${esc(seo.desc)}" />`)
   s = trocaRe(s, /<meta name="robots" content="[^"]*" \/>\n(<link rel="canonical"[^>]*>\n)?/, `<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />\n<link rel="canonical" href="${url}" />\n`)
   s = trocaRe(s, /<meta property="og:url" content="[^"]*" \/>/, `<meta property="og:url" content="${url}" />`)
@@ -95,7 +95,7 @@ ${ps.map((p) => `      <p>${esc(p)}</p>`).join('\n')}
       { '@type': 'ListItem', position: 2, name: 'Guias para MEI', item: `${BASE}/mei/` },
       { '@type': 'ListItem', position: 3, name: seo.titulo, item: url }] }) +
     ld({ '@context': 'https://schema.org', '@type': 'Article', headline: seo.titulo, description: seo.desc, inLanguage: 'pt-BR', mainEntityOfPage: url,
-      dateModified: HOJE, author: { '@type': 'Organization', name: 'Granna Mei', url: `${BASE}/` }, publisher: { '@type': 'Organization', name: 'Granna Mei', logo: { '@type': 'ImageObject', url: `${BASE}/img/logo-512.png` } } }) +
+      dateModified: HOJE, author: { '@type': 'Organization', name: 'Granninha', url: `${BASE}/` }, publisher: { '@type': 'Organization', name: 'Granninha', logo: { '@type': 'ImageObject', url: `${BASE}/img/logo-512.png` } } }) +
     ld({ '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: perguntas })
   s = troca(s, '</head>', dados + '</head>')
   return s
@@ -122,7 +122,7 @@ const GRUPOS = [
 const usados = GRUPOS.flatMap((g) => g[1])
 if (usados.length !== paginas.length || new Set(usados).size !== paginas.length) throw new Error('página de guias não lista todas as páginas uma vez')
 let hub = ler('documentacao.html')
-hub = trocaRe(hub, /<title>.*?<\/title>/, '<title>Guias do financeiro do MEI | Granna Mei</title>')
+hub = trocaRe(hub, /<title>.*?<\/title>/, '<title>Guias do financeiro do MEI | Granninha</title>')
 hub = trocaRe(hub, /<meta name="description" content="[^"]*" \/>/, '<meta name="description" content="Guias curtos e diretos sobre o financeiro do MEI: lucro, limite de faturamento, DAS, contas, cartão, comprovantes e controle por tipo de negócio." />')
 hub = trocaRe(hub, /<link rel="canonical" href="[^"]*" \/>/, `<link rel="canonical" href="${BASE}/mei/" />`)
 hub = trocaRe(hub, /<meta property="og:url" content="[^"]*" \/>/, `<meta property="og:url" content="${BASE}/mei/" />`)
@@ -137,7 +137,7 @@ hub = troca(hub, '</head>',
   ld({ '@context': 'https://schema.org', '@type': 'ItemList', name: 'Guias do financeiro do MEI', itemListElement: paginas.map((p, i) => ({ '@type': 'ListItem', position: i + 1, url: `${BASE}/mei/${p.slug}`, name: p.titulo })) }) +
   '</head>')
 hub = troca(hub, '<div class="migalha"><a href="/">Início</a> / Como funciona</div>', '<div class="migalha"><a href="/">Início</a> / Guias para MEI</div>')
-hub = troca(hub, '<h1>Como funciona o Granna Mei</h1>', '<h1>Guias do financeiro do MEI</h1>')
+hub = troca(hub, '<h1>Como funciona a Granninha</h1>', '<h1>Guias do financeiro do MEI</h1>')
 hub = trocaRe(hub, /(<h1>Guias do financeiro do MEI<\/h1>\n\s*<p>).*?(<\/p>)/s, '$1Respostas diretas para as dúvidas de dinheiro de quem é MEI: lucro, limite, DAS, contas, comprovantes e o controle de cada tipo de negócio.$2')
 const porChave = Object.fromEntries(paginas.map((p) => [p.chave, p]))
 const corpo = `<div class="wrap doc">

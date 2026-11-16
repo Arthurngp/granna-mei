@@ -1,4 +1,4 @@
-// Copy das LPs de anúncio do Granna Mei (lp4 a lp33). Cada uma ataca uma dor do MEI.
+// Copy das LPs de anúncio da Granninha (lp4 a lp33). Cada uma ataca uma dor do MEI.
 // Gere as páginas com: node scripts/gerar-lps.mjs  (molde: site/index.html)
 // Regra: só prometer o que o produto já faz. Mensagens da Granninha seguem o formato real dela.
 

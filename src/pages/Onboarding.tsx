@@ -555,7 +555,7 @@ export default function Onboarding() {
                 <>
                   <a
                     className="btn btn-wa btn-bloco"
-                    href={linkWhats(codigo ? `Meu código Granna Mei: ${codigo}` : 'Oi, Granninha!')}
+                    href={linkWhats(codigo ? `Meu código Granninha: ${codigo}` : 'Oi, Granninha!')}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={() => {

@@ -13,6 +13,8 @@ caso('tira link de fora e mantém o nosso', () => {
   const r = limparSaida('Pague em https://pagar-granna.com agora. Seu painel: https://grannamei.amplasoft.me/painel')
   assert.ok(!r.texto.includes('pagar-granna'))
   assert.ok(r.texto.includes('https://grannamei.amplasoft.me/painel'))
+  const n = limparSaida('Seu painel: https://granninha.amplasoft.me/painel')
+  assert.ok(n.texto.includes('https://granninha.amplasoft.me/painel'), 'domínio novo não pode ser apagado')
   assert.equal(r.limpou, true)
 })
 caso('tira link sem https (golpe.com.br/x, www.x.com)', () => {

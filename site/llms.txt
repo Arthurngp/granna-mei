@@ -1,6 +1,6 @@
-# Granna Mei
+# Granninha
 
-> Controle financeiro para MEI (microempreendedor individual) pelo WhatsApp. A pessoa manda uma mensagem, um áudio, a foto do comprovante ou um PDF para a assistente Granninha, que lança entradas e gastos, separa o que é da casa e o que é do negócio, lembra das contas a pagar e acompanha o limite de faturamento anual do MEI (R$ 81 mil). Produto da Amplasoft (AMPLASOFT INTELIGENCIA COMERCIAL LTDA, CNPJ 65.782.493/0001-04).
+> Controle financeiro para MEI (microempreendedor individual) pelo WhatsApp. A pessoa manda uma mensagem, um áudio, a foto do comprovante ou um PDF para a assistente Granninha, que lança entradas e gastos, separa o que é da casa e o que é do negócio, lembra das contas a pagar e acompanha o limite de faturamento anual do MEI (R$ 81 mil). Instagram: @granninha (https://www.instagram.com/granninha/). Produto da Amplasoft (AMPLASOFT INTELIGENCIA COMERCIAL LTDA, CNPJ 65.782.493/0001-04).
 
 - Site: https://grannamei.amplasoft.me/
 - Criar conta: https://grannamei.amplasoft.me/painel/criar-conta

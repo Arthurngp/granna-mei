@@ -151,7 +151,7 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
     falhou(error, 'verificação')
     if (v) {
       const up = await sb.from('perfis').update({ whats: formatarNumero(jid), whats_verificado: true }).eq('id', v.user_id).select('nome').single()
-      if (up.error?.code === '23505') return { status: 'ignorada', resposta: 'Este número já está ligado a outra conta do Granna Mei. Se for engano, fala com a gente pelo painel.', userId: v.user_id }
+      if (up.error?.code === '23505') return { status: 'ignorada', resposta: 'Este número já está ligado a outra conta da Granninha. Se for engano, fala com a gente pelo painel.', userId: v.user_id }
       falhou(up.error, 'confirmar número')
       await sb.from('verificacoes').delete().eq('user_id', v.user_id)
       const nome = (up.data?.nome ?? '').split(' ')[0]
@@ -175,7 +175,7 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
     status: 'ignorada',
     resposta: codigo
       ? `Esse código não confere ou já venceu. Gere um novo no painel em ${PAINEL()} e me mande de novo.`
-      : `Oi! Eu sou a Granninha, do Granna Mei. Eu organizo o dinheiro do seu MEI aqui pelo WhatsApp.\n\nPara começar, crie sua conta (${hojeSP() <= '2026-11-30' ? 'grátis até 31 de dezembro' : '7 dias grátis'}): ${PAINEL()}/criar-conta`,
+      : `Oi! Eu sou a Granninha. Eu organizo o dinheiro do seu MEI aqui pelo WhatsApp.\n\nPara começar, crie sua conta (${hojeSP() <= '2026-11-30' ? 'grátis até 31 de dezembro' : '7 dias grátis'}): ${PAINEL()}/criar-conta`,
     userId: null,
   }
 }

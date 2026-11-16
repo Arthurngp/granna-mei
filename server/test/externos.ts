@@ -63,7 +63,7 @@ await caso('nem com código errado', async () => {
   assert.equal(r.resposta ?? '', '')
 })
 await caso('código válido (cliente que criou a conta no site) continua confirmando o número', async () => {
-  const r = await msg(`Meu código Granna Mei: ${CODIGO_VALIDO}`)
+  const r = await msg(`Meu código Granninha: ${CODIGO_VALIDO}`)
   assert.equal(r.status, 'ok')
   assert.match(r.resposta ?? '', /confirmado/)
 })

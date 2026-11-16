@@ -42,7 +42,7 @@ export default function App() {
       <Centro>
         <Mascote pose="escudo" tam={120} />
         <h1 style={{ fontSize: 22 }}>Esta conta não é de admin</h1>
-        <p className="suave">O painel admin é só para a equipe do Granna Mei.</p>
+        <p className="suave">O painel admin é só para a equipe da Granninha.</p>
         <button type="button" className="btn btn-sec" onClick={sair}>
           Sair
         </button>
@@ -56,7 +56,7 @@ export default function App() {
         <div className="linha1">
           <img src={`${import.meta.env.BASE_URL}logo-96.png`} alt="" />
           <div className="cresce">
-            <b>Granna Mei</b> <small>Admin</small>
+            <b>Granninha</b> <small>Admin</small>
           </div>
           <button type="button" onClick={sair}>
             Sair
@@ -111,8 +111,8 @@ function Entrar({ pronto }: { pronto: () => void }) {
   }
   return (
     <Centro>
-      <img src={`${import.meta.env.BASE_URL}logo-192.png`} alt="Granna Mei" style={{ width: 72, height: 72, borderRadius: '50%' }} />
-      <h1 style={{ fontSize: 24 }}>Admin do Granna Mei</h1>
+      <img src={`${import.meta.env.BASE_URL}logo-192.png`} alt="Granninha" style={{ width: 72, height: 72, borderRadius: '50%' }} />
+      <h1 style={{ fontSize: 24 }}>Admin da Granninha</h1>
       <form className="card pilha" onSubmit={enviar} noValidate>
         <label className="campo">
           <span>E-mail</span>
@@ -145,7 +145,7 @@ function SegundaEtapa({ ativar, pronto, sair }: { ativar: boolean; pronto: () =>
       // Limpa tentativas de cadastro que ficaram pela metade antes de criar uma nova.
       const f = await sb.auth.mfa.listFactors()
       for (const x of f.data?.all ?? []) if (x.status !== 'verified') await sb.auth.mfa.unenroll({ factorId: x.id })
-      const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Admin Granna Mei' })
+      const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Admin Granninha' })
       if (error || !data) return setErro('Não consegui iniciar a segunda etapa: ' + (error?.message ?? ''))
       setFator({ id: data.id, qr: data.totp.qr_code, segredo: data.totp.secret })
     })()

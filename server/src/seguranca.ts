@@ -5,8 +5,8 @@
  * - texto escrito pelo cliente (ou lido de um comprovante) entra no banco e nos próximos prompts limpo e curto.
  */
 
-/** Único endereço que a Granninha pode mandar. */
-const DOMINIOS_NOSSOS = ['grannamei.amplasoft.me']
+/** Únicos endereços que a Granninha pode mandar (o antigo segue valendo durante a troca de domínio). */
+const DOMINIOS_NOSSOS = ['granninha.amplasoft.me', 'grannamei.amplasoft.me']
 
 const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"')]+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|xyz|me|br|app|link|site|online|info|biz|co|ly|gl|to|club|shop|store|top|live)(?:\.br)?\b(?:\/[^\s<>"')]*)?/gi
 const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+/gi

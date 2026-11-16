@@ -1,5 +1,5 @@
 /**
- * Cliente do gateway WA-AKG próprio do Granna Mei (nunca o do NGP Space nem o do Mattilha).
+ * Cliente do gateway WA-AKG próprio da Granninha (nunca o do NGP Space nem o do Mattilha).
  * Formato conferido no código do WA-AKG, commit 936b26b:
  * - envio: POST /api/messages/{sessao}/{jid}/send com { message: { text } } (texto puro dá 500);
  * - mídia recebida: GET /api/media/{arquivo}, com a chave da API.
