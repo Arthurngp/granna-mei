@@ -260,7 +260,7 @@ export function perguntaDeOpcoes(movimento: 'entrada' | 'saida', descricao: stri
   return `${titulo} Responda com o número:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`
 }
 
-const PAINEL = () => (process.env.PAINEL_URL ?? 'https://grannamei.amplasoft.me/painel').replace(/\/+$/, '')
+const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.amplasoft.me/painel').replace(/\/+$/, '')
 
 /** Confere cada ação. Devolve a pergunta a fazer, se algo não fecha. */
 export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes = {}): Conferencia {
