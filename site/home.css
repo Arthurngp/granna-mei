@@ -1,0 +1,148 @@
+/* Home V2 do Granna Mei (2026-11-16). Só a index.html usa; faq e documentacao seguem no base.css. */
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;background:#F4F2EC}
+
+.gm{overflow-x:clip}
+img{display:block;max-width:100%}
+.gm{font-family:Figtree,system-ui,sans-serif;color:#15162B;background:#F4F2EC;font-size:17px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.gm *{box-sizing:border-box}
+.gm h1,.gm h2,.gm h3,.gm p{margin:0}
+.disp{font-family:'Bricolage Grotesque',Figtree,sans-serif;letter-spacing:-.035em;font-weight:800}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:500;letter-spacing:0}
+.wrap{width:100%;max-width:1240px;margin:0 auto;padding:0 32px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:54px;padding:0 26px;border-radius:3px;font-weight:700;font-size:16px;text-decoration:none;white-space:nowrap}
+.btn-wa{background:#17A34F;color:#fff}.btn-wa:hover{background:#128A42;color:#fff}
+.btn-linha{color:#fff;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.35)}.btn-linha:hover{color:#fff;box-shadow:inset 0 0 0 1.5px #fff}
+.topo{display:flex;align-items:center;gap:28px;min-height:76px}
+.topo nav{display:flex;gap:26px;margin-left:auto;align-items:center}
+.topo nav a{color:#B1B9D8;text-decoration:none;font-weight:600;font-size:15px}
+.topo nav a:hover{color:#fff}
+.heroi-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:48px;align-items:end;padding-top:56px}
+.conta{display:grid;grid-template-columns:minmax(0,1fr) 56px minmax(0,1fr) 56px minmax(0,1.25fr);align-items:stretch}
+.conta .op{display:flex;align-items:center;justify-content:center;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:44px;color:#15162B}
+.conta .bl{padding:30px 32px;display:flex;flex-direction:column;justify-content:space-between;gap:28px;min-height:200px}
+.conta .bl p:first-child{font-weight:700;font-size:15px}
+.divisao{display:flex;height:64px;margin-top:20px}
+.divisao > div{display:flex;align-items:center;padding:0 20px;font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;transform-origin:left;animation:enche 1.8s cubic-bezier(.6,0,.2,1) .2s both}
+.divisao > div + div{animation-delay:.9s}
+.passos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+.passos > div{background:#fff;border-radius:4px;overflow:hidden;box-shadow:0 1px 0 rgba(21,22,43,.06),0 18px 40px rgba(21,22,43,.08);display:flex;flex-direction:column;transition:transform .5s cubic-bezier(.2,.8,.2,1),box-shadow .5s}
+.passos > div:hover{transform:translateY(-8px) rotateX(3deg);box-shadow:0 30px 60px rgba(21,22,43,.16)}
+.passos .topo-card{display:flex;justify-content:space-between;align-items:flex-end;padding:24px 24px 0;min-height:170px}
+.passos .topo-card img{width:140px;margin-bottom:-6px;transition:transform .6s cubic-bezier(.2,.8,.2,1)}
+.passos > div:hover .topo-card img{transform:translateY(-8px) rotate(-4deg)}
+.passos .corpo{padding:28px 28px 32px}
+.bento{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:2px;background:#DCD8CC;border:2px solid #DCD8CC}
+.b{background:#FBFAF6;padding:32px;display:flex;flex-direction:column;gap:14px;min-height:260px;position:relative;overflow:hidden}
+.b2{grid-column:span 2}.b3{grid-column:span 3}.b4{grid-column:span 4}
+.planos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0;border:2px solid #15162B}
+.planos > div{padding:44px}
+.faq{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:56px}
+.faq details{border-top:1px solid #DCD8CC;padding:22px 0}
+.faq summary{cursor:pointer;font-weight:700;font-size:18px;list-style:none;display:flex;justify-content:space-between;gap:16px}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:'+';font-family:'JetBrains Mono',monospace;color:#17A34F}
+.faq details[open] summary::after{content:'−'}
+.faq details p{margin-top:10px;color:#4E557A}
+.fita{overflow:hidden;white-space:nowrap}
+.fita-trilho{display:inline-flex;gap:40px;padding-right:40px;animation:fita 38s linear infinite}
+.fita:hover .fita-trilho{animation-play-state:paused}
+@keyframes fita{to{transform:translateX(-50%)}}
+/* entrada do herói */
+.sobe{opacity:0;transform:translateY(28px);animation:sobe .9s cubic-bezier(.2,.8,.2,1) forwards}
+.s1{animation-delay:.05s}.s2{animation-delay:.18s}.s3{animation-delay:.3s}.s4{animation-delay:.42s}.s5{animation-delay:.54s}
+@keyframes sobe{to{opacity:1;transform:none}}
+/* palco 3D do celular */
+.palco3d{perspective:1400px}
+.fone{transform-style:preserve-3d;animation:deriva 9s ease-in-out infinite}
+@keyframes deriva{0%,100%{transform:rotateY(-14deg) rotateX(6deg) translateY(0)}50%{transform:rotateY(-4deg) rotateX(2deg) translateY(-14px)}}
+.flutua{animation:flutua 5s ease-in-out infinite}
+.flutua-b{animation:flutua 6.5s ease-in-out -2s infinite}
+@keyframes flutua{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-16px) rotate(2deg)}}
+/* conversa em loop */
+.m{opacity:0;transform:translateY(10px) scale(.96);animation-duration:14s;animation-iteration-count:infinite;animation-timing-function:cubic-bezier(.2,.8,.2,1)}
+.m1{animation-name:m1}.m2{animation-name:m2}.m3{animation-name:m3}.m4{animation-name:m4}
+@keyframes m1{0%,3%{opacity:0;transform:translateY(10px) scale(.96)}6%,90%{opacity:1;transform:none}96%,100%{opacity:0}}
+@keyframes m2{0%,17%{opacity:0;transform:translateY(10px) scale(.96)}20%,90%{opacity:1;transform:none}96%,100%{opacity:0}}
+@keyframes m3{0%,34%{opacity:0;transform:translateY(10px) scale(.96)}37%,90%{opacity:1;transform:none}96%,100%{opacity:0}}
+@keyframes m4{0%,52%{opacity:0;transform:translateY(10px) scale(.96)}55%,90%{opacity:1;transform:none}96%,100%{opacity:0}}
+.dig{display:flex;gap:4px;align-self:flex-start;background:#fff;padding:10px 12px;border-radius:8px 8px 8px 2px;height:0;opacity:0;overflow:hidden;animation-duration:14s;animation-iteration-count:infinite}
+.dig i{width:6px;height:6px;border-radius:50%;background:#8B92B8;animation:pulo 1s ease-in-out infinite}
+.dig i:nth-child(2){animation-delay:.15s}.dig i:nth-child(3){animation-delay:.3s}
+@keyframes pulo{0%,100%{transform:translateY(0);opacity:.5}50%{transform:translateY(-4px);opacity:1}}
+.d1{animation-name:d1}.d2{animation-name:d2}
+@keyframes d1{0%,7%{height:0;opacity:0;padding:0 12px}8%,16%{height:26px;opacity:1;padding:10px 12px}17%,100%{height:0;opacity:0;padding:0 12px;margin-top:-8px}}
+@keyframes d2{0%,39%{height:0;opacity:0;padding:0 12px}40%,51%{height:26px;opacity:1;padding:10px 12px}52%,100%{height:0;opacity:0;padding:0 12px;margin-top:-8px}}
+/* gráfico de linha */
+.linha{stroke-dasharray:1400;stroke-dashoffset:1400;animation:traca 2.4s cubic-bezier(.6,0,.2,1) .3s forwards}
+.area{opacity:0;animation:aparece 1.2s ease 1.6s forwards}
+.ponto{opacity:0;transform-box:fill-box;transform-origin:center;animation:ponto .5s cubic-bezier(.3,1.6,.5,1) 2.5s forwards, pulsa 2.2s ease-in-out 3s infinite}
+@keyframes traca{to{stroke-dashoffset:0}}
+@keyframes aparece{to{opacity:1}}
+@keyframes ponto{from{opacity:0;transform:scale(0)}to{opacity:1;transform:scale(1)}}
+@keyframes pulsa{0%,100%{r:7}50%{r:10}}
+.grafico3d{perspective:1600px}
+.grafico3d > div{transform:rotateX(14deg) rotateY(-8deg);transform-style:preserve-3d;animation:inclina 10s ease-in-out infinite}
+@keyframes inclina{0%,100%{transform:rotateX(14deg) rotateY(-8deg)}50%{transform:rotateX(8deg) rotateY(6deg)}}
+/* barra do MEI */
+.enche{transform-origin:left;animation:enche 2.2s cubic-bezier(.6,0,.2,1) .4s both}
+@keyframes enche{from{transform:scaleX(0)}}
+.brilho-barra{position:relative;overflow:hidden}
+.brilho-barra::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);transform:translateX(-100%);animation:varre 3s ease-in-out 2.6s infinite}
+@keyframes varre{60%,100%{transform:translateX(100%)}}
+/* blocos com profundidade */
+.bento{perspective:1600px}
+.b{transition:transform .5s cubic-bezier(.2,.8,.2,1),box-shadow .5s}
+.b:hover{transform:translateZ(24px) rotateX(3deg) rotateY(-3deg);box-shadow:0 30px 60px rgba(21,22,43,.18);z-index:2}
+.b img{transition:transform .6s cubic-bezier(.2,.8,.2,1)}
+.b:hover img{transform:translateY(-8px) rotate(-4deg) scale(1.06)}
+/* plano anual */
+.anual{position:relative;overflow:hidden}
+.anual::before{content:'';position:absolute;top:-50%;left:-60%;width:40%;height:200%;background:linear-gradient(90deg,transparent,rgba(143,233,184,.16),transparent);transform:rotate(18deg);animation:reflexo 6s ease-in-out infinite;pointer-events:none}
+@keyframes reflexo{0%{left:-60%}55%,100%{left:130%}}
+.btn{transition:transform .2s,box-shadow .2s,background .2s}
+.btn-wa:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(23,163,79,.35)}
+/* entrada ao rolar (navegadores que suportam) */
+@supports (animation-timeline: view()){
+.revela{animation:revela linear both;animation-timeline:view();animation-range:entry 0% cover 28%}
+@keyframes revela{from{opacity:0;transform:translateY(60px) rotateX(10deg)}to{opacity:1;transform:none}}
+.num-grande{animation:num linear both;animation-timeline:view();animation-range:entry 0% cover 45%}
+@keyframes num{from{transform:translateX(-40px);opacity:.2;letter-spacing:.1em}to{transform:none;opacity:1}}
+}
+@media (prefers-reduced-motion:reduce){
+.gm *,.gm *::before,.gm *::after{animation:none !important;transition:none !important}
+.sobe,.m{opacity:1 !important;transform:none !important}
+.dig{display:none}
+.linha{stroke-dashoffset:0}.area,.ponto{opacity:1}
+}
+@media (max-width:900px){
+.wrap{padding:0 16px}
+.topo nav .some{display:none}
+.heroi-grid{grid-template-columns:minmax(0,1fr);padding-top:32px}
+.conta{grid-template-columns:minmax(0,1fr)}
+.conta .op{height:44px;font-size:34px}
+.conta .bl{min-height:0;padding:22px 20px;gap:12px}
+.divisao{height:auto;flex-direction:column}
+.divisao > div{padding:14px 16px;width:100% !important}
+.passos{grid-template-columns:minmax(0,1fr);gap:14px}
+.passos .topo-card{min-height:140px}
+.passos .topo-card img{width:112px}
+.bento{grid-template-columns:minmax(0,1fr)}
+.b2,.b3,.b4{grid-column:auto}
+.planos{grid-template-columns:minmax(0,1fr)}
+.planos > div{padding:28px 20px}
+.faq{grid-template-columns:minmax(0,1fr)}
+.btn{white-space:normal;text-align:center}
+}
+/* ajustes de celular (2026-11-16) */
+.topo > a{white-space:nowrap}
+@media (max-width:900px){
+.topo{gap:12px}
+.topo nav{gap:14px}
+.topo nav .btn{white-space:nowrap;padding:0 14px}
+.heroi-grid > div:first-child{padding-bottom:0 !important}
+.palco3d{min-height:520px !important}
+.palco3d .fone > div{min-height:470px !important}
+.palco3d > img.flutua{width:100px !important;right:-10px !important;bottom:-4px !important}
+.b6{flex-direction:column !important;align-items:flex-start !important;gap:16px !important}
+}
