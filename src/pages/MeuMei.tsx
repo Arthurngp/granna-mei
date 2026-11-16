@@ -5,7 +5,7 @@ import { FaixaAssinatura, Topo } from '../components/Shell'
 import { Mascote, useAviso } from '../components/ui'
 import { faturamentoAno } from '../lib/calc'
 import { LIMITE_MEI } from '../lib/config'
-import { brl, brlCurto, capitaliza, diaCurto, hoje, mesDe, nomeMes, parse, pct, prazo } from '../lib/format'
+import { brl, brlCurto, capitaliza, diaCurto, hoje, mesDe, nomeMes, parse, pct, prazo, tipoDocumento } from '../lib/format'
 import { useApp } from '../lib/store'
 
 const MESES_C = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
@@ -42,7 +42,7 @@ export default function MeuMei() {
 
   return (
     <div className="pagina">
-      <Topo titulo="Meu MEI" sub={s.usuario.cnpj ? `CNPJ ${s.usuario.cnpj}` : s.usuario.negocio || undefined} />
+      <Topo titulo="Meu MEI" sub={s.usuario.cnpj ? `${tipoDocumento(s.usuario.cnpj)} ${s.usuario.cnpj}` : s.usuario.negocio || undefined} />
       <FaixaAssinatura />
 
       <div className="grade">

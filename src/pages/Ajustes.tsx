@@ -7,7 +7,7 @@ import { CampoDinheiro, Chave, Codigo, Folha, Seg, useAviso } from '../component
 import { saldos } from '../lib/calc'
 import { PRECO_ANUAL, PRECO_MENSAL, RAMOS } from '../lib/config'
 import { baixar, csvLancamentos } from '../lib/exportar'
-import { brl, DIAS_SEMANA, diaCurto, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaDias, somaMeses } from '../lib/format'
+import { brl, DIAS_SEMANA, diaCurto, documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaDias, somaMeses } from '../lib/format'
 import { novoId, useApp } from '../lib/store'
 import type { Carteira, Categoria, Conta, Estado, Fixa, StatusAssinatura, TipoCarteira } from '../lib/tipos'
 
@@ -91,7 +91,7 @@ export default function Ajustes() {
     )
   }
 
-  const statusTxt: Record<StatusAssinatura, string> = { trial: 'Teste grátis', ativa: 'Em dia', atrasada: 'Pagamento em atraso', bloqueada: 'Bloqueada' }
+  const statusTxt: Record<StatusAssinatura, string> = { trial: 'Teste grátis', ativa: 'Em dia', atrasada: 'Pagamento em atraso', bloqueada: 'Bloqueada', cortesia: 'Cortesia' }
 
   return (
     <div className="pagina">
@@ -128,13 +128,13 @@ export default function Ajustes() {
           </div>
         </section>
         <section className="card g-6 menu">
-          <Item I={CreditCard} titulo="Assinatura" det={`${s.assinatura.plano === 'anual' ? `Anual · ${brl(PRECO_ANUAL)}` : `Mensal · ${brl(PRECO_MENSAL)}`} · ${statusTxt[s.assinatura.status]}`} para="/ajustes/assinatura" />
+          <Item I={CreditCard} titulo="Assinatura" det={s.assinatura.status === 'cortesia' ? 'Cortesia · sem cobrança' : `${s.assinatura.plano === 'anual' ? `Anual · ${brl(PRECO_ANUAL)}` : `Mensal · ${brl(PRECO_MENSAL)}`} · ${statusTxt[s.assinatura.status] ?? s.assinatura.status}`} para="/ajustes/assinatura" />
         </section>
 
         <div className="g-6 pilha" style={{ gap: 8 }}>
           <div className="secao-tit">Sua conta</div>
           <section className="card menu">
-            <Item I={UserRound} titulo="Você e seu negócio" det={[u.negocio, RAMOS.find((r) => r.id === u.ramo)?.nome].filter(Boolean).join(' · ') || 'Nome, CNPJ e ramo'} onClick={() => setAba('perfil')} />
+            <Item I={UserRound} titulo="Você e seu negócio" det={[u.negocio, RAMOS.find((r) => r.id === u.ramo)?.nome].filter(Boolean).join(' · ') || 'Nome, CNPJ ou CPF e ramo'} onClick={() => setAba('perfil')} />
             <Item
               I={MessageCircle}
               titulo="WhatsApp conectado"
@@ -223,7 +223,8 @@ export default function Ajustes() {
         )}
       </div>
 
-      <div className="assinatura-amp" style={{ marginTop: 6 }}>
+      {/* No computador a assinatura fica no fim da barra lateral. */}
+      <div className="assinatura-amp so-mobile" style={{ marginTop: 6 }}>
         Desenvolvido por{' '}
         <a href="https://grupongp.com.br" target="_blank" rel="noopener noreferrer">
           Amplasoft — Grupo NGP
@@ -242,8 +243,9 @@ export default function Ajustes() {
             <input className="entrada" value={u.negocio} onChange={(e) => usuario({ negocio: e.target.value })} />
           </label>
           <label className="campo">
-            <span>CNPJ do MEI</span>
-            <input className="entrada num" inputMode="numeric" value={u.cnpj} onChange={(e) => usuario({ cnpj: mascaraCnpj(e.target.value) })} placeholder="00.000.000/0001-00" />
+            <span>CNPJ ou CPF</span>
+            <input className="entrada num" inputMode="numeric" value={u.cnpj} onChange={(e) => usuario({ cnpj: mascaraCnpj(e.target.value) })} placeholder="CNPJ do MEI ou seu CPF" aria-invalid={!documentoValido(u.cnpj)} />
+            {!documentoValido(u.cnpj) && <small className="cor-out">Esse CNPJ ou CPF não confere. Revise os números.</small>}
           </label>
           <label className="campo">
             <span>E-mail</span>

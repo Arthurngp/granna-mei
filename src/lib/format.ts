@@ -99,14 +99,47 @@ export function mascaraFone(v: string) {
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
 }
 
+/** CPF (até 11 números) ou CNPJ (12 a 14 números), com a máscara de cada um. */
 export function mascaraCnpj(v: string) {
   const d = v.replace(/\D/g, '').slice(0, 14)
+  if (d.length <= 11) {
+    return d
+      .replace(/^(\d{3})(\d)/, '$1.$2')
+      .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/\.(\d{3})(\d)/, '.$1-$2')
+  }
   return d
     .replace(/^(\d{2})(\d)/, '$1.$2')
     .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
     .replace(/\.(\d{3})(\d)/, '.$1/$2')
     .replace(/(\d{4})(\d)/, '$1-$2')
 }
+
+const digitoVerificador = (base: string, pesos: number[]) => {
+  const r = base.split('').reduce((a, n, i) => a + Number(n) * pesos[i], 0) % 11
+  return r < 2 ? 0 : 11 - r
+}
+
+/** Vazio, CPF válido ou CNPJ válido (confere os dígitos verificadores). */
+export function documentoValido(v: string) {
+  const d = v.replace(/\D/g, '')
+  if (!d) return true
+  if (/^(\d)\1+$/.test(d)) return false
+  if (d.length === 11) {
+    const d1 = digitoVerificador(d.slice(0, 9), [10, 9, 8, 7, 6, 5, 4, 3, 2])
+    const d2 = digitoVerificador(d.slice(0, 10), [11, 10, 9, 8, 7, 6, 5, 4, 3, 2])
+    return d1 === Number(d[9]) && d2 === Number(d[10])
+  }
+  if (d.length === 14) {
+    const d1 = digitoVerificador(d.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+    const d2 = digitoVerificador(d.slice(0, 13), [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+    return d1 === Number(d[12]) && d2 === Number(d[13])
+  }
+  return false
+}
+
+/** "CPF" ou "CNPJ", pelo tamanho. */
+export const tipoDocumento = (v: string) => (v.replace(/\D/g, '').length === 11 ? 'CPF' : 'CNPJ')
 
 /** Campo de dinheiro: o usuário digita só números e os centavos entram pela direita. */
 export function centavosDe(texto: string) {

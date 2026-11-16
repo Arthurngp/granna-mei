@@ -47,6 +47,12 @@ export function Shell() {
               Falar com a Granninha
             </a>
           </div>
+          <div className="assinatura-amp">
+            Desenvolvido por{' '}
+            <a href="https://grupongp.com.br" target="_blank" rel="noopener noreferrer">
+              Amplasoft — Grupo NGP
+            </a>
+          </div>
         </div>
       </aside>
       <main className="conteudo">
