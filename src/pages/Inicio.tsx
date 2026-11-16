@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Check, ChevronRight, Eye, EyeOff, MessageCircle } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronRight, CreditCard, Eye, EyeOff, MessageCircle } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FaixaWhats } from '../components/ConfirmarWhats'
@@ -42,6 +42,9 @@ export default function Inicio() {
     [s.contas, h],
   )
 
+  // Fatura do cartão que vence em até 7 dias também aparece no card de vencimentos.
+  const fatProximas = abertas.filter((f) => f.vence <= somaDias(h, 7))
+  const nomeCartao = (id: string) => s.carteiras.find((c) => c.id === id)?.nome ?? 'Cartão'
   const vazio = s.lancamentos.length === 0
   const nome = primeiroNome(s.usuario.nome)
   const serie = escala === 'mes' ? diaria : mensal
@@ -223,8 +226,25 @@ export default function Inicio() {
                   <ChevronRight size={16} />
                 </Link>
               </div>
-              {proximas.length ? (
+              {proximas.length || fatProximas.length ? (
                 <div className="lista">
+                  {fatProximas.map((f) => {
+                    const dif = difDias(f.vence, h)
+                    return (
+                      <Link to="/contas" className="linha" key={f.cartaoId + f.fatura}>
+                        <span className="marca" aria-hidden style={{ background: '#E7EAF5', color: '#454C83', borderColor: 'transparent' }}>
+                          <CreditCard size={15} />
+                        </span>
+                        <div className="meio">
+                          <div className="tit">Fatura {nomeCartao(f.cartaoId)}</div>
+                          <div className="det">
+                            <span className={dif < 0 ? 'atraso' : dif === 0 ? 'hoje' : ''}>{prazo(f.vence)}</span>
+                          </div>
+                        </div>
+                        <div className="val num">{oculto ? '••••' : brl(f.falta)}</div>
+                      </Link>
+                    )
+                  })}
                   {proximas.map((c) => {
                     const dif = difDias(c.vencimento, h)
                     return (

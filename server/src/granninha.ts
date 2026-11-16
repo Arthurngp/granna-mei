@@ -6,7 +6,7 @@
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, sb, usoDoMes } from './banco.ts'
 import { executar, reverter, ultimaComEfeito, type Efeitos, type Origem } from './executar.ts'
 import { baixarMidia } from './gateway.ts'
-import { BOLETO, conferir, interpretar, opcaoEscolhida, type Acao, type Contexto, type Opcao } from './interpretar.ts'
+import { BOLETO, conferir, interpretar, NEGOCIO, opcaoEscolhida, PESSOAL, type Acao, type Contexto, type Opcao } from './interpretar.ts'
 import { lerDocumento, textoDoDocumento, type Transacao } from './midia.ts'
 import { transcrever, type Uso } from './openai.ts'
 import { responderPergunta } from './perguntas.ts'
@@ -199,7 +199,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
 
   // Pergunta em aberto (ex.: "qual foi o valor?") ou importação de extrato esperando um sim.
   const { data: conv } = await sb.from('conversas').select('pendente,atualizado_em').eq('telefone', telefone).maybeSingle()
-  const pend = conv?.pendente as { tipo?: string; texto?: string; pergunta?: string; transacoes?: Transacao[]; opcoes?: Opcao[]; anexo?: string } | null
+  const pend = conv?.pendente as { tipo?: string; texto?: string; pergunta?: string; transacoes?: Transacao[]; opcoes?: Opcao[]; anexo?: string; forcar?: { carteira?: string; pessoal?: boolean }; documento?: { valor: number; movimento: 'entrada' | 'saida' } } | null
   const fresco = conv && Date.now() - new Date(conv.atualizado_em).getTime() < 30 * 60_000
   if (pend?.tipo) await sb.from('conversas').update({ pendente: null, atualizado_em: new Date().toISOString() }).eq('telefone', telefone)
 
@@ -250,24 +250,27 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
       }
     } else if (/^\s*(sim|s|pode|importa|ok|isso|manda)\b/i.test(texto)) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens)
   }
-  // Resposta a uma pergunta de forma de pagamento: o número (ou o nome) escolhe a carteira no código, sem depender da IA.
-  let forcarCarteira: string | undefined
+  // Resposta a uma pergunta com opções: o número (ou o nome) decide no código, sem depender da IA.
+  // As respostas se acumulam (ex.: "do negócio" e depois "Nubank") até o lançamento fechar.
+  const forcar: { carteira?: string; pessoal?: boolean } = pend?.tipo === 'pergunta' && fresco ? { ...(pend.forcar ?? {}) } : {}
+  if (pend?.tipo === 'pergunta' && fresco && pend.documento && !documento) documento = pend.documento
   if (pend?.tipo === 'pergunta' && fresco && pend.texto) {
     const esc = pend.opcoes?.length ? opcaoEscolhida(texto, pend.opcoes) : null
     if (pend.opcoes?.length && !esc && /^\s*\d{1,2}\s*$/.test(texto)) {
       await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
       return { status: 'pergunta', resposta: `Não achei essa opção. ${pend.pergunta}`, efeitos: {}, intencao: 'acoes', texto, tokens }
     }
-    if (esc) forcarCarteira = esc.id
-    texto = `${pend.texto}\n(resposta para "${(pend.pergunta ?? '').split('\n')[0]}"): ${esc ? (esc.id === BOLETO ? 'no boleto ou carnê' : esc.nome) : texto}`
+    if (esc?.id === NEGOCIO || esc?.id === PESSOAL) forcar.pessoal = esc.id === PESSOAL
+    else if (esc) forcar.carteira = esc.id
+    texto = `${pend.texto}\n(resposta para "${(pend.pergunta ?? '').split('\n')[0]}"): ${esc ? (esc.id === BOLETO ? 'no boleto ou carnê' : esc.id === NEGOCIO ? 'é do negócio' : esc.id === PESSOAL ? 'é pessoal, da casa' : esc.nome) : texto}`
   }
 
-  const it = await interpretar(texto, ctx, { forcarCarteira, documento })
+  const it = await interpretar(texto, ctx, { forcarCarteira: forcar.carteira, forcarPessoal: forcar.pessoal, documento })
   soma(it.uso)
 
   if (it.intencao === 'acoes') {
     if (it.perguntar) {
-      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta: it.perguntar, opcoes: it.opcoes }, atualizado_em: new Date().toISOString() })
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta: it.perguntar, opcoes: it.opcoes, forcar, documento }, atualizado_em: new Date().toISOString() })
       return { status: 'pergunta', resposta: it.perguntar, efeitos: {}, intencao: 'acoes', texto, tokens }
     }
     const anteriores = it.acoes.some((a) => a.tipo_acao === 'criar_categoria') ? (await ultimaComEfeito(cliente.id))?.efeitos : undefined
@@ -321,7 +324,7 @@ async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Or
     }
     const base = conferir(`${t.valor.toFixed(2).replace('.', ',')}`, ctx, {
       intencao: 'acoes', pergunta: null, correcao: null, falta: null,
-      acoes: [{ tipo_acao: 'lancamento', movimento: t.movimento, valor: t.valor, descricao: t.descricao, categoria_id: null, carteira_id: padrao, carteira_destino_id: null, meio: null, data, pessoal: false, vencimento: null, dia_do_mes: null, parcelas: null, conta_id: null }],
+      acoes: [{ tipo_acao: 'lancamento', movimento: t.movimento, valor: t.valor, descricao: t.descricao, categoria_id: null, carteira_id: padrao, carteira_destino_id: null, meio: null, data, pessoal: false, vencimento: null, dia_do_mes: null, parcelas: null, conta_id: null, talvez_pessoal: false }],
     }, { perguntarMeio: false })
     acoes.push(...base.acoes)
   }

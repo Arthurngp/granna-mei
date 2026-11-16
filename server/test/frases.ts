@@ -29,7 +29,7 @@ const CTX: Contexto = {
   ],
 }
 
-type A = { t: string; m?: 'entrada' | 'saida'; v?: number; c?: string; w?: string; p?: boolean; n?: number; d?: number; k?: string; dt?: string; venc?: string; dest?: string }
+type A = { t: string; m?: 'entrada' | 'saida'; v?: number; c?: string; w?: string; p?: boolean; n?: number; d?: number; k?: string; dt?: string; venc?: string; dest?: string; tp?: boolean }
 type Caso = { f: string; i?: string; a?: A[]; perg?: true }
 
 const L = (m: 'entrada' | 'saida', v: number, x: Partial<A> = {}): A => ({ t: 'lancamento', m, v, ...x })
@@ -130,6 +130,15 @@ const CASOS: Caso[] = [
   { f: 'criar categoria Combustível', a: [{ t: 'criar_categoria' }] },
   { f: 'cria a categoria embalagens', a: [{ t: 'criar_categoria' }] },
   { f: 'quanto tá a fatura do cartão?', i: 'pergunta' },
+  // Gasto que pode ser da casa ou do negócio (2026-11-16)
+  { f: 'recarga de celular 30', a: [S(30, { tp: true })] },
+  { f: 'gasolina 120 no pix', a: [S(120, { tp: true })] },
+  { f: 'paguei a internet 99,90', a: [S(99.9, { tp: true })] },
+  { f: 'conserto do carro 450', a: [S(450, { tp: true })] },
+  { f: 'recarga do celular do salão 30', a: [S(30, { tp: false })] },
+  { f: 'comprei tinta 85', a: [S(85, { tp: false })] },
+  { f: 'aluguel do salão 900', a: [S(900, { tp: false })] },
+  { f: 'mercado de casa 230', a: [S(230, { p: true, tp: false })] },
   // Perguntas
   { f: 'quanto gastei esse mês?', i: 'pergunta' },
   { f: 'o que vence essa semana', i: 'pergunta' },
@@ -184,6 +193,7 @@ function detalhes(c: Caso, r: Interpretacao) {
     if (e.w) out.push({ campo: 'carteira', ok: a.carteira_id === e.w, msg: `${a.carteira_id} vs ${e.w}` })
     if (e.dest) out.push({ campo: 'carteira', ok: a.carteira_destino_id === e.dest, msg: `destino ${a.carteira_destino_id} vs ${e.dest}` })
     if (e.p !== undefined) out.push({ campo: 'pessoal', ok: a.pessoal === e.p, msg: `${a.pessoal} vs ${e.p}` })
+    if (e.tp !== undefined) out.push({ campo: 'casa ou negócio', ok: a.talvez_pessoal === e.tp, msg: `talvez_pessoal ${a.talvez_pessoal} vs ${e.tp}` })
     if (e.n) out.push({ campo: 'parcelas', ok: a.parcelas === e.n, msg: `${a.parcelas} vs ${e.n}` })
     if (e.d) out.push({ campo: 'dia', ok: a.dia_do_mes === e.d, msg: `${a.dia_do_mes} vs ${e.d}` })
     if (e.dt) out.push({ campo: 'data', ok: a.data === e.dt, msg: `${a.data} vs ${e.dt}` })
