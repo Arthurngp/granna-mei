@@ -194,6 +194,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   }
   let texto = (d.content ?? '').trim()
   let anexo: string | null = null
+  let documento: { valor: number; movimento: 'entrada' | 'saida' } | undefined
   const nome = cliente.nome.split(' ')[0]
 
   // Pergunta em aberto (ex.: "qual foi o valor?") ou importação de extrato esperando um sim.
@@ -233,6 +234,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
       }
     }
     texto = textoDoDocumento(leitura, d.caption ?? '')
+    documento = { valor: leitura.transacoes[0].valor, movimento: leitura.transacoes[0].movimento }
   }
 
   const ctx = await contextoDe(cliente.id, hoje)
@@ -260,7 +262,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     texto = `${pend.texto}\n(resposta para "${(pend.pergunta ?? '').split('\n')[0]}"): ${esc ? (esc.id === BOLETO ? 'no boleto ou carnê' : esc.nome) : texto}`
   }
 
-  const it = await interpretar(texto, ctx, { forcarCarteira })
+  const it = await interpretar(texto, ctx, { forcarCarteira, documento })
   soma(it.uso)
 
   if (it.intencao === 'acoes') {

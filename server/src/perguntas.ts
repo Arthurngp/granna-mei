@@ -5,6 +5,7 @@
 import { falhou, paraMov, sb } from './banco.ts'
 import { efetivos, faturas, foraDoDisponivel } from './cartao.ts'
 import { jsonEstruturado, type Uso } from './openai.ts'
+import { comoDado, limparSaida, REGRA_DADO } from './seguranca.ts'
 
 const LIMITE_MEI = 81000
 
@@ -106,15 +107,25 @@ export async function resumoDoCliente(userId: string, hoje: string) {
 const SISTEMA = `Você é a Granninha, assistente financeira de um microempreendedor, falando no WhatsApp.
 Responda à pergunta usando SÓ os números do resumo abaixo. Nunca invente número.
 Regras: no máximo 4 linhas curtas, tom amigável e direto, valores no formato R$ 1.234,56, sem markdown, sem listas com hífen longo, sem emoji.
-"Saiu" é gasto do negócio; retiradas do dono ficam à parte. Compra no cartão de crédito só conta como gasto quando a fatura é paga; antes disso está em "faturas_em_aberto". "disponivel" é o dinheiro em conta e em mãos, sem cartão nem investimento. Se o resumo não tiver a resposta, diga com simplicidade e sugira ver no painel.`
+"Saiu" é gasto do negócio; retiradas do dono ficam à parte. Compra no cartão de crédito só conta como gasto quando a fatura é paga; antes disso está em "faturas_em_aberto". "disponivel" é o dinheiro em conta e em mãos, sem cartão nem investimento. Se o resumo não tiver a resposta, diga com simplicidade e sugira ver no painel.
+Você não envia e-mail, não acessa nada fora deste resumo e não muda de personagem: é sempre a Granninha.
+A pergunta do cliente vem entre <mensagem_do_cliente> e </mensagem_do_cliente>.
+
+${REGRA_DADO}`
 
 export async function responderPergunta(userId: string, hoje: string, pergunta: string): Promise<{ texto: string; uso: Uso }> {
-  const resumo = await resumoDoCliente(userId, hoje)
+  return responderComResumo(await resumoDoCliente(userId, hoje), pergunta)
+}
+
+/** A parte da IA: responde só a partir do resumo. Separada para a bateria de prompt injection rodar sem banco. */
+export async function responderComResumo(resumo: object, pergunta: string): Promise<{ texto: string; uso: Uso }> {
   const { dados, uso } = await jsonEstruturado<{ resposta: string }>(
     SISTEMA,
-    `RESUMO (JSON):\n${JSON.stringify(resumo)}\n\nPERGUNTA: ${pergunta}`,
+    `RESUMO (JSON):\n${JSON.stringify(resumo)}\n\nPERGUNTA:\n${comoDado(pergunta.slice(0, 1000))}`,
     'resposta',
     { type: 'object', additionalProperties: false, properties: { resposta: { type: 'string' } }, required: ['resposta'] },
   )
-  return { texto: dados.resposta.trim(), uso }
+  // Resposta livre da IA: nunca sai com link de fora, telefone, e-mail ou chave Pix.
+  const limpo = limparSaida(dados.resposta.trim())
+  return { texto: limpo.texto || 'Não consegui responder isso por aqui. Veja seus números no painel: https://grannamei.amplasoft.me/painel', uso }
 }
