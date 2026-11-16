@@ -3,8 +3,8 @@
 /** Limite de faturamento anual do MEI. */
 export const LIMITE_MEI = 81000
 
-export const PRECO_MENSAL = 19.9
-export const PRECO_ANUAL = 197
+export const PRECO_MENSAL = 29.9
+export const PRECO_ANUAL = 299.9
 
 /** Uso justo por mês (a confirmar com o Arthur antes do lançamento). */
 export const LIMITE_LANCAMENTOS = 300

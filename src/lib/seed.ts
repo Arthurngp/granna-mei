@@ -183,7 +183,7 @@ export function estadoDemo(): Estado {
 
   lancs.sort((a, b) => (a.data + a.hora < b.data + b.hora ? 1 : -1))
   const d = new Date()
-  const faturas = [1, 2, 3].map((k) => ({ id: `f${k}`, data: iso(new Date(d.getFullYear(), d.getMonth() - k, 15)), valor: 19.9, status: 'paga' as const }))
+  const faturas = [1, 2, 3].map((k) => ({ id: `f${k}`, data: iso(new Date(d.getFullYear(), d.getMonth() - k, 15)), valor: 29.9, status: 'paga' as const }))
 
   return {
     versao: VERSAO,

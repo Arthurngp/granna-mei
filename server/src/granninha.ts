@@ -171,7 +171,7 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
     status: 'ignorada',
     resposta: codigo
       ? `Esse código não confere ou já venceu. Gere um novo no painel em ${PAINEL()} e me mande de novo.`
-      : `Oi! Eu sou a Granninha, do Granna Mei. Eu organizo o dinheiro do seu MEI aqui pelo WhatsApp.\n\nPara começar, crie sua conta (${hojeSP() <= '2026-11-30' ? 'grátis até 30 de novembro' : '7 dias grátis'}): ${PAINEL()}/criar-conta`,
+      : `Oi! Eu sou a Granninha, do Granna Mei. Eu organizo o dinheiro do seu MEI aqui pelo WhatsApp.\n\nPara começar, crie sua conta (${hojeSP() <= '2026-11-30' ? 'grátis até 31 de dezembro' : '7 dias grátis'}): ${PAINEL()}/criar-conta`,
     userId: null,
   }
 }
