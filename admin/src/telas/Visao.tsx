@@ -42,6 +42,20 @@ function useCusto() {
   return { c, falhou }
 }
 
+interface Midias { audio: number; foto: number; pdf: number }
+
+/** Mídias do mês por tipo. Se a função ainda não existe no banco, devolve null e o painel mostra o total somado. */
+function useMidias() {
+  const [m, setM] = useState<Midias | null>(null)
+  useEffect(() => {
+    const ler = () => rpc<Midias>('admin_midias_mes').then(setM).catch(() => setM(null))
+    void ler()
+    const t = setInterval(ler, 60_000)
+    return () => clearInterval(t)
+  }, [])
+  return m
+}
+
 /** Nome de cada passo das boas-vindas (o número é o passo mais avançado que a pessoa alcançou). */
 const NOME_PASSO = ['Dados do negócio', 'Ramo', 'Contas', 'Cartões', 'Contas fixas', 'Horários', 'Confirmar WhatsApp', 'Terminou']
 
@@ -62,6 +76,7 @@ const n = (x: number) => x.toLocaleString('pt-BR')
 export function Visao() {
   const { p, erro } = usePainel()
   const { c: custo, falhou: custoFalhou } = useCusto()
+  const midias = useMidias()
   if (erro) return <Falha texto={erro} />
   if (!p) return <Carregando />
   const dias = p.mensagens_por_dia
@@ -122,7 +137,15 @@ export function Visao() {
             )}
             <div><span>Tokens de IA no mês</span><span className="num">{n(p.tokens_mes)}</span></div>
             <div><span>Tokens hoje</span><span className="num">{n(p.tokens_hoje)}</span></div>
-            <div><span>Áudios, fotos e PDFs</span><span className="num">{n(p.midias_mes)}</span></div>
+            {midias ? (
+              <>
+                <div><span>Áudios no mês</span><span className="num">{n(midias.audio)}</span></div>
+                <div><span>Fotos no mês</span><span className="num">{n(midias.foto)}</span></div>
+                <div><span>PDFs no mês</span><span className="num">{n(midias.pdf)}</span></div>
+              </>
+            ) : (
+              <div><span>Áudios, fotos e PDFs</span><span className="num">{n(p.midias_mes)}</span></div>
+            )}
           </div>
           <div className="card-cab" style={{ marginTop: 14 }}><h2>Quem mais usa</h2></div>
           {p.maiores_consumidores.length ? (
