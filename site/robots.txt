@@ -1,2 +1,19 @@
 User-agent: *
-Disallow: /
+Allow: /
+Disallow: /painel/
+Disallow: /admin/
+
+# Buscadores de IA liberados de forma explícita
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-SearchBot
+User-agent: PerplexityBot
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+Allow: /
+Disallow: /painel/
+Disallow: /admin/
+
+Sitemap: https://grannamei.amplasoft.me/sitemap.xml

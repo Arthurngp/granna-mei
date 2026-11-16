@@ -1,0 +1,13 @@
+# Granna Mei
+
+> Controle financeiro para MEI (microempreendedor individual) pelo WhatsApp. A pessoa manda uma mensagem, um áudio, a foto do comprovante ou um PDF para a assistente Granninha, que lança entradas e gastos, separa o que é da casa e o que é do negócio, lembra das contas a pagar e acompanha o limite de faturamento anual do MEI (R$ 81 mil). Produto da Amplasoft (AMPLASOFT INTELIGENCIA COMERCIAL LTDA, CNPJ 65.782.493/0001-04).
+
+- Site: https://grannamei.amplasoft.me/
+- Criar conta: https://grannamei.amplasoft.me/painel/criar-conta
+- Preços: R$ 29,90 por mês (sem fidelidade) ou R$ 299,90 por ano. Começa com período grátis, sem cartão.
+- Funciona no WhatsApp que a pessoa já usa; o painel abre no navegador do celular ou do computador. Não precisa instalar aplicativo.
+
+## Páginas
+
+- [Como funciona](https://grannamei.amplasoft.me/documentacao): a Granninha no WhatsApp, o painel, o controle do MEI, segurança e planos.
+- [Perguntas frequentes](https://grannamei.amplasoft.me/faq): cadastro, WhatsApp, correções, MEI, segurança e planos.
