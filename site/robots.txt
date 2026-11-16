@@ -16,4 +16,4 @@ Allow: /
 Disallow: /painel/
 Disallow: /admin/
 
-Sitemap: https://grannamei.amplasoft.me/sitemap.xml
+Sitemap: https://granninha.amplasoft.me/sitemap.xml

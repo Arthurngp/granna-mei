@@ -13,7 +13,7 @@ import { LPS } from './lps-dados.mjs'
 import { SEO } from './seo-lps.mjs'
 
 const raiz = join(dirname(fileURLToPath(import.meta.url)), '..', 'site')
-const BASE = 'https://grannamei.amplasoft.me'
+const BASE = 'https://granninha.amplasoft.me'
 const HOJE = new Date().toISOString().slice(0, 10)
 const ler = (f) => readFileSync(join(raiz, f), 'utf8')
 const home = ler('index.html')
