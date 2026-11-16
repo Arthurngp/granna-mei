@@ -110,17 +110,17 @@ try {
     const r = await postar({ event: 'message.received', data: {} }, 'sha256=00')
     assert.equal(r.status, 401)
   })
-  await caso('número que não é cliente recebe o link de cadastro', async () => {
-    const r = await mandar(ESTRANHO, { content: 'oi' })
-    assert.match(r.texto, /criar-conta/)
-  })
-  await caso('e não recebe de novo no mesmo dia (sem conversa infinita, sem gastar IA)', async () => {
-    const r = await mandar(ESTRANHO, { content: 'oi de novo' }, { esperarNada: true })
+  await caso('número que não é cliente não recebe nada (nem convite)', async () => {
+    const r = await mandar(ESTRANHO, { content: 'oi' }, { esperarNada: true })
     assert.equal(r.texto, '')
   })
-  await caso('número só digitado no cadastro NÃO é reconhecido (precisa confirmar)', async () => {
-    const r = await mandar(FONE, { content: 'recebi 150 no pix' })
-    assert.match(r.texto, /criar-conta/)
+  await caso('nem com código errado', async () => {
+    const r = await mandar(ESTRANHO, { content: 'meu código 000000' }, { esperarNada: true })
+    assert.equal(r.texto, '')
+  })
+  await caso('número só digitado no cadastro NÃO é reconhecido e fica sem resposta (precisa confirmar)', async () => {
+    const r = await mandar(FONE, { content: 'recebi 150 no pix' }, { esperarNada: true })
+    assert.equal(r.texto, '')
     assert.equal((await lancs(uid)).length, 0)
   })
   await caso('cliente gera código no painel e manda: número confirmado', async () => {
