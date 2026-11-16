@@ -42,6 +42,23 @@ function useCusto() {
   return { c, falhou }
 }
 
+interface Origens {
+  por_lp: { lp: string; cadastros: number; confirmados: number; pagantes: number }[]
+  por_campanha: { campanha: string; cadastros: number }[]
+}
+
+/** Cadastros por LP e campanha. Se a função ainda não existe no banco, devolve null e o quadro não aparece. */
+function useOrigens() {
+  const [o, setO] = useState<Origens | null>(null)
+  useEffect(() => {
+    const ler = () => rpc<Origens>('admin_origens').then(setO).catch(() => setO(null))
+    void ler()
+    const t = setInterval(ler, 60_000)
+    return () => clearInterval(t)
+  }, [])
+  return o
+}
+
 interface Midias { audio: number; foto: number; pdf: number }
 
 /** Mídias do mês por tipo. Se a função ainda não existe no banco, devolve null e o painel mostra o total somado. */
@@ -77,6 +94,7 @@ export function Visao() {
   const { p, erro } = usePainel()
   const { c: custo, falhou: custoFalhou } = useCusto()
   const midias = useMidias()
+  const origens = useOrigens()
   if (erro) return <Falha texto={erro} />
   if (!p) return <Carregando />
   const dias = p.mensagens_por_dia
@@ -176,6 +194,33 @@ export function Visao() {
             </p>
           )}
         </section>
+        {origens && origens.por_lp.length > 0 && (
+          <section className="card g-6">
+            <div className="card-cab"><h2>Cadastros por página</h2></div>
+            <div className="lista">
+              {origens.por_lp.map((o) => (
+                <div className="linha" key={o.lp}>
+                  <div className="meio"><div className="tit">{o.lp === 'home' ? 'Home' : o.lp}</div><div className="det"><span>{n(o.confirmados)} confirmaram o WhatsApp</span></div></div>
+                  <div className="val num">
+                    {n(o.cadastros)}
+                    <small>{n(o.pagantes)} pagando</small>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {origens.por_campanha.length > 0 && (
+              <>
+                <div className="card-cab" style={{ marginTop: 14 }}><h2>Cadastros por campanha</h2></div>
+                <div className="fatos">
+                  {origens.por_campanha.map((c) => (
+                    <div key={c.campanha}><span>{c.campanha}</span><span className="num">{n(c.cadastros)}</span></div>
+                  ))}
+                </div>
+              </>
+            )}
+            <p className="suave pq" style={{ marginTop: 10 }}>Página e campanha da última chegada ao site antes de criar a conta. Cadastros anteriores a 16/11 aparecem como “sem origem”.</p>
+          </section>
+        )}
       </div>
     </div>
   )

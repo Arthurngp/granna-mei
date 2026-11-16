@@ -4,6 +4,7 @@ import { useAviso } from '../components/ui'
 import { hoje, somaDias, somaMeses } from './format'
 import { carregar, enviar } from './remoto'
 import { categoriasPadrao, estadoDemo, estadoVazio, VERSAO } from './seed'
+import { lerOrigem } from './origem'
 import { supabase, temBanco } from './supabase'
 import type { Conta, Estado, Lancamento, StatusAssinatura } from './tipos'
 
@@ -240,7 +241,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setS({ ...v, sessao: { logado: true, onboarding: false, demo: true, passo: 0 }, usuario: { ...v.usuario, nome, email } })
           return null
         }
-        const { data, error } = await supabase.auth.signUp({ email, password: senha, options: { data: { nome } } })
+        const origem = lerOrigem()
+        const { data, error } = await supabase.auth.signUp({ email, password: senha, options: { data: origem ? { nome, origem } : { nome } } })
         if (error) return traduz(error.message)
         if (!data.session || !data.user) return 'Conta criada. Confirme pelo link que mandamos no seu e-mail e depois entre.'
         limparDemo()
