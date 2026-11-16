@@ -143,7 +143,7 @@ export async function processar(ev: EventoGateway): Promise<Saida> {
   return { status, para: telefone, resposta }
 }
 
-/** Número que não é de nenhum cliente verificado: ou está mandando o código de confirmação, ou recebe o link de cadastro. */
+/** Número que não é de nenhum cliente verificado: se mandar código de confirmação válido, liga o número à conta; fora isso, silêncio (ou o link de cadastro, com GRANNINHA_CONVIDAR=1). */
 async function numeroDesconhecido(telefone: string, jid: string, texto: string): Promise<{ status: Status; resposta: string; userId: string | null }> {
   const codigo = texto.match(/\b(\d{6})\b/)?.[1]
   if (codigo) {
@@ -162,6 +162,10 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
       }
     }
   }
+  // Por enquanto a Granninha fica em silêncio para quem não é cliente: sem convite, sem link, sem aviso de código
+  // errado (pedido do Arthur em 2026-11-16: "inativo para os externos"). Só o código válido acima ganha resposta,
+  // porque é o passo final de quem já criou a conta pelo site. GRANNINHA_CONVIDAR=1 religa o convite abaixo.
+  if (process.env.GRANNINHA_CONVIDAR !== '1') return { status: 'ignorada', resposta: '', userId: null }
   // Responde o link no máximo uma vez por dia para o mesmo número: sem gastar IA e sem virar conversa infinita.
   const { data: c } = await sb.from('conversas').select('pendente,atualizado_em').eq('telefone', telefone).maybeSingle()
   const ultimo = (c?.pendente as { link_em?: string } | null)?.link_em
