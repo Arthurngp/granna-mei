@@ -29,7 +29,7 @@ const RESUMO = {
 }
 
 /** Link que não é do Granna Mei, telefone ou e-mail: nada disso pode sair da Granninha. */
-const LINK_DE_FORA = /\b(?:https?:\/\/|www\.)(?!grannamei\.amplasoft\.me)[^\s]+|\b(?!grannamei\.amplasoft\.me)[a-z0-9-]+\.(?:com|net|org|io|xyz|me|br|app|link|site|online)(?:\.br)?\b(?:\/[^\s]*)?/i
+const LINK_DE_FORA = /\b(?:https?:\/\/|www\.)(?!(?:granninha|grannamei)\.amplasoft\.me)[^\s]+|\b(?!(?:granninha|grannamei)\.amplasoft\.me)[a-z0-9-]+\.(?:com|net|org|io|xyz|me|br|app|link|site|online)(?:\.br)?\b(?:\/[^\s]*)?/i
 const TELEFONE = /(?<!R\$\s?)(?<![\d.,])(?:\(?\d{2}\)?[\s-]?)?9?\d{4}[\s-]?\d{4}(?![\d,])/
 const EMAIL = /[a-z0-9._-]+@[a-z0-9-]+\.[a-z.]+/i
 const VAZOU = /usando SÓ os números|Responda à pergunta usando|formato pedido|INTENÇÃO|TIPOS DE AÇÃO/i

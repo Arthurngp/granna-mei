@@ -125,7 +125,7 @@ try {
   })
   await caso('cliente gera código no painel e manda: número confirmado', async () => {
     const { data: c } = await sb.from('verificacoes').upsert({ user_id: uid, codigo: '482913' }).select('codigo').single()
-    const r = await mandar(FONE, { content: `Meu código Granna Mei: ${c!.codigo}` })
+    const r = await mandar(FONE, { content: `Meu código Granninha: ${c!.codigo}` })
     assert.match(r.texto, /confirmado/)
     const p = (await sb.from('perfis').select('whats_verificado,whats').eq('id', uid).single()).data!
     assert.equal(p.whats_verificado, true)

@@ -6,7 +6,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { falhou, sb } from './banco.ts'
 import { garantirSessao, qrDaSessao } from './gateway.ts'
 
-const ORIGENS = (process.env.ADMIN_ORIGENS ?? 'https://grannamei.amplasoft.me').split(',').map((s) => s.trim())
+// Os dois domínios valem sempre, além do que vier em ADMIN_ORIGENS: trocar o domínio não pode derrubar o admin.
+const ORIGENS = [...new Set([...(process.env.ADMIN_ORIGENS ?? '').split(','), 'https://granninha.amplasoft.me', 'https://grannamei.amplasoft.me'].map((s) => s.trim()).filter(Boolean))]
 
 function cors(req: IncomingMessage, res: ServerResponse) {
   const o = req.headers.origin

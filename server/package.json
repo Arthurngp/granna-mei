@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Serviço da Granninha: recebe as mensagens do WhatsApp, entende com IA e grava no banco do Granna Mei.",
+  "description": "Serviço da Granninha: recebe as mensagens do WhatsApp, entende com IA e grava no banco da Granninha.",
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",

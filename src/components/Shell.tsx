@@ -25,7 +25,7 @@ export function Shell() {
       <aside className="lateral">
         <div className="marca-topo">
           <img src={`${import.meta.env.BASE_URL}logo-96.png`} alt="" />
-          Granna Mei
+          Granninha
         </div>
         {NAV.map(({ para, rotulo, I }) => (
           <NavLink key={para} to={para} end={para === '/'} className={({ isActive }) => `item ${isActive ? 'ativo' : ''}`}>
