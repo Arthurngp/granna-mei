@@ -58,9 +58,11 @@ await caso('quem não é cliente não recebe nada', async () => {
   assert.equal(r.status, 'ignorada')
   assert.equal(r.resposta ?? '', '')
 })
-await caso('nem com código errado', async () => {
+// Mudou de propósito em 18/11: antes era silêncio também aqui, e quem errava o código ou deixava
+// vencer ficava esperando para sempre achando que a Granninha não funciona.
+await caso('quem erra o código é avisado (só quem manda código, não um estranho qualquer)', async () => {
   const r = await msg('meu código 000000')
-  assert.equal(r.resposta ?? '', '')
+  assert.match(r.resposta ?? '', /não confere ou já venceu/)
 })
 await caso('código válido (cliente que criou a conta no site) continua confirmando o número', async () => {
   const r = await msg(`Meu código Granninha: ${CODIGO_VALIDO}`)

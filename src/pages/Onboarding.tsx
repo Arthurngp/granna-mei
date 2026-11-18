@@ -57,12 +57,15 @@ export default function Onboarding() {
   const { s, mut, sair, gerarCodigo, checarConfirmado } = useApp()
   const [confirmado, setConfirmado] = useState(false)
   const [codigo, setCodigo] = useState<string | null>(null)
-  const [passo, setPassoLocal] = useState(0)
+  // Quem já terminou os dados e está esperando a Granninha confirmar o número volta direto para esse
+  // passo se recarregar a página. Antes caía no passo 1 e tinha de preencher os 6 passos de novo.
+  const [passo, setPassoLocal] = useState(s.sessao.passo >= 6 ? 6 : 0)
 
-  const [negocio, setNegocio] = useState('')
-  const [cnpj, setCnpj] = useState('')
-  const [fone, setFone] = useState('')
-  const [ramo, setRamo] = useState('')
+  // Pré-preenchidos com o que já foi salvo: voltar do último passo não pode apagar o que ele escreveu.
+  const [negocio, setNegocio] = useState(s.usuario.negocio)
+  const [cnpj, setCnpj] = useState(s.usuario.cnpj)
+  const [fone, setFone] = useState(s.usuario.whats)
+  const [ramo, setRamo] = useState(s.usuario.ramo)
   const [carteiras, setCarteiras] = useState<CarteiraOb[]>([
     { id: 'banco', tipo: 'banco', nome: 'Conta do banco', dica: 'Pix, transferência e cartão de débito', on: true, saldo: 0 },
     { id: 'dinheiro', tipo: 'dinheiro', nome: 'Dinheiro', dica: 'O que fica na gaveta ou na carteira', on: false, saldo: 0 },
@@ -514,6 +517,7 @@ export default function Onboarding() {
             <div className="codigo-grande">
               <small>Seu código</small>
               <b className="num">{codigo ?? '······'}</b>
+              <small>vale por 30 minutos</small>
             </div>
             <ol className="passos-confirma">
               <li>Toque no botão verde aqui embaixo.</li>
@@ -523,6 +527,17 @@ export default function Onboarding() {
             <div className="esperando" aria-live="polite">
               <LoaderCircle size={16} className="gira" /> Esperando sua mensagem chegar...
             </div>
+            {/* Sem isto, quem demora e vê o código vencer fica esperando para sempre. */}
+            <button
+              type="button"
+              className="btn btn-txt"
+              onClick={() => {
+                setCodigo(null)
+                void gerarCodigo().then(setCodigo)
+              }}
+            >
+              Demorei, quero outro código
+            </button>
           </div>
         )}
         {passo === 6 && confirmado && <Conversa />}

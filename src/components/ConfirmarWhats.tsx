@@ -57,6 +57,11 @@ export function ConfirmarWhats({ compacto }: { compacto?: boolean }) {
           <p className="suave pq" style={{ textAlign: 'center' }}>
             Envie a mensagem como ela vier. A Granninha responde confirmando.
           </p>
+          {/* O código vence em 30 minutos: quem demorou precisa conseguir outro sem fechar a tela. */}
+          <button type="button" className="btn btn-txt" onClick={gerar} disabled={ocupado}>
+            {ocupado ? <LoaderCircle size={18} className="gira" /> : null}
+            Gerar outro código
+          </button>
         </>
       )}
       {erro && <small className="erro">{erro}</small>}
