@@ -5,7 +5,7 @@ import { Mascote } from './components/ui'
 import { useApp } from './lib/store'
 import Ajustes from './pages/Ajustes'
 import Assinatura from './pages/Assinatura'
-import { CriarConta, Entrar } from './pages/Auth'
+import { CriarConta, Entrar, NovaSenha } from './pages/Auth'
 import Bloqueado from './pages/Bloqueado'
 import Contas from './pages/Contas'
 import Inicio from './pages/Inicio'
@@ -41,6 +41,7 @@ export default function App() {
       <Routes>
         <Route path="/entrar" element={<Entrar />} />
         <Route path="/criar-conta" element={<CriarConta />} />
+        <Route path="/nova-senha" element={<NovaSenha />} />
         <Route path="*" element={<Navigate to="/entrar" replace />} />
       </Routes>
     )
@@ -48,6 +49,7 @@ export default function App() {
     rotas = (
       <Routes>
         <Route path="/comecar" element={<Onboarding />} />
+        <Route path="/nova-senha" element={<NovaSenha />} />
         <Route path="*" element={<Navigate to="/comecar" replace />} />
       </Routes>
     )
@@ -56,6 +58,7 @@ export default function App() {
     rotas = (
       <Routes>
         <Route path="/bloqueado" element={<Bloqueado />} />
+        <Route path="/nova-senha" element={<NovaSenha />} />
         <Route path="*" element={<Navigate to="/bloqueado" replace />} />
       </Routes>
     )
@@ -71,6 +74,7 @@ export default function App() {
           <Route path="/ajustes" element={<Ajustes />} />
           <Route path="/ajustes/assinatura" element={<Assinatura />} />
         </Route>
+        <Route path="/nova-senha" element={<NovaSenha />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     )

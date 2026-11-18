@@ -38,11 +38,21 @@ export interface Cliente {
   ramo: string
 }
 
-/** Só número VERIFICADO identifica um cliente. Número só digitado no cadastro não vale. */
+/**
+ * Só número VERIFICADO identifica um cliente. Número só digitado no cadastro não vale.
+ * Quem pediu para excluir a conta sai daqui na hora (`exclusao_em`): o acesso pelo WhatsApp acaba
+ * no mesmo instante, mesmo nos segundos até o batimento soltar o número para outra conta usar.
+ */
 export async function clientePorNumero(jid: string): Promise<Cliente | null> {
   const chave = chaveDoNumero(jid)
   if (!chave) return null
-  const { data, error } = await sb.from('perfis').select('id,nome,negocio,ramo').eq('whats_chave', chave).eq('whats_verificado', true).maybeSingle()
+  const { data, error } = await sb
+    .from('perfis')
+    .select('id,nome,negocio,ramo')
+    .eq('whats_chave', chave)
+    .eq('whats_verificado', true)
+    .is('exclusao_em', null)
+    .maybeSingle()
   falhou(error, 'clientePorNumero')
   return data as Cliente | null
 }

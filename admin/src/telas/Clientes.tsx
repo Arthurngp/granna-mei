@@ -157,11 +157,11 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
     }
   }
 
-  const gerarLink = async () => {
+  const gerarLink = async (tipo?: 'senha') => {
     setErro('')
     setOcupado(true)
     try {
-      const r = await api<{ link: string }>('/admin/link-acesso', { method: 'POST', body: JSON.stringify({ user_id: c.id }) })
+      const r = await api<{ link: string }>('/admin/link-acesso', { method: 'POST', body: JSON.stringify({ user_id: c.id, tipo }) })
       setLink(r.link)
     } catch (e) {
       setErro((e as Error).message)
@@ -221,8 +221,11 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
             <button type="button" className="btn btn-sec btn-bloco" disabled={ocupado} onClick={() => executar(c.verificado ? 'desverificar_numero' : 'verificar_numero')}>
               {c.verificado ? 'Desfazer confirmação do número' : 'Marcar número como confirmado'}
             </button>
-            <button type="button" className="btn btn-sec btn-bloco" disabled={ocupado} onClick={gerarLink}>
+            <button type="button" className="btn btn-sec btn-bloco" disabled={ocupado} onClick={() => gerarLink()}>
               Gerar link de acesso
+            </button>
+            <button type="button" className="btn btn-sec btn-bloco" disabled={ocupado} onClick={() => gerarLink('senha')}>
+              Gerar link para criar senha nova
             </button>
             {c.papel !== 'admin' && (
               <button type="button" className="btn btn-perigo btn-bloco" disabled={ocupado} onClick={() => setAcao('excluir_definitivo')}>
