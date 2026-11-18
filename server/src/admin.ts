@@ -59,14 +59,25 @@ export async function rotaAdmin(req: IncomingMessage, res: ServerResponse, camin
     return true
   }
   if (req.method === 'POST' && caminho === '/admin/link-acesso') {
-    const { user_id } = JSON.parse((await corpo()) || '{}') as { user_id?: string }
+    // tipo 'senha' leva o cliente para criar uma senha nova; sem isso ele entra sem saber nenhuma senha.
+    const { user_id, tipo } = JSON.parse((await corpo()) || '{}') as { user_id?: string; tipo?: string }
     if (!user_id) return json(res, 400, { erro: 'user_id obrigatório' }), true
     const u = await sb.auth.admin.getUserById(user_id)
     if (u.error || !u.data.user?.email) return json(res, 404, { erro: 'Cliente não encontrado.' }), true
     const painel = (process.env.PAINEL_URL ?? 'https://grannamei.amplasoft.me/painel').replace(/\/+$/, '')
-    const l = await sb.auth.admin.generateLink({ type: 'magiclink', email: u.data.user.email, options: { redirectTo: painel + '/' } })
+    const senha = tipo === 'senha'
+    const l = await sb.auth.admin.generateLink({
+      type: senha ? 'recovery' : 'magiclink',
+      email: u.data.user.email,
+      options: { redirectTo: painel + (senha ? '/nova-senha' : '/') },
+    })
     falhou(l.error, 'gerar link')
-    await sb.from('admin_auditoria').insert({ admin_id: admin, acao: 'link_acesso', alvo_user_id: user_id, detalhes: { motivo: 'link de acesso gerado pelo admin' } })
+    await sb.from('admin_auditoria').insert({
+      admin_id: admin,
+      acao: senha ? 'link_nova_senha' : 'link_acesso',
+      alvo_user_id: user_id,
+      detalhes: { motivo: senha ? 'link para o cliente criar senha nova' : 'link de acesso gerado pelo admin' },
+    })
     json(res, 200, { link: l.data.properties?.action_link })
     return true
   }

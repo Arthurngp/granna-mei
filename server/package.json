@@ -10,7 +10,9 @@
     "check": "tsc --noEmit",
     "test:frases": "tsx test/frases.ts",
     "test:fluxo": "tsx test/fluxo.ts",
-    "test:externos": "tsx test/externos.ts"
+    "test:externos": "tsx test/externos.ts",
+    "test:excluir": "tsx test/excluir.ts",
+    "test:saude": "tsx test/saude.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

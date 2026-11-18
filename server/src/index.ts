@@ -2,14 +2,16 @@
  * Servidor da Granninha.
  * POST /webhook   recebe as mensagens do gateway (assinadas), responde 200 na hora e processa em seguida
  *                 (o gateway espera no máximo 10 s e não reenvia).
- * GET  /saude     situação do serviço e do número, para o admin e o monitoramento.
+ * GET  /saude     diz só que está de pé. O detalhe (número, volume, fila) sai com a chave
+ *                 SAUDE_CHAVE, no cabeçalho Authorization ou em ?chave=, para o monitoramento.
  */
 import { createServer, type IncomingMessage } from 'node:http'
 import './env.ts'
 import { sb } from './banco.ts'
 import { rotaAdmin } from './admin.ts'
 import { assinaturaValida, enviarTexto, statusSessao } from './gateway.ts'
-import { processar, type EventoGateway } from './granninha.ts'
+import { excluirVencidas, soltarNumerosDeExcluidas } from './excluir.ts'
+import { hojeSP, processar, type EventoGateway } from './granninha.ts'
 
 const PORTA = Number(process.env.PORT ?? 3000)
 let ultimaMensagem: string | null = null
@@ -67,6 +69,14 @@ export function iniciar(porta = PORTA) {
         return
       }
       if (req.method === 'GET' && url.pathname === '/saude') {
+        // Sem a chave certa, só diz que está de pé: o número da Granninha e o volume de mensagens
+        // não são para qualquer um na internet. Sem SAUDE_CHAVE definida, ninguém vê o detalhe.
+        const chave = process.env.SAUDE_CHAVE ?? ''
+        const veio = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '') || (url.searchParams.get('chave') ?? '')
+        if (!chave || veio !== chave) {
+          res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true }))
+          return
+        }
         const desde = new Date(Date.now() - 86400_000).toISOString()
         const [wa, hoje, falhas] = await Promise.all([
           statusSessao().catch((e) => ({ estado: 'gateway fora: ' + (e as Error).message, numero: null })),
@@ -92,6 +102,32 @@ export function iniciar(porta = PORTA) {
       await sb.from('granninha_saude').upsert({ id: 1, whatsapp_estado: wa.estado, whatsapp_numero: wa.numero, fila: filas.size, atualizado_em: new Date().toISOString() })
     } catch (e) {
       console.error('[saude]', (e as Error).message)
+    }
+    // Quem pediu para excluir a conta para de ser atendido na hora e o número volta a ficar livre.
+    try {
+      const soltos = await soltarNumerosDeExcluidas(sb)
+      if (soltos) console.log('[excluir] números soltos de contas em exclusão:', soltos)
+    } catch (e) {
+      console.error('[excluir] soltar números:', (e as Error).message)
+    }
+    await varrerVencidas()
+  }
+
+  // Uma vez por dia: apaga de vez quem passou dos 30 dias. Sai listando, sem apagar, até
+  // EXCLUSAO_AUTOMATICA=1 (assim o Arthur vê no log o que sairia antes de ligar de verdade).
+  let diaVarrido: string | null = null
+  const varrerVencidas = async () => {
+    const hoje = hojeSP()
+    if (diaVarrido === hoje) return
+    diaVarrido = hoje
+    try {
+      const apagar = process.env.EXCLUSAO_AUTOMATICA === '1'
+      const lista = await excluirVencidas(sb, hoje, apagar)
+      for (const v of lista) console.log(`[excluir] prazo vencido ${v.exclusao_em} · ${v.cliente} · ${v.apagada ? 'APAGADA' : 'não apagada: ' + v.erro}`)
+      if (!lista.length) console.log('[excluir] nenhuma conta com prazo vencido hoje.')
+    } catch (e) {
+      diaVarrido = null // deu erro: tenta de novo no próximo minuto
+      console.error('[excluir] varrer vencidas:', (e as Error).message)
     }
   }
   if (process.env.SEM_BATIMENTO !== '1') {

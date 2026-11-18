@@ -1,6 +1,6 @@
 import { Eye, EyeOff, LoaderCircle } from 'lucide-react'
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Mascote, useAviso, type Pose } from '../components/ui'
 import { PRECO_MENSAL } from '../lib/config'
 import { brl, hoje } from '../lib/format'
@@ -166,6 +166,58 @@ export function CriarConta() {
       <p className="auth-troca">
         Já tem conta? <Link to="/entrar">Entrar</Link>
       </p>
+    </Tela>
+  )
+}
+
+/**
+ * Criar a senha nova. É onde cai o link de "esqueci minha senha" do e-mail, e também o link
+ * que o admin gera para quem perdeu o acesso: quem chega aqui já entrou pelo link, só falta a senha.
+ */
+export function NovaSenha() {
+  const { s, trocarSenha } = useApp()
+  const avisar = useAviso()
+  const navegar = useNavigate()
+  const [senha, setSenha] = useState('')
+  const [repete, setRepete] = useState('')
+  const [erro, setErro] = useState('')
+  const [ocupado, setOcupado] = useState(false)
+
+  const enviar = async (e: FormEvent) => {
+    e.preventDefault()
+    setErro('')
+    if (senha.length < 6) return setErro('A senha tem pelo menos 6 caracteres.')
+    if (senha !== repete) return setErro('As duas senhas não são iguais.')
+    setOcupado(true)
+    const falha = await trocarSenha(senha)
+    setOcupado(false)
+    if (falha) return setErro(falha)
+    avisar('Senha trocada. Já pode usar a nova.')
+    navegar('/', { replace: true })
+  }
+
+  // Sem sessão, o link venceu ou já foi usado: não adianta mostrar o formulário.
+  if (!s.sessao.logado) {
+    return (
+      <Tela titulo="Criar uma senha nova" sub="Este link não vale mais." pose="pensando">
+        <h2>Esse link já venceu</h2>
+        <p>Cada link de senha serve uma vez só e dura pouco tempo. Peça outro na tela de entrar.</p>
+        <Link className="btn btn-pri btn-bloco" to="/entrar">
+          Voltar para entrar
+        </Link>
+      </Tela>
+    )
+  }
+
+  return (
+    <Tela titulo="Criar uma senha nova" sub="Escolha a senha que você vai usar daqui para a frente." pose="checklist">
+      <h2>Senha nova</h2>
+      <form className="pilha" onSubmit={enviar} noValidate>
+        <CampoSenha valor={senha} onChange={setSenha} rotulo="Senha nova" dica="Pelo menos 6 caracteres" auto="new-password" />
+        <CampoSenha valor={repete} onChange={setRepete} rotulo="Repita a senha" auto="new-password" />
+        <Erro texto={erro} />
+        <BotaoEnviar ocupado={ocupado}>Salvar a senha</BotaoEnviar>
+      </form>
     </Tela>
   )
 }

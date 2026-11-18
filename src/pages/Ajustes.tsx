@@ -134,12 +134,12 @@ export default function Ajustes() {
 
       {s.exclusaoEm && (
         <div className="faixa atraso" role="alert">
-          <span className="cresce">Sua conta será apagada em {diaCurto(s.exclusaoEm)}. Até lá, dá para desistir.</span>
+          <span className="cresce">Sua conta será apagada em {diaCurto(s.exclusaoEm)} e a Granninha já parou de responder no WhatsApp. Até lá, dá para desistir.</span>
           <button
             type="button"
             onClick={() => {
               mut((a) => ({ ...a, exclusaoEm: undefined }))
-              avisar('Exclusão cancelada. Sua conta continua.')
+              avisar('Exclusão cancelada. Confirme seu número de novo para a Granninha voltar.')
             }}
           >
             Desistir
@@ -790,7 +790,10 @@ export default function Ajustes() {
       >
         <div className="pilha">
           <p>
-            Sua assinatura é cancelada agora e, <b>em 30 dias</b>, apagamos todos os seus lançamentos, contas e comprovantes. Nesse prazo você pode desistir aqui mesmo, em Ajustes.
+            A Granninha <b>para de responder no seu WhatsApp agora</b> e seu número fica livre para outra conta. Em <b>30 dias</b> apagamos de vez seus lançamentos, contas e comprovantes.
+          </p>
+          <p>
+            Nesse prazo você ainda entra aqui para desistir. Se desistir, é só confirmar seu número de novo para a Granninha voltar a te atender.
           </p>
           <button type="button" className="btn btn-sec" onClick={() => baixarTudo(s)}>
             <Download size={18} />

@@ -34,6 +34,8 @@ function traduz(msg: string) {
   const m = msg.toLowerCase()
   if (m.includes('invalid login')) return 'E-mail ou senha não conferem.'
   if (m.includes('already registered') || m.includes('already been registered')) return 'Já existe uma conta com este e-mail. Tente entrar.'
+  if (m.includes('different from the old') || m.includes('should be different')) return 'A senha nova precisa ser diferente da que você já usava.'
+  if (m.includes('session missing') || m.includes('session not found') || m.includes('expired')) return 'Esse link já venceu. Peça outro em "Esqueci minha senha".'
   if (m.includes('password')) return 'A senha precisa ter pelo menos 6 caracteres.'
   if (m.includes('rate limit') || m.includes('too many')) return 'Muitas tentativas seguidas. Espere um minuto e tente de novo.'
   if (m.includes('failed to fetch') || m.includes('network')) return 'Sem conexão com o servidor. Confira sua internet.'
@@ -50,6 +52,8 @@ interface Ctx {
   entrar: (email: string, senha: string) => Promise<string | null>
   criarConta: (nome: string, email: string, senha: string) => Promise<string | null>
   recuperarSenha: (email: string) => Promise<string | null>
+  /** Grava a senha nova de quem chegou pelo link de recuperação. Devolve a mensagem de erro, ou null. */
+  trocarSenha: (senha: string) => Promise<string | null>
   /** Código de 6 números para o cliente mandar à Granninha e confirmar o WhatsApp. */
   gerarCodigo: () => Promise<string | null>
   /** Confere no banco se a Granninha já confirmou o número (o cliente mandou o código). */
@@ -255,8 +259,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       recuperarSenha: async (email) => {
         if (!supabase) return 'A troca de senha ainda não está ligada neste endereço.'
-        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + import.meta.env.BASE_URL })
-        return error ? 'O envio de e-mail ainda não está ligado. Fale com a gente para trocar a senha.' : null
+        // O link do e-mail cai direto na tela de criar a senha nova.
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + import.meta.env.BASE_URL + 'nova-senha' })
+        return error ? 'Não consegui enviar o e-mail agora. Tente de novo daqui a pouco.' : null
+      },
+      trocarSenha: async (senha) => {
+        if (!supabase) return 'A troca de senha ainda não está ligada neste endereço.'
+        const { error } = await supabase.auth.updateUser({ password: senha })
+        return error ? traduz(error.message) : null
       },
       gerarCodigo: async () => {
         if (s.sessao.demo || !supabase) return String(Math.floor(100000 + Math.random() * 900000))
