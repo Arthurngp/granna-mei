@@ -268,7 +268,7 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
   })
   return {
     status: 'ignorada',
-    resposta: `Oi! Eu sou a Granninha. Eu organizo o dinheiro do seu MEI aqui pelo WhatsApp.\n\nPara começar, crie sua conta (${hojeSP() <= '2026-11-30' ? 'grátis até 31 de dezembro' : '7 dias grátis'}): ${PAINEL()}/criar-conta`,
+    resposta: `Oi! Eu sou a Granninha. Eu organizo o dinheiro do seu MEI aqui pelo WhatsApp.\n\nPara começar, crie sua conta (${hojeSP() <= '2026-12-31' ? 'grátis até 31 de dezembro' : '7 dias grátis'}): ${PAINEL()}/criar-conta`,
     userId: null,
   }
 }

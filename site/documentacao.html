@@ -72,7 +72,7 @@
 
     <section class="secao" id="comeco">
       <div class="secao-cab"><img src="/img/laptop.png" alt="" /><div><small>2</small><h2>Primeiros passos</h2></div></div>
-      <p>Você cria a conta com nome, e-mail e senha e <span data-fora="ganha 7 dias grátis">usa grátis até 31 de dezembro (conta criada até 30 de novembro)</span>. Depois, a Granninha te guia por 7 passos curtos:</p>
+      <p>Você cria a conta com nome, e-mail e senha e <span data-fora="ganha 7 dias grátis">usa grátis até 31 de dezembro (conta criada até 31 de dezembro)</span>. Depois, a Granninha te guia por 7 passos curtos:</p>
       <ol class="passos-lista">
         <li><span><strong>Seu negócio e seu WhatsApp.</strong> O nome do negócio, o CNPJ (se tiver) e o número que você vai usar para conversar com ela.</span></li>
         <li><span><strong>Seu ramo.</strong> Beleza, alimentação, comércio, serviços e outros. Assim as categorias já chegam certas para o seu tipo de negócio.</span></li>
@@ -162,7 +162,7 @@
     <section class="secao" id="planos">
       <div class="secao-cab"><img src="/img/saco.png" alt="" /><div><small>9</small><h2>Planos, teste e pagamento</h2></div></div>
       <ul>
-        <li><strong data-fora="7 dias grátis">Grátis até 31 de dezembro</strong> para quem cria a conta até 30 de novembro, com tudo liberado.</li>
+        <li><strong data-fora="7 dias grátis">Grátis até 31 de dezembro</strong> para quem cria a conta até 31 de dezembro, com tudo liberado.</li>
         <li><strong>Mensal:</strong> R$ 29,90 por mês, sem fidelidade.</li>
         <li><strong>Anual:</strong> R$ 299,90 por ano, quase 2 meses gratuitamente.</li>
       </ul>
@@ -190,10 +190,10 @@
   </div>
 </footer>
 <script>
-  // Oferta: quem cria a conta até 30/11 usa grátis até 31/12. Até 30/11 o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
+  // Oferta: quem cria a conta até 31/12 usa grátis até 31/12. Até lá o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
   (function () {
     var hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-    if (hoje <= '2026-11-30') return;
+    if (hoje <= '2026-12-31') return;
     document.querySelectorAll('[data-fora]').forEach(function (el) { el.textContent = el.getAttribute('data-fora'); });
   })();
 </script>
