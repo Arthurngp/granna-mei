@@ -117,6 +117,11 @@ export async function processar(ev: EventoGateway): Promise<Saida> {
       } else if (tipo === 'outro') {
         status = 'ignorada'
         resposta = 'Por aqui eu entendo texto, áudio, foto de comprovante e PDF. Me manda de um desses jeitos?'
+      } else if (await codigoDeOutraConta(cliente.id, d.content ?? '')) {
+        // Abriu outra conta e tentou confirmar com o mesmo número: o número já é desta conta, então
+        // sem isto o código viraria uma conversa comum aqui e a conta nova ficaria esperando para sempre.
+        status = 'ignorada'
+        resposta = `Esse número já está confirmado nesta conta, então não dá para usá-lo em outra ao mesmo tempo. Se quiser levá-lo para a conta nova, troque o número aqui em ${PAINEL()}/ajustes (ou peça a exclusão desta conta) e confirme lá.`
       } else {
         const r = await conversar(cliente, hoje, tipo, d, msgId, telefone)
         ;({ status, resposta, efeitos, intencao } = r)
@@ -143,17 +148,95 @@ export async function processar(ev: EventoGateway): Promise<Saida> {
   return { status, para: telefone, resposta }
 }
 
-/** Número que não é de nenhum cliente verificado: se mandar código de confirmação válido, liga o número à conta; fora isso, silêncio (ou o link de cadastro, com GRANNINHA_CONVIDAR=1). */
+/**
+ * A mensagem é um código de confirmação de OUTRA conta? Acontece quando a pessoa abre uma conta nova
+ * e tenta confirmar com o número que já é de uma conta existente dela.
+ */
+async function codigoDeOutraConta(clienteId: string, texto: string): Promise<boolean> {
+  const codigo = texto.trim().match(/^\D{0,30}\b(\d{6})\b\D{0,30}$/)?.[1]
+  if (!codigo) return false
+  const { data } = await sb.from('verificacoes').select('user_id').eq('codigo', codigo).gt('expira_em', new Date().toISOString()).limit(2)
+  return (data ?? []).some((v) => (v as { user_id: string }).user_id !== clienteId)
+}
+
+/** Quantos códigos errados o mesmo número pode tentar antes de a Granninha parar de responder, e por quanto tempo. */
+const LIMITE_CODIGOS = 5
+const JANELA_CODIGOS = 60 * 60 * 1000
+
+/** Lê as tentativas de código daquele telefone, zerando sozinho quando a janela passa. */
+async function tentativasDe(telefone: string): Promise<{ n: number; desde: string | null; link_em?: string }> {
+  const { data } = await sb.from('conversas').select('pendente').eq('telefone', telefone).maybeSingle()
+  const p = (data?.pendente ?? {}) as { codigo_tentativas?: number; codigo_desde?: string; link_em?: string }
+  const dentro = p.codigo_desde ? Date.now() - new Date(p.codigo_desde).getTime() < JANELA_CODIGOS : false
+  return { n: dentro ? (p.codigo_tentativas ?? 0) : 0, desde: dentro ? (p.codigo_desde ?? null) : null, link_em: p.link_em }
+}
+
+async function marcarTentativa(telefone: string, atual: { n: number; desde: string | null; link_em?: string }) {
+  const agora = new Date().toISOString()
+  await sb.from('conversas').upsert({
+    telefone,
+    pendente: { codigo_tentativas: atual.n + 1, codigo_desde: atual.desde ?? agora, ...(atual.link_em ? { link_em: atual.link_em } : {}) },
+    atualizado_em: agora,
+  })
+}
+
+/**
+ * Número que não é de nenhum cliente verificado. Se mandar o código de confirmação certo, liga o
+ * número à conta; fora isso, silêncio (ou o convite de cadastro, com GRANNINHA_CONVIDAR=1).
+ *
+ * O código vale para UM número: ele só confirma se o remetente for o número que a pessoa digitou no
+ * painel. Sem isso, qualquer um mandando números de 6 dígitos ao acaso acabaria ligando o próprio
+ * telefone à conta de um cliente (e lendo o financeiro dele). Por isso também existe teto de
+ * tentativas por telefone: estourou, a Granninha cala, e aí nem serve para adivinhar código.
+ */
 async function numeroDesconhecido(telefone: string, jid: string, texto: string): Promise<{ status: Status; resposta: string; userId: string | null }> {
   const codigo = texto.match(/\b(\d{6})\b/)?.[1]
+  const mudo = { status: 'ignorada' as Status, resposta: '', userId: null }
   if (codigo) {
-    const { data: v, error } = await sb.from('verificacoes').select('user_id').eq('codigo', codigo).gt('expira_em', new Date().toISOString()).maybeSingle()
+    const tent = await tentativasDe(telefone)
+    if (tent.n >= LIMITE_CODIGOS) {
+      // Estourou o teto. Avisa UMA vez e depois cala: quem é cliente de verdade e errou demais precisa
+      // saber que é só esperar, e quem está tentando adivinhar código não ganha pista nenhuma com isso.
+      if (tent.n === LIMITE_CODIGOS) {
+        await marcarTentativa(telefone, tent)
+        return { status: 'ignorada', resposta: 'Foram muitas tentativas seguidas. Espere alguns minutos, gere um código novo no painel e me mande de novo.', userId: null }
+      }
+      return mudo
+    }
+    const agora = new Date().toISOString()
+    // limit(2) para enxergar a colisão: dois clientes com o mesmo código vivo não podem quebrar a confirmação.
+    const { data: vs, error } = await sb.from('verificacoes').select('user_id').eq('codigo', codigo).gt('expira_em', agora).limit(2)
     falhou(error, 'verificação')
+    const achados = vs ?? []
+    if (achados.length > 1) {
+      return { status: 'ignorada', resposta: `Não consegui confirmar agora. Gere um código novo no painel em ${PAINEL()} e me mande de novo.`, userId: null }
+    }
+    const v = achados[0]
     if (v) {
+      // O código é de quem digitou aquele número no painel: confere antes de ligar.
+      const dono = await sb.from('perfis').select('nome, whats_chave').eq('id', v.user_id).maybeSingle()
+      falhou(dono.error, 'dono do código')
+      const esperado = dono.data?.whats_chave as string | null
+      if (esperado && esperado !== chaveDoNumero(jid)) {
+        await marcarTentativa(telefone, tent)
+        return {
+          status: 'ignorada',
+          resposta: `Esse código foi gerado para outro número de WhatsApp. Confira o número em ${PAINEL()}/ajustes e gere um código novo.`,
+          userId: null,
+        }
+      }
       const up = await sb.from('perfis').update({ whats: formatarNumero(jid), whats_verificado: true }).eq('id', v.user_id).select('nome').single()
-      if (up.error?.code === '23505') return { status: 'ignorada', resposta: 'Este número já está ligado a outra conta da Granninha. Se for engano, fala com a gente pelo painel.', userId: v.user_id }
+      if (up.error?.code === '23505') {
+        return {
+          status: 'ignorada',
+          resposta: `Este número já está ligado a outra conta da Granninha. Entre naquela conta em ${PAINEL()} e troque o número em Ajustes, ou peça a exclusão dela.`,
+          userId: v.user_id,
+        }
+      }
       falhou(up.error, 'confirmar número')
       await sb.from('verificacoes').delete().eq('user_id', v.user_id)
+      // Confirmou: a contagem de tentativas daquele telefone sai do caminho.
+      await sb.from('conversas').delete().eq('telefone', telefone)
       const nome = (up.data?.nome ?? '').split(' ')[0]
       return {
         status: 'ok',
@@ -161,21 +244,27 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
         userId: v.user_id,
       }
     }
+    // Código errado ou vencido: quem está tentando confirmar precisa saber disso, senão fica
+    // esperando para sempre achando que a Granninha não funciona. Vale mesmo com o convite desligado.
+    await marcarTentativa(telefone, tent)
+    return { status: 'ignorada', resposta: `Esse código não confere ou já venceu. Gere um novo no painel em ${PAINEL()} e me mande de novo.`, userId: null }
   }
-  // Por enquanto a Granninha fica em silêncio para quem não é cliente: sem convite, sem link, sem aviso de código
-  // errado (pedido do Arthur em 2026-11-16: "inativo para os externos"). Só o código válido acima ganha resposta,
-  // porque é o passo final de quem já criou a conta pelo site. GRANNINHA_CONVIDAR=1 religa o convite abaixo.
-  if (process.env.GRANNINHA_CONVIDAR !== '1') return { status: 'ignorada', resposta: '', userId: null }
+  // Sem código, a Granninha fica em silêncio para quem não é cliente: sem convite, sem link
+  // (pedido do Arthur em 2026-11-16: "inativo para os externos"). GRANNINHA_CONVIDAR=1 religa o convite abaixo.
+  if (process.env.GRANNINHA_CONVIDAR !== '1') return mudo
   // Responde o link no máximo uma vez por dia para o mesmo número: sem gastar IA e sem virar conversa infinita.
-  const { data: c } = await sb.from('conversas').select('pendente,atualizado_em').eq('telefone', telefone).maybeSingle()
-  const ultimo = (c?.pendente as { link_em?: string } | null)?.link_em
-  if (ultimo && Date.now() - new Date(ultimo).getTime() < 86400_000) return { status: 'ignorada', resposta: '', userId: null }
-  await sb.from('conversas').upsert({ telefone, pendente: { link_em: new Date().toISOString() }, atualizado_em: new Date().toISOString() })
+  const tent = await tentativasDe(telefone)
+  if (tent.link_em && Date.now() - new Date(tent.link_em).getTime() < 86400_000) return mudo
+  const agora = new Date().toISOString()
+  // Guarda a contagem de tentativas de código junto: um "oi" no meio não pode zerar o teto.
+  await sb.from('conversas').upsert({
+    telefone,
+    pendente: { link_em: agora, ...(tent.n ? { codigo_tentativas: tent.n, codigo_desde: tent.desde } : {}) },
+    atualizado_em: agora,
+  })
   return {
     status: 'ignorada',
-    resposta: codigo
-      ? `Esse código não confere ou já venceu. Gere um novo no painel em ${PAINEL()} e me mande de novo.`
-      : `Oi! Eu sou a Granninha. Eu organizo o dinheiro do seu MEI aqui pelo WhatsApp.\n\nPara começar, crie sua conta (${hojeSP() <= '2026-11-30' ? 'grátis até 31 de dezembro' : '7 dias grátis'}): ${PAINEL()}/criar-conta`,
+    resposta: `Oi! Eu sou a Granninha. Eu organizo o dinheiro do seu MEI aqui pelo WhatsApp.\n\nPara começar, crie sua conta (${hojeSP() <= '2026-11-30' ? 'grátis até 31 de dezembro' : '7 dias grátis'}): ${PAINEL()}/criar-conta`,
     userId: null,
   }
 }
