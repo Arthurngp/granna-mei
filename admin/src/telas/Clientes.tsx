@@ -128,6 +128,7 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
   const [ocupado, setOcupado] = useState(false)
   const [erro, setErro] = useState('')
   const [link, setLink] = useState('')
+  const [emailConf, setEmailConf] = useState('')
 
   useEffect(() => {
     setFicha(null)
@@ -135,6 +136,7 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
     setMotivo('')
     setErro('')
     setLink('')
+    setEmailConf('')
     if (c) rpc<Ficha>('admin_cliente', { p_id: c.id }).then(setFicha).catch((e: Error) => setErro(e.message))
   }, [c])
 
@@ -161,6 +163,21 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
     try {
       const r = await api<{ link: string }>('/admin/link-acesso', { method: 'POST', body: JSON.stringify({ user_id: c.id }) })
       setLink(r.link)
+    } catch (e) {
+      setErro((e as Error).message)
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  const excluirDefinitivo = async () => {
+    setErro('')
+    setOcupado(true)
+    try {
+      await api('/admin/excluir-conta', { method: 'POST', body: JSON.stringify({ user_id: c.id, email: emailConf, motivo }) })
+      avisar('Conta excluída. E-mail, CNPJ e telefone estão livres para cadastrar de novo.')
+      mudou()
+      fechar()
     } catch (e) {
       setErro((e as Error).message)
     } finally {
@@ -207,6 +224,11 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
             <button type="button" className="btn btn-sec btn-bloco" disabled={ocupado} onClick={gerarLink}>
               Gerar link de acesso
             </button>
+            {c.papel !== 'admin' && (
+              <button type="button" className="btn btn-perigo btn-bloco" disabled={ocupado} onClick={() => setAcao('excluir_definitivo')}>
+                Excluir conta definitivamente
+              </button>
+            )}
             {link && (
               <div className="pilha" style={{ gap: 6 }}>
                 <small className="suave">Link de entrada sem senha, vale uma vez. Mande para o cliente pelo WhatsApp.</small>
@@ -223,6 +245,29 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
                 </button>
               </div>
             )}
+          </div>
+        ) : acao === 'excluir_definitivo' ? (
+          <div className="item-ob ligado">
+            <b>Excluir conta definitivamente</b>
+            <small className="suave">
+              Apaga o login, o perfil (CNPJ, WhatsApp, contador), todos os lançamentos, contas, mensagens e arquivos de {c.nome || c.email}. Não tem volta. Depois disso o mesmo e-mail, CNPJ e telefone podem criar uma conta nova do zero.
+            </small>
+            <label className="campo">
+              <span>Para confirmar, digite o e-mail da conta: {c.email}</span>
+              <input className="entrada" value={emailConf} onChange={(e) => setEmailConf(e.target.value)} autoCapitalize="none" autoComplete="off" />
+            </label>
+            <label className="campo">
+              <span>Motivo (fica na auditoria)</span>
+              <input className="entrada" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ex.: cliente pediu para recomeçar do zero" />
+            </label>
+            <div className="dupla">
+              <button type="button" className="btn btn-sec" onClick={() => setAcao(null)}>
+                Voltar
+              </button>
+              <button type="button" className="btn btn-perigo" disabled={ocupado || motivo.trim().length < 3 || emailConf.trim().toLowerCase() !== c.email.trim().toLowerCase()} onClick={excluirDefinitivo}>
+                Excluir de vez
+              </button>
+            </div>
           </div>
         ) : (
           <div className="item-ob ligado">
