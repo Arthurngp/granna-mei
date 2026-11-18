@@ -11,6 +11,9 @@ import { BOLETO, conferir, interpretar, NEGOCIO, opcaoEscolhida, PESSOAL, type A
 import { lerDocumento, textoDoDocumento, type Transacao } from './midia.ts'
 import { transcrever, type Uso } from './openai.ts'
 import { responderPergunta } from './perguntas.ts'
+import { carregarBase } from './base.ts'
+import { ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta } from './consultas.ts'
+import { foraDoDisponivel } from './cartao.ts'
 
 export const LIMITE_LANCAMENTOS = Number(process.env.LIMITE_LANCAMENTOS ?? 300)
 export const LIMITE_MIDIAS = Number(process.env.LIMITE_MIDIAS ?? 100)
@@ -391,6 +394,15 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     texto = `${pend.texto}\n(resposta para "${(pend.pergunta ?? '').split('\n')[0]}"): ${esc ? (esc.id === BOLETO ? 'no boleto ou carnê' : esc.id === NEGOCIO ? 'é do negócio' : esc.id === PESSOAL ? 'é pessoal, da casa' : esc.nome) : texto}`
   }
 
+  // Pergunta de número ("qual meu saldo?", "quanto entrou hoje?"): responde por código, sem IA. O número é o mesmo do painel.
+  if (!continua && !documento && !anexo && ehPerguntaClara(texto)) {
+    const consulta = reconhecer(texto)
+    if (consulta) {
+      const direta = responderConsulta(consulta, await carregarBase(cliente.id), hoje)
+      return { status: 'ok', resposta: direta, efeitos: {}, intencao: 'pergunta', texto, tokens }
+    }
+  }
+
   const it = await interpretar(texto, ctx, { forcarCarteira: forcar.carteira, forcarPessoal: forcar.pessoal, documento })
   soma(it.uso)
 
@@ -401,14 +413,14 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     }
     const anteriores = it.acoes.some((a) => a.tipo_acao === 'criar_categoria') ? (await ultimaComEfeito(cliente.id))?.efeitos : undefined
     const r = await executar(cliente.id, ctx, it.acoes, origemFinal, anexo, anteriores)
-    return { status: 'ok', resposta: `${r.linhas.join('\n\n')}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
+    return { status: 'ok', resposta: `${r.linhas.join('\n\n')}${await saldoDepois(cliente.id, it.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
   }
   if (it.intencao === 'desfazer') {
     const ult = await ultimaComEfeito(cliente.id)
     if (!ult) return { status: 'ok', resposta: 'Não achei nada recente para desfazer.', efeitos: {}, intencao: 'desfazer', texto, tokens }
     await reverter(cliente.id, ult.efeitos)
     await sb.from('mensagens').update({ desfeita: true }).eq('id', ult.id).eq('user_id', cliente.id)
-    return { status: 'ok', resposta: `Pronto, desfiz: "${ult.texto.slice(0, 120)}"`, efeitos: {}, intencao: 'desfazer', texto, tokens }
+    return { status: 'ok', resposta: `Pronto, desfiz: "${ult.texto.slice(0, 120)}"${await saldoDepois(cliente.id, null)}`, efeitos: {}, intencao: 'desfazer', texto, tokens }
   }
   if (it.intencao === 'corrigir') {
     const ult = await ultimaComEfeito(cliente.id)
@@ -422,9 +434,12 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     await reverter(cliente.id, ult.efeitos)
     await sb.from('mensagens').update({ desfeita: true }).eq('id', ult.id).eq('user_id', cliente.id)
     const r = await executar(cliente.id, await contextoDe(cliente.id, hoje), it2.acoes, tipo, anexo)
-    return { status: 'ok', resposta: `Corrigido.\n\n${r.linhas.join('\n\n')}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'corrigir', texto: novo, tokens }
+    return { status: 'ok', resposta: `Corrigido.\n\n${r.linhas.join('\n\n')}${await saldoDepois(cliente.id, it2.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'corrigir', texto: novo, tokens }
   }
   if (it.intencao === 'pergunta') {
+    // A IA entendeu que é pergunta; se o pedido é um dos conhecidos, o número sai do código, não da IA.
+    const consulta = reconhecer(texto) ?? (it.pergunta ? reconhecer(it.pergunta) : null)
+    if (consulta) return { status: 'ok', resposta: responderConsulta(consulta, await carregarBase(cliente.id), hoje), efeitos: {}, intencao: 'pergunta', texto, tokens }
     const p = await responderPergunta(cliente.id, hoje, it.pergunta ?? texto)
     soma(p.uso)
     return { status: 'ok', resposta: p.texto, efeitos: {}, intencao: 'pergunta', texto, tokens }
@@ -463,7 +478,7 @@ async function importarFatura(userId: string, ctx: Contexto, ts: Transacao[], ca
   const total = acoes.reduce((a, x) => a + (x.valor ?? 0), 0)
   return {
     status: 'ok',
-    resposta: `Importei ${acoes.length} compras no ${cartao.nome}, somando ${brl(total)}${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Elas entram nos gastos quando você pagar a fatura. Confira as categorias no painel.\n\nErrou? Responda DESFAZER.`,
+    resposta: `Importei ${acoes.length} compras no ${cartao.nome}, somando ${brl(total)}${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Elas entram nos gastos quando você pagar a fatura. Confira as categorias no painel.${await saldoDepois(userId, acoes)}\n\nErrou? Responda DESFAZER.`,
     efeitos: r.efeitos, intencao: 'fatura', texto: 'importar fatura', tokens,
   }
 }
@@ -492,7 +507,29 @@ async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Or
   const r = await executar(userId, ctx, acoes, tipo, anexo)
   return {
     status: 'ok',
-    resposta: `Importei ${acoes.length} lançamentos${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Confira as categorias no painel.\n\nErrou? Responda DESFAZER.`,
+    resposta: `Importei ${acoes.length} lançamentos${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Confira as categorias no painel.${await saldoDepois(userId, acoes)}\n\nErrou? Responda DESFAZER.`,
     efeitos: r.efeitos, intencao: 'extrato', texto: 'importar extrato', tokens,
+  }
+}
+
+/** Tipos de ação que mexem no saldo de uma carteira. Conta a pagar, conta fixa e categoria nova não mexem. */
+const MEXE_NO_SALDO = new Set(['lancamento', 'transferencia', 'pagar_fatura', 'baixar_conta'])
+
+/**
+ * Fecha a confirmação com o saldo REAL, calculado do banco depois de gravar: em qual carteira caiu e quanto há disponível.
+ * Sem `acoes` (desfazer) mostra todas as contas. Se a consulta falhar, o lançamento já está salvo e a confirmação sai sem a linha:
+ * saldo nunca derruba o registro.
+ */
+async function saldoDepois(userId: string, acoes: Acao[] | null): Promise<string> {
+  try {
+    const b = await carregarBase(userId)
+    const ids = acoes
+      ? acoes.filter((a) => MEXE_NO_SALDO.has(a.tipo_acao) || (a.tipo_acao === 'parcelado' && a.noCartao)).flatMap((a) => [a.carteira_id, a.carteira_destino_id])
+      : b.carteiras.filter((c) => !foraDoDisponivel(c.tipo)).map((c) => c.id)
+    const linhas = linhasDeSaldoDepois(b, ids)
+    return linhas ? `\n\n${linhas}` : ''
+  } catch (e) {
+    console.error('[saldo] não consegui calcular o saldo depois de gravar:', (e as Error).message)
+    return ''
   }
 }

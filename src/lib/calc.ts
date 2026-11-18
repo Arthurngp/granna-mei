@@ -1,4 +1,5 @@
 import { efetivos, foraDoDisponivel } from './cartao'
+import { saldosDas } from './saldo'
 import { diasNoMes, hoje, mesCurto, mesDe, somaMeses } from './format'
 import type { Categoria, Estado, Lancamento } from './tipos'
 
@@ -38,20 +39,8 @@ export function totais(lancs: Lancamento[]): Totais {
 export const doMes = (lancs: Lancamento[], ym: string) => lancs.filter((l) => mesDe(l.data) === ym)
 export const doPeriodo = (lancs: Lancamento[], de: string, ate: string) => lancs.filter((l) => l.data >= de && l.data <= ate)
 
-/** Saldo atual de cada carteira: saldo inicial mais tudo que entrou, saiu e foi transferido. */
-export function saldos(s: Estado): Record<string, number> {
-  const r: Record<string, number> = {}
-  for (const c of s.carteiras) r[c.id] = c.saldoInicial
-  for (const l of s.lancamentos) {
-    if (l.tipo === 'entrada') r[l.carteiraId] = (r[l.carteiraId] ?? 0) + l.valor
-    else if (l.tipo === 'saida') r[l.carteiraId] = (r[l.carteiraId] ?? 0) - l.valor
-    else {
-      r[l.carteiraId] = (r[l.carteiraId] ?? 0) - l.valor
-      if (l.carteiraDestinoId) r[l.carteiraDestinoId] = (r[l.carteiraDestinoId] ?? 0) + l.valor
-    }
-  }
-  return r
-}
+/** Saldo atual de cada carteira. É a mesma conta da Granninha no WhatsApp (src/lib/saldo.ts, igual ao do servidor). */
+export const saldos = (s: Estado): Record<string, number> => saldosDas(s.carteiras, s.lancamentos)
 
 /** Entradas e saídas por dia do mês. No mês corrente, para em hoje. */
 export function serieDiaria(lancs: Lancamento[], ym: string) {
