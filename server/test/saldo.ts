@@ -377,7 +377,7 @@ for (const frase of NAO_CONSULTA) {
 caso('pergunta clara pula a IA; lançamento nunca', () => {
   for (const q of ['qual meu saldo', 'quanto entrou hoje?', 'saldo', 'me mostra os gastos de hoje', 'resumo da semana']) assert.ok(ehPerguntaClara(q), q)
   for (const q of ['meus gastos de hoje', 'gastos por dia', 'meus gastos fixos', 'o que vence nos próximos dias', 'contas a pagar', 'gastos do mês']) assert.ok(ehPerguntaClara(q), q)
-  for (const q of ['gastei hoje', 'recebi hoje', 'paguei o mês todo', 'saiu o aluguel hoje', 'gastei 6 reais', 'paguei a luz', 'recebi do João', 'quanto vale 50 + 30', 'uma frase bem longa que não é pergunta nenhuma, só conversa de quem está explicando o que aconteceu com o caixa hoje de manhã']) assert.ok(!ehPerguntaClara(q), q)
+  for (const q of ['esse recebimento foi de serviço', 'essa saída foi da casa', 'esse gasto era do negócio', 'gastei hoje', 'recebi hoje', 'paguei o mês todo', 'saiu o aluguel hoje', 'gastei 6 reais', 'paguei a luz', 'recebi do João', 'quanto vale 50 + 30', 'uma frase bem longa que não é pergunta nenhuma, só conversa de quem está explicando o que aconteceu com o caixa hoje de manhã']) assert.ok(!ehPerguntaClara(q), q)
 })
 
 caso('responderDireto devolve null para o que é da IA, e texto para o que é do código', () => {

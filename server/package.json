@@ -14,7 +14,8 @@
     "test:excluir": "tsx test/excluir.ts",
     "test:saude": "tsx test/saude.ts",
     "test:saldo": "tsx test/saldo.ts && tsx test/saldo-fluxo.ts",
-    "test:sem-ia": "tsx test/cartao.ts && tsx test/conferir.ts && tsx test/confirmar.ts && tsx test/externos.ts && tsx test/excluir.ts && tsx test/saude.ts && tsx test/saldo.ts && tsx test/saldo-fluxo.ts"
+    "test:correcao": "tsx test/correcao-fluxo.ts",
+    "test:sem-ia": "tsx test/cartao.ts && tsx test/conferir.ts && tsx test/confirmar.ts && tsx test/externos.ts && tsx test/excluir.ts && tsx test/saude.ts && tsx test/saldo.ts && tsx test/saldo-fluxo.ts && tsx test/correcao-fluxo.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",
