@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Check, ChevronRight, CreditCard, Eye, EyeOff, MessageCircle } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronRight, CreditCard, Eye, EyeOff, MessageCircle, Wallet } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FaixaWhats } from '../components/ConfirmarWhats'
@@ -85,6 +85,12 @@ export default function Inicio() {
           <div className={`grande ${t.sobrou < 0 ? 'neg' : ''}`}>
             <Valor n={t.sobrou} oculto={oculto} animado />
           </div>
+          {/* O que tem agora fica junto do saldo do mês: no rodapé passava despercebido. */}
+          <div className="heroi-caixa">
+            <Wallet size={15} strokeWidth={2.2} />
+            <span>Em caixa agora</span>
+            <b>{oculto ? 'R$ ••••' : brl(emCarteiras)}</b>
+          </div>
           <div className="heroi-duo">
             <div>
               <div className="t">
@@ -109,15 +115,11 @@ export default function Inicio() {
               </div>
             </div>
           </div>
-          <div className="rodape">
-            Em caixa agora: <b>{oculto ? 'R$ ••••' : brl(emCarteiras)}</b>
-            {t.retirada > 0 && (
-              <>
-                {' '}
-                · Suas retiradas: <b>{oculto ? 'R$ ••••' : brl(t.retirada)}</b>
-              </>
-            )}
-          </div>
+          {t.retirada > 0 && (
+            <div className="rodape">
+              Suas retiradas: <b>{oculto ? 'R$ ••••' : brl(t.retirada)}</b>
+            </div>
+          )}
         </section>
 
         {vazio ? (
