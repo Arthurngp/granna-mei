@@ -133,6 +133,8 @@ img{display:block;max-width:100%}
 .planos > div{padding:28px 20px}
 .faq{grid-template-columns:minmax(0,1fr)}
 .btn{white-space:normal;text-align:center}
+/* No card de limite, o mascote não pode disputar espaço com o título no celular. */
+.b4 .flutua-b{position:static !important;order:-1;align-self:flex-end;width:108px !important;margin:-8px 0 2px}
 }
 /* ajustes de celular (2026-11-16) */
 .topo > a{white-space:nowrap}
