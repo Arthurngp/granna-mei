@@ -3,7 +3,8 @@
  * Ordem: registra (sem duplicar) → reconhece o cliente pelo número verificado → confere acesso e uso →
  * transforma áudio, foto ou PDF em texto → entende → grava → responde.
  */
-import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, sb, usoDoMes } from './banco.ts'
+import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, usoDoMes } from './banco.ts'
+import { despedidaDe, RESPOSTA_DESPEDIDA } from './despedida.ts'
 import { faturaDe } from './cartao.ts'
 import { executar, reverter, ultimaComEfeito, type Efeitos, type Origem } from './executar.ts'
 import { baixarMidia } from './gateway.ts'
@@ -351,7 +352,21 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     documento = { valor: leitura.transacoes[0].valor, movimento: leitura.transacoes[0].movimento }
   }
 
+  // Despedida, agradecimento e "ok" ("tá bom, volto mais tarde"): não é cumprimento nem pedido. Responde curto ou fica em
+  // silêncio, sem recomeçar com "Oi, me manda o que entrou", e sem gastar IA. Com pergunta em aberto não entra: a resposta é dela.
+  if (!documento && !anexo && !(pend?.tipo && fresco)) {
+    const dp = despedidaDe(texto)
+    if (dp === 'silencio') return { status: 'ignorada', resposta: '', efeitos: {}, intencao: 'confirmacao', texto, tokens }
+    if (dp) return { status: 'ok', resposta: RESPOSTA_DESPEDIDA[dp], efeitos: {}, intencao: 'despedida', texto, tokens }
+  }
+
   const ctx = await contextoDe(cliente.id, hoje)
+  // As últimas trocas ajudam a entender "esse", "aquele", "de novo". Falhar aqui nunca impede de anotar.
+  try {
+    ctx.historico = await historicoRecente(cliente.id, msgId)
+  } catch (e) {
+    console.error('[historico] não consegui ler a conversa recente:', (e as Error).message)
+  }
 
   // Resposta à pergunta "esse é o mesmo lançamento?": 1 corrige o anterior, 2 lança como outro. Outra mensagem qualquer
   // deixa a pergunta de lado (nada foi gravado) e vale sozinha.
@@ -464,6 +479,12 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     const p = await responderPergunta(cliente.id, hoje, it.pergunta ?? texto)
     soma(p.uso)
     return { status: 'ok', resposta: p.texto, efeitos: {}, intencao: 'pergunta', texto, tokens }
+  }
+  if (it.intencao === 'saudacao') {
+    // A IA às vezes chama "valeu, até mais" de saudação: despedida não recebe "Oi, me manda...".
+    const dp = despedidaDe(texto)
+    if (dp === 'silencio') return { status: 'ignorada', resposta: '', efeitos: {}, intencao: 'confirmacao', texto, tokens }
+    if (dp) return { status: 'ok', resposta: RESPOSTA_DESPEDIDA[dp], efeitos: {}, intencao: 'despedida', texto, tokens }
   }
   if (it.intencao === 'saudacao') return { status: 'ok', resposta: `Oi${nome ? `, ${nome}` : ''}! Me manda o que entrou ou saiu que eu anoto. Pode ser texto, áudio ou foto do comprovante.`, efeitos: {}, intencao: 'saudacao', texto, tokens }
   if (it.intencao === 'ajuda') return { status: 'ok', resposta: AJUDA, efeitos: {}, intencao: 'ajuda', texto, tokens }

@@ -114,6 +114,29 @@ export async function contextoDe(userId: string, hoje: string): Promise<Contexto
   }
 }
 
+export const HISTORICO_MAX = 6
+export const HISTORICO_MIN = 30
+
+/**
+ * As últimas trocas deste cliente (até 6, dos últimos 30 minutos), da mais antiga para a mais nova, SEM a mensagem de agora.
+ * Só entra o que virou conversa de verdade (resposta enviada); mensagem ignorada, bloqueada ou com erro fica de fora.
+ * Serve para a IA entender "esse", "aquele", "de novo": nunca para tirar valor ou ordem.
+ */
+export async function historicoRecente(userId: string, excluirMsgId: string): Promise<{ cliente: string; granninha: string }[]> {
+  const desde = new Date(Date.now() - HISTORICO_MIN * 60_000).toISOString()
+  const { data, error } = await sb
+    .from('mensagens')
+    .select('texto,resposta,criado_em')
+    .eq('user_id', userId)
+    .in('status', ['ok', 'pergunta'])
+    .neq('id', excluirMsgId)
+    .gte('criado_em', desde)
+    .order('criado_em', { ascending: false })
+    .limit(HISTORICO_MAX)
+  falhou(error, 'histórico recente')
+  return [...(data ?? [])].reverse().filter((m) => (m.texto ?? '').trim()).map((m) => ({ cliente: m.texto as string, granninha: (m.resposta as string | null) ?? '' }))
+}
+
 /** Linha do banco no formato do módulo do cartão. */
 export function paraMov(l: { id: string; tipo: string; valor: number | string; data: string; descricao: string; carteira_id: string; carteira_destino_id?: string | null; categoria_id?: string | null; pessoal?: boolean | null; fatura?: string | null }): MovCartao {
   return {

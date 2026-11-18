@@ -13,7 +13,7 @@ const PKS: Record<string, string[]> = {
   mensagens: ['id'], conversas: ['telefone'], perfis: ['id'], assinaturas: ['user_id'],
   categorias: ['user_id', 'id'], carteiras: ['user_id', 'id'], lancamentos: ['user_id', 'id'], fixas: ['user_id', 'id'], contas: ['user_id', 'id'],
 }
-export const E = { tabelas: {} as Record<string, Linha[]>, falharTabela: null as string | null }
+export const E = { tabelas: {} as Record<string, Linha[]>, falharTabela: null as string | null, /** falha só a leitura cujo `select` é exatamente este */ falharSelect: null as string | null }
 const pedidos: string[] = []
 
 const comparar = (a: unknown, b: string) => {
@@ -57,6 +57,7 @@ const db = createServer(async (req, res) => {
     res.writeHead(st, { 'Content-Type': 'application/json', ...cab })
     res.end(corpo === undefined ? '' : JSON.stringify(corpo))
   }
+  if (E.falharSelect && req.method === 'GET' && url.searchParams.get('select') === E.falharSelect) return enviar(500, { message: 'banco falso: leitura provocada', code: 'XX000' })
   if (E.falharTabela === tabela) return enviar(500, { message: 'banco falso: falha provocada', code: 'XX000' })
   E.tabelas[tabela] ??= []
   const filtros = [...url.searchParams.entries()].filter(([k]) => !RESERVADOS.has(k))
@@ -136,6 +137,8 @@ export const ia = {
   regras: [] as [RegExp, unknown][],
   chamadas: { interpretacao: 0, resposta: 0 },
   ultimoResumo: null as null | Record<string, any>,
+  /** Prompt de sistema da última interpretação (para provar o que a IA recebeu). */
+  ultimoSistema: '',
   queda: false,
 }
 const iaServer = createServer(async (req, res) => {
@@ -154,6 +157,7 @@ const iaServer = createServer(async (req, res) => {
   let saida: unknown
   if (nome === 'interpretacao') {
     ia.chamadas.interpretacao++
+    ia.ultimoSistema = String(b.messages[0].content)
     saida = ia.regras.find(([re]) => re.test(usuario))?.[1] ?? SEM_ACAO
   } else if (nome === 'resposta') {
     ia.chamadas.resposta++
@@ -187,9 +191,11 @@ export const HOJE = hojeSP()
 export function semear() {
   E.tabelas = {}
   E.falharTabela = null
+  E.falharSelect = null
   ia.regras = []
   ia.chamadas = { interpretacao: 0, resposta: 0 }
   ia.ultimoResumo = null
+  ia.ultimoSistema = ''
   ia.queda = false
   const cats = (u: string) => [
     { user_id: u, id: 'outras-saidas', nome: 'Outros gastos', tipo: 'saida', pessoal: false },
@@ -220,13 +226,15 @@ export function semear() {
 }
 
 let seq = 0
-export const msg = async (texto: string) => {
+/** Como `msg`, mas devolve também o status (para provar o silêncio: status "ignorada" e resposta vazia). */
+export const msgCompleta = async (texto: string) => {
   const r = await processar({
     event: 'message.received',
     data: { key: { id: `S${Date.now()}${++seq}`, remoteJid: `${NUM}@s.whatsapp.net`, fromMe: false }, from: `${NUM}@s.whatsapp.net`, isGroup: false, chatType: 'PERSONAL', type: 'TEXT', content: texto },
   } as Parameters<typeof processar>[0])
-  return r.resposta ?? ''
+  return { resposta: r.resposta ?? '', status: r.status }
 }
+export const msg = async (texto: string) => (await msgCompleta(texto)).resposta
 export const lancsU1 = () => E.tabelas.lancamentos.filter((l) => l.user_id === U1)
 export const saldoNoBanco = (carteira: string) => {
   const c = E.tabelas.carteiras.find((x) => x.user_id === U1 && x.id === carteira)!
