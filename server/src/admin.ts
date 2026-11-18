@@ -5,6 +5,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { falhou, sb } from './banco.ts'
 import { garantirSessao, qrDaSessao } from './gateway.ts'
+import { ErroExclusao, excluirContaDefinitivo } from './excluir.ts'
 
 // Os dois domínios valem sempre, além do que vier em ADMIN_ORIGENS: trocar o domínio não pode derrubar o admin.
 const ORIGENS = [...new Set([...(process.env.ADMIN_ORIGENS ?? '').split(','), 'https://granninha.amplasoft.me', 'https://grannamei.amplasoft.me'].map((s) => s.trim()).filter(Boolean))]
@@ -67,6 +68,17 @@ export async function rotaAdmin(req: IncomingMessage, res: ServerResponse, camin
     falhou(l.error, 'gerar link')
     await sb.from('admin_auditoria').insert({ admin_id: admin, acao: 'link_acesso', alvo_user_id: user_id, detalhes: { motivo: 'link de acesso gerado pelo admin' } })
     json(res, 200, { link: l.data.properties?.action_link })
+    return true
+  }
+  if (req.method === 'POST' && caminho === '/admin/excluir-conta') {
+    const b = JSON.parse((await corpo()) || '{}') as { user_id?: string; email?: string; motivo?: string }
+    if (!b.user_id) return json(res, 400, { erro: 'user_id obrigatório' }), true
+    try {
+      json(res, 200, await excluirContaDefinitivo(sb, admin, b.user_id, b.email ?? '', b.motivo ?? ''))
+    } catch (e) {
+      if (e instanceof ErroExclusao) json(res, e.status, { erro: e.message })
+      else json(res, 500, { erro: `Não foi possível excluir: ${(e as Error).message}` })
+    }
     return true
   }
   json(res, 404, { erro: 'rota desconhecida' })
