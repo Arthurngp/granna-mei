@@ -3,7 +3,8 @@ import { env } from './env.ts'
 export const MODELO = process.env.OPENAI_MODELO ?? 'gpt-5.4-mini'
 export const MODELO_AUDIO = process.env.OPENAI_MODELO_AUDIO ?? 'gpt-4o-mini-transcribe'
 
-const BASE = 'https://api.openai.com/v1'
+// OPENAI_BASE_URL existe para os testes apontarem para uma IA falsa local. Em produção fica sem definir.
+const BASE = process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
 
 async function pedir(caminho: string, init: RequestInit, tentativas = 3): Promise<Response> {
   for (let i = 0; ; i++) {
