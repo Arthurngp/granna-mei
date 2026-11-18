@@ -147,7 +147,8 @@ INTENÇÃO
 - "acoes": a mensagem registra dinheiro (uma ou mais ações), ou pede para criar uma categoria.
 - "pergunta": quer saber algo dos próprios números ou do MEI dele ("quanto gastei", "o que vence", "quanto sobrou", "quanto falta pro limite do MEI", "quando vence o DAS", "quanto está a fatura"). Reescreva a pergunta clara em "pergunta".
 - "desfazer": quer anular o último registro ("desfazer", "apaga o último", "cancela isso", "errei, apaga").
-- "corrigir": quer mudar o último registro ("não foi 50, foi 60", "era dinheiro, não pix"). Descreva a correção em "correcao".
+- "corrigir": quer mudar o último registro ("não foi 50, foi 60", "era dinheiro, não pix", "esse recebimento foi de prestação de serviço", "na verdade foi no Nubank", "era da casa, não do negócio", "muda a categoria para Material"). Descreva a correção em "correcao".
+  Frase que fala de "esse", "essa", "isso", "o último" ou "o de agora" e só diz o que ele É (categoria, conta, meio, se é da casa) é "corrigir", NUNCA um registro novo: quem registra algo novo conta um fato novo ("recebi 290 do João").
 - "saudacao": só cumprimento ou agradecimento. "ajuda": pergunta como usar. "outro": nada a ver com dinheiro.
 
 TIPOS DE AÇÃO

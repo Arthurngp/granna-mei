@@ -12,6 +12,7 @@ import { lerDocumento, textoDoDocumento, type Transacao } from './midia.ts'
 import { transcrever, type Uso } from './openai.ts'
 import { responderPergunta } from './perguntas.ts'
 import { carregarBase } from './base.ts'
+import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, perguntaDuplicata, respostaDuplicata, type LancAntigo } from './duplicata.ts'
 import { ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta } from './consultas.ts'
 import { foraDoDisponivel } from './cartao.ts'
 
@@ -296,7 +297,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
 
   // Pergunta em aberto (ex.: "qual foi o valor?") ou importação de extrato esperando um sim.
   const { data: conv } = await sb.from('conversas').select('pendente,atualizado_em').eq('telefone', telefone).maybeSingle()
-  const pend = conv?.pendente as { tipo?: string; texto?: string; pergunta?: string; transacoes?: Transacao[]; opcoes?: Opcao[]; anexo?: string; forcar?: { carteira?: string; pessoal?: boolean }; documento?: { valor: number; movimento: 'entrada' | 'saida' }; origem?: Origem } | null
+  const pend = conv?.pendente as { tipo?: string; texto?: string; pergunta?: string; transacoes?: Transacao[]; opcoes?: Opcao[]; anexo?: string; forcar?: { carteira?: string; pessoal?: boolean }; documento?: { valor: number; movimento: 'entrada' | 'saida' }; origem?: Origem; acoes?: Acao[]; anteriorMsg?: string } | null
   const fresco = conv && Date.now() - new Date(conv.atualizado_em).getTime() < 30 * 60_000
   if (pend?.tipo) await sb.from('conversas').update({ pendente: null, atualizado_em: new Date().toISOString() }).eq('telefone', telefone)
 
@@ -351,6 +352,13 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   }
 
   const ctx = await contextoDe(cliente.id, hoje)
+
+  // Resposta à pergunta "esse é o mesmo lançamento?": 1 corrige o anterior, 2 lança como outro. Outra mensagem qualquer
+  // deixa a pergunta de lado (nada foi gravado) e vale sozinha.
+  if (pend?.tipo === 'duplicata' && fresco && pend.acoes?.length) {
+    const r = respostaDuplicata(texto)
+    if (r) return resolverDuplicata(cliente.id, ctx, pend.acoes, pend.anteriorMsg ?? '', r, pend.origem ?? tipo, pend.anexo ?? null, texto, tokens)
+  }
 
   if (pend?.tipo === 'importar_fatura' && fresco) {
     if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei a fatura.', efeitos: {}, intencao: 'fatura', texto, tokens }
@@ -411,6 +419,17 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
       await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta: it.perguntar, opcoes: it.opcoes, forcar, documento, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
       return { status: 'pergunta', resposta: it.perguntar, efeitos: {}, intencao: 'acoes', texto, tokens }
     }
+    // Trava: o que ia ser gravado é igual ao último lançamento e a frase soa como correção? Pergunta antes de gravar.
+    if (!documento && !anexo) {
+      const ult = await ultimaComEfeito(cliente.id)
+      if (ult && Date.now() - new Date(ult.criado_em).getTime() < JANELA_MIN * 60_000 && devePerguntar(texto, ult.texto)) {
+        const antigo = pareceMesmoLancamento(await lancsDe(cliente.id, ult.efeitos.lancamentos ?? []), it.acoes)
+        if (antigo) {
+          await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'duplicata', acoes: it.acoes, anteriorMsg: ult.id, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
+          return { status: 'pergunta', resposta: perguntaDuplicata(antigo, ctx), efeitos: {}, intencao: 'acoes', texto, tokens }
+        }
+      }
+    }
     const anteriores = it.acoes.some((a) => a.tipo_acao === 'criar_categoria') ? (await ultimaComEfeito(cliente.id))?.efeitos : undefined
     const r = await executar(cliente.id, ctx, it.acoes, origemFinal, anexo, anteriores)
     return { status: 'ok', resposta: `${r.linhas.join('\n\n')}${await saldoDepois(cliente.id, it.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
@@ -431,10 +450,12 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     if (it2.intencao !== 'acoes' || it2.perguntar || !it2.acoes.length) {
       return { status: 'pergunta', resposta: it2.perguntar ?? 'Não entendi a correção. Responda DESFAZER e me mande de novo do jeito certo.', efeitos: {}, intencao: 'corrigir', texto, tokens }
     }
+    const antes = await lancsDe(cliente.id, ult.efeitos.lancamentos ?? [])
     await reverter(cliente.id, ult.efeitos)
     await sb.from('mensagens').update({ desfeita: true }).eq('id', ult.id).eq('user_id', cliente.id)
     const r = await executar(cliente.id, await contextoDe(cliente.id, hoje), it2.acoes, tipo, anexo)
-    return { status: 'ok', resposta: `Corrigido.\n\n${r.linhas.join('\n\n')}${await saldoDepois(cliente.id, it2.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'corrigir', texto: novo, tokens }
+    const mudou = antesEAgora(antes, it2.acoes, ctx)
+    return { status: 'ok', resposta: `Corrigido.\n\n${r.linhas.join('\n\n')}${mudou ? `\n\n${mudou}` : ''}${await saldoDepois(cliente.id, it2.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'corrigir', texto: novo, tokens }
   }
   if (it.intencao === 'pergunta') {
     // A IA entendeu que é pergunta; se o pedido é um dos conhecidos, o número sai do código, não da IA.
@@ -510,6 +531,33 @@ async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Or
     resposta: `Importei ${acoes.length} lançamentos${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Confira as categorias no painel.${await saldoDepois(userId, acoes)}\n\nErrou? Responda DESFAZER.`,
     efeitos: r.efeitos, intencao: 'extrato', texto: 'importar extrato', tokens,
   }
+}
+
+/** Lançamentos do cliente por id (para comparar antes e depois de uma correção). */
+async function lancsDe(userId: string, ids: string[]): Promise<LancAntigo[]> {
+  if (!ids.length) return []
+  const { data, error } = await sb.from('lancamentos').select('id,tipo,valor,categoria_id,carteira_id,pessoal,descricao').eq('user_id', userId).in('id', ids)
+  falhou(error, 'lançamentos do último registro')
+  return (data ?? []).map((l) => ({ ...l, valor: Number(l.valor), pessoal: !!l.pessoal }))
+}
+
+/** O cliente respondeu 1 (é o mesmo: corrige o anterior) ou 2 (é outro: lança). */
+async function resolverDuplicata(userId: string, ctx: Contexto, acoes: Acao[], anteriorMsg: string, escolha: 'corrigir' | 'novo', origem: Origem, anexo: string | null, texto: string, tokens: Uso): Promise<Conversa> {
+  if (escolha === 'novo') {
+    const r = await executar(userId, ctx, acoes, origem, anexo)
+    return { status: 'ok', resposta: `${r.linhas.join('\n\n')}${await saldoDepois(userId, acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
+  }
+  const ult = await ultimaComEfeito(userId)
+  // Só corrige se o anterior ainda é o último registro vivo: se foi desfeito ou outra coisa entrou no meio, não mexe em nada.
+  if (!ult || ult.id !== anteriorMsg) {
+    return { status: 'ok', resposta: 'Não achei mais aquele lançamento para corrigir, então não mexi em nada. Se quiser, me manda de novo do jeito certo.', efeitos: {}, intencao: 'corrigir', texto, tokens }
+  }
+  const antes = await lancsDe(userId, ult.efeitos.lancamentos ?? [])
+  await reverter(userId, ult.efeitos)
+  await sb.from('mensagens').update({ desfeita: true }).eq('id', ult.id).eq('user_id', userId)
+  const r = await executar(userId, ctx, acoes, origem, anexo)
+  const mudou = antesEAgora(antes, acoes, ctx)
+  return { status: 'ok', resposta: `Corrigido.\n\n${r.linhas.join('\n\n')}${mudou ? `\n\n${mudou}` : ''}${await saldoDepois(userId, acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'corrigir', texto, tokens }
 }
 
 /** Tipos de ação que mexem no saldo de uma carteira. Conta a pagar, conta fixa e categoria nova não mexem. */

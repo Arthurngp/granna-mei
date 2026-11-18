@@ -6,6 +6,7 @@
  * Tudo aqui é função pura sobre uma `Base` já carregada: sem banco, sem IA, testável a seco.
  */
 import { efetivos, faturas, foraDoDisponivel, type CartaoInfo, type MovCartao } from './cartao.ts'
+import { temPistaDeCorrecao } from './duplicata.ts'
 import { centavosDe, saldosDas } from './saldo.ts'
 
 export interface CarteiraBase {
@@ -361,7 +362,8 @@ export function ehPerguntaClara(texto: string): boolean {
   if (/^(qual|quais|quanto|quantos|me (mostra|mostre|manda|mande|diz|diga|fala|fale)|mostra|mostre|resumo|saldo|extrato|como (estou|to|anda|vai|estao))\b/.test(t) || t.endsWith('?')) return true
   // "meus gastos de hoje", "gastos por dia", "o que vence": pedido sem pergunta, mas é um dos que o código sabe responder.
   // Frase que começa contando algo que o dono FEZ ("gastei", "recebi") é lançamento, não pedido.
-  return !FEZ_ALGO.test(t) && t.length <= 60 && reconhecer(texto) !== null
+  // "esse recebimento foi de serviço" fala do último lançamento (é correção), mesmo tendo a palavra "recebimento".
+  return !FEZ_ALGO.test(t) && !temPistaDeCorrecao(texto) && t.length <= 60 && reconhecer(texto) !== null
 }
 const FEZ_ALGO = /^(gastei|paguei|recebi|comprei|vendi|ganhei|passei|transferi|depositei|saquei|tirei|cobrei|fiz|entrou|saiu|caiu|anota|anotar|registra|registrar|lanca|lancar|coloca|adiciona)\b/
 
