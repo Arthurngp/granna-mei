@@ -54,7 +54,7 @@
           <a class="btn btn-wa" href="/painel/criar-conta" data-fora="Testar 7 dias grátis">Usar grátis até 31/12</a>
           <a class="btn btn-linha" href="#como">Como funciona</a>
         </div>
-        <p class="sobe s5" style="font-size:14px;color:#8B92B8;margin-top:16px" data-fora="Depois, R$ 29,90 por mês. Cancele quando quiser.">Crie sua conta até 30 de novembro e ganhe dezembro grátis. Sem cartão.</p>
+        <p class="sobe s5" style="font-size:14px;color:#8B92B8;margin-top:16px" data-fora="Depois, R$ 29,90 por mês. Cancele quando quiser.">Crie sua conta até 31 de dezembro e use de graça até lá. Sem cartão.</p>
       </div>
 
       <div class="palco3d" style="position:relative;display:flex;justify-content:center;align-items:flex-end;min-height:660px" aria-hidden="true">
@@ -229,7 +229,7 @@ Errou? Responda DESFAZER.</div>
 <section id="precos" style="padding:104px 0;background:#FBFAF6;border-top:1px solid #DCD8CC;border-bottom:1px solid #DCD8CC">
   <div class="wrap">
     <h2 class="disp" style="font-size:clamp(34px,4.6vw,64px);line-height:1">Menos que um lanche por semana</h2>
-    <p style="color:#4E557A;margin-top:14px;max-width:620px" data-fora="Os dois planos começam com 7 dias grátis.">Crie sua conta até 30 de novembro e use grátis até 31 de dezembro, com tudo liberado.</p>
+    <p style="color:#4E557A;margin-top:14px;max-width:620px" data-fora="Os dois planos começam com 7 dias grátis.">Crie sua conta até 31 de dezembro e use grátis até lá, com tudo liberado. A cobrança começa em janeiro.</p>
     <div class="planos revela" style="margin-top:48px">
       <div style="border-right:1px solid #DCD8CC">
         <h3 style="font-size:20px">Mensal</h3>
@@ -294,7 +294,7 @@ Errou? Responda DESFAZER.</div>
   <div class="wrap" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:32px;padding-top:72px;padding-bottom:72px">
     <div style="max-width:720px">
       <h2 class="disp" style="font-size:clamp(36px,5vw,72px);line-height:.98">Comece hoje a saber quanto suas encomendas dão.</h2>
-      <p style="margin-top:18px;font-size:18px;color:#E4F8EA" data-fora="7 dias grátis, sem cartão. Leva menos de 5 minutos.">Crie até 30 de novembro e use grátis até 31 de dezembro. Sem cartão, em menos de 5 minutos.</p>
+      <p style="margin-top:18px;font-size:18px;color:#E4F8EA" data-fora="7 dias grátis, sem cartão. Leva menos de 5 minutos.">Crie sua conta e use grátis até 31 de dezembro. Sem cartão, em menos de 5 minutos.</p>
       <a class="btn" href="/painel/criar-conta" data-fora="Testar 7 dias grátis" style="margin-top:30px;background:#15162B;color:#fff">Usar grátis até 31/12</a>
     </div>
     <img class="flutua" src="/img/festa.png" alt="" style="width:260px;flex:none">
@@ -326,10 +326,10 @@ Errou? Responda DESFAZER.</div>
 
 </div>
 <script>
-  // Oferta: quem cria a conta até 30/11 usa grátis até 31/12. Até 30/11 o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
+  // Oferta: quem cria a conta até 31/12 usa grátis até 31/12. Até lá o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
   (function () {
     var hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-    if (hoje <= '2026-11-30') return;
+    if (hoje <= '2026-12-31') return;
     document.querySelectorAll('[data-fora]').forEach(function (el) { el.textContent = el.getAttribute('data-fora'); });
   })();
 </script>

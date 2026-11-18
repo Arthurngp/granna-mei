@@ -116,7 +116,7 @@
 
     <div class="faq-grupo" id="planos">
       <h2>Planos e pagamento</h2>
-      <details><summary>Quanto custa?</summary><p>R$ 29,90 por mês, sem fidelidade, ou R$ 299,90 por ano, que dá quase 2 meses gratuitamente. <span data-fora="Os dois começam com 7 dias grátis.">Quem cria a conta até 30 de novembro usa grátis até 31 de dezembro, com tudo liberado.</span></p></details>
+      <details><summary>Quanto custa?</summary><p>R$ 29,90 por mês, sem fidelidade, ou R$ 299,90 por ano, que dá quase 2 meses gratuitamente. <span data-fora="Os dois começam com 7 dias grátis.">Quem cria a conta até 31 de dezembro usa grátis até lá, com tudo liberado. A cobrança começa em janeiro.</span></p></details>
       <details><summary>Preciso de cartão para testar?</summary><p>Não. Você cria a conta e usa o período grátis sem informar forma de pagamento.</p></details>
       <details><summary>Tem limite de uso?</summary><p>Tem um limite mensal de uso justo, bem acima do que um MEI usa no dia a dia. Se você chegar perto, a Granninha avisa antes, e o contador zera todo dia 1.</p></details>
       <details><summary>O que acontece se o pagamento atrasar?</summary><p>Você recebe um aviso. Se o pagamento não cair em 24 horas, o acesso fica pausado: dá para pagar e baixar seus dados, mas a Granninha deixa de anotar. Nada é apagado, e tudo volta assim que o pagamento é confirmado.</p></details>
@@ -141,10 +141,10 @@
   </div>
 </footer>
 <script>
-  // Oferta: quem cria a conta até 30/11 usa grátis até 31/12. Até 30/11 o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
+  // Oferta: quem cria a conta até 31/12 usa grátis até 31/12. Até lá o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
   (function () {
     var hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-    if (hoje <= '2026-11-30') return;
+    if (hoje <= '2026-12-31') return;
     document.querySelectorAll('[data-fora]').forEach(function (el) { el.textContent = el.getAttribute('data-fora'); });
   })();
 </script>

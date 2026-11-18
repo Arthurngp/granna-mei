@@ -143,10 +143,10 @@
   </div>
 </footer>
 <script>
-  // Oferta: quem cria a conta até 30/11 usa grátis até 31/12. Até 30/11 o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
+  // Oferta: quem cria a conta até 31/12 usa grátis até 31/12. Até lá o texto é o da oferta; depois volta sozinho para o texto normal (data-fora).
   (function () {
     var hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-    if (hoje <= '2026-11-30') return;
+    if (hoje <= '2026-12-31') return;
     document.querySelectorAll('[data-fora]').forEach(function (el) { el.textContent = el.getAttribute('data-fora'); });
   })();
 </script>
