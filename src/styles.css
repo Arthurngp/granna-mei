@@ -551,6 +551,26 @@ select.entrada {
 .heroi .grande.neg {
   color: #ffb1b6;
 }
+/* "Em caixa agora" ao lado do saldo do mês: no rodapé ficava escondido. */
+.heroi-caixa {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 7px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--indigo-4);
+  position: relative;
+  z-index: 1;
+}
+.heroi-caixa b {
+  color: #fff;
+  font-weight: 720;
+  font-size: 15.5px;
+}
 .heroi-duo {
   display: grid;
   grid-template-columns: 1fr 1fr;
