@@ -188,7 +188,9 @@ try {
     assert.match(r1.texto, /valor|quanto/i)
     assert.equal((await lancs(uid)).length, 0)
     const r = await responderAte(FONE, '89')
-    assert.match(r.texto, /saída de R\$ 89,00/, 'conversa: ' + r.conversa)
+    // "saída" ou "retirada": conta de luz é genuinamente ambígua para um MEI (pode ser da casa), e a
+    // IA decide isso sozinha. O que este caso prova é que a pergunta do valor fecha o lançamento.
+    assert.match(r.texto, /(saída|retirada) de R\$ 89,00/, 'conversa: ' + r.conversa)
     const ls = await lancs(uid)
     assert.equal(ls.length, 1)
     assert.equal(Number(ls[0].valor), 89)
