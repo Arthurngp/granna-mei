@@ -114,9 +114,11 @@ try {
     const r = await mandar(ESTRANHO, { content: 'oi' }, { esperarNada: true })
     assert.equal(r.texto, '')
   })
-  await caso('nem com código errado', async () => {
-    const r = await mandar(ESTRANHO, { content: 'meu código 000000' }, { esperarNada: true })
-    assert.equal(r.texto, '')
+  await caso('código errado deixa de ser silêncio (mudança do PR #28)', async () => {
+    // Antes era silêncio; desde 2026-11-18 quem manda algo que PARECE código recebe resposta, senão
+    // fica esperando para sempre achando que a Granninha não funciona. Estranho sem código segue mudo.
+    const r = await mandar(ESTRANHO, { content: 'meu código 000000' })
+    assert.match(r.texto, /não confere ou já venceu/)
   })
   await caso('número só digitado no cadastro NÃO é reconhecido e fica sem resposta (precisa confirmar)', async () => {
     const r = await mandar(FONE, { content: 'recebi 150 no pix' }, { esperarNada: true })
@@ -291,9 +293,11 @@ try {
     assert.equal(l.carteira_id, 'banco')
     assert.equal(l.carteira_destino_id, 'cartao-nu')
   })
-  await caso('figurinha recebe a explicação do que ela entende', async () => {
-    const r = await mandar(FONE, { type: 'STICKER', content: '' })
-    assert.match(r.texto, /texto, áudio/)
+  await caso('figurinha fica em silêncio (fase cv)', async () => {
+    // Antes cada figurinha recebia "por aqui eu entendo texto, áudio...". Vídeo e localização continuam
+    // recebendo a ajuda; o caso disso está na seção 6.
+    const r = await mandar(FONE, { type: 'STICKER', content: '' }, { esperarNada: true })
+    assert.equal(r.texto, '')
   })
 
   console.log('5. acesso, cortesia e mensagens que não são para ela')
@@ -335,10 +339,107 @@ try {
       delete process.env.WA_SOMENTE_NUMEROS
     }
   })
-  await caso('saúde do serviço responde com o estado do número', async () => {
-    const s = await (await fetch(SERV + '/saude')).json()
-    assert.equal(s.whatsapp.estado, 'CONNECTED')
-    assert.ok(s.mensagens_24h > 0)
+  await caso('saúde: fechada sem a chave, detalhada com ela (mudança do PR #27)', async () => {
+    // Desde 2026-11-18 o /saude sem chave diz só que está de pé: o número da Granninha e o volume de
+    // mensagens não são para qualquer um na internet.
+    const fechada = await (await fetch(SERV + '/saude')).json()
+    assert.deepEqual(fechada, { ok: true }, 'sem chave não vaza número nem volume')
+    process.env.SAUDE_CHAVE = 'chave-do-fluxo'
+    try {
+      const s = await (await fetch(SERV + '/saude', { headers: { Authorization: 'Bearer chave-do-fluxo' } })).json()
+      assert.equal(s.whatsapp.estado, 'CONNECTED')
+      assert.ok(s.mensagens_24h > 0)
+    } finally {
+      delete process.env.SAUDE_CHAVE
+    }
+  })
+
+  console.log('6. conversa sem falha (fase cv)')
+  await caso('a chegada está no banco ANTES do 200: nada se perde no deploy', async () => {
+    const id = `PRESA-TESTE-${Date.now()}`
+    const corpo = JSON.stringify({ event: 'message.received', sessionId: 'granninha', data: { key: { id, remoteJid: `${FONE}@s.whatsapp.net`, fromMe: false }, from: `${FONE}@s.whatsapp.net`, isGroup: false, chatType: 'PERSONAL', type: 'TEXT', content: 'paguei 7 de estacionamento no pix' } })
+    const sig = 'sha256=' + createHmac('sha256', 'segredo-teste').update(corpo).digest('hex')
+    const r = await fetch(SERV + '/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Webhook-Signature': sig }, body: corpo })
+    assert.equal(r.status, 200)
+    // Sem esperar nada: a linha tem que existir já, porque o 200 só sai depois de gravar.
+    const m = (await sb.from('mensagens').select('id,status,erro').eq('id', id).maybeSingle()).data
+    assert.ok(m, 'a mensagem está no banco no instante do 200')
+    assert.ok(['recebida', 'ok', 'pergunta'].includes(String((m as { status: string }).status)))
+    // deixa terminar para não sujar os casos seguintes
+    const t0 = Date.now()
+    while (Date.now() - t0 < 60000) {
+      const x = (await sb.from('mensagens').select('status').eq('id', id).maybeSingle()).data as { status: string } | null
+      if (x && x.status !== 'recebida') break
+      await new Promise((ok2) => setTimeout(ok2, 200))
+    }
+  })
+  await caso('mensagem presa (deploy no meio) é retomada pela varredura', async () => {
+    const { varredura } = await import('../src/index.ts')
+    const { varrerPresas } = await import('../src/presas.ts')
+    const id = `RETOMAR-TESTE-${Date.now()}`
+    const evento = { event: 'message.received', sessionId: 'granninha', data: { key: { id, remoteJid: `${FONE}@s.whatsapp.net`, fromMe: false }, from: `${FONE}@s.whatsapp.net`, isGroup: false, chatType: 'PERSONAL', type: 'TEXT', content: 'recebi 33 de corte no pix' } }
+    // Como se o processo tivesse morrido antes de começar: 'recebida', marca "na fila", 5 min atrás.
+    const linha = { id, telefone: FONE, tipo: 'texto', texto: 'recebi 33 de corte no pix', erro: 'na fila', criado_em: new Date(Date.now() - 5 * 60_000).toISOString() }
+    let ins = await sb.from('mensagens').insert({ ...linha, evento })
+    if (ins.error) {
+      // Sem a migration 20261119120000 a coluna não existe: o texto se reconstrói sem ela.
+      console.log('      (sem a coluna `evento`: testando a retomada por texto)')
+      ins = await sb.from('mensagens').insert(linha)
+    }
+    if (ins.error) throw new Error('não deu para semear a mensagem presa: ' + ins.error.message)
+    const antes = enviados.length
+    const log = await varrerPresas(varredura)
+    assert.ok(log.some((l) => l.includes(id)), 'a varredura pegou a mensagem: ' + JSON.stringify(log))
+    const t0 = Date.now()
+    while (Date.now() - t0 < 60000 && enviados.length === antes) await new Promise((ok2) => setTimeout(ok2, 200))
+    assert.ok(enviados.length > antes, 'a resposta saiu')
+    assert.ok((await lancs(uid)).some((l) => Number(l.valor) === 33), 'o lançamento que tinha se perdido foi gravado')
+  })
+  await caso('mensagem que JÁ tinha começado não é reprocessada, e avisa', async () => {
+    const { varredura } = await import('../src/index.ts')
+    const { varrerPresas } = await import('../src/presas.ts')
+    const id = `MEIO-TESTE-${Date.now()}`
+    await sb.from('mensagens').insert({ id, telefone: FONE, tipo: 'texto', texto: 'desfazer', erro: 'processando', criado_em: new Date(Date.now() - 5 * 60_000).toISOString() })
+    const quantos = (await lancs(uid)).length
+    const antes = enviados.length
+    await varrerPresas(varredura)
+    const t0 = Date.now()
+    while (Date.now() - t0 < 20000 && enviados.length === antes) await new Promise((ok2) => setTimeout(ok2, 200))
+    assert.equal((await lancs(uid)).length, quantos, 'nada foi desfeito de novo')
+    const m = (await sb.from('mensagens').select('status,erro').eq('id', id).single()).data as { status: string; erro: string }
+    assert.equal(m.status, 'erro')
+    assert.match(m.erro, /interrompida/)
+    assert.match(enviados[enviados.length - 1].texto, /não consegui terminar de anotar/)
+  })
+  await caso('pergunta no meio não rouba o DESFAZER', async () => {
+    const r1 = await mandar(FONE, { content: 'paguei 61 de luz no pix' })
+    assert.match(r1.texto, /R\$ 61,00/)
+    await mandar(FONE, { content: 'quanto sobrou esse mês?' })
+    const r3 = await mandar(FONE, { content: 'desfazer' })
+    assert.match(r3.texto, /desfiz/)
+    assert.ok(!(await lancs(uid)).some((l) => Number(l.valor) === 61), 'os R$ 61 saíram de verdade')
+  })
+  await caso('dois DESFAZER seguidos: o segundo pergunta antes de apagar outro', async () => {
+    const r = await mandar(FONE, { content: 'desfazer' })
+    assert.match(r.texto, /já tinha desfeito|Não achei nada recente/)
+  })
+  await caso('a pergunta em aberto é apagada de verdade no banco quando dá certo', async () => {
+    // O banco falso compara `atualizado_em` como texto; aqui é timestamptz de verdade. Se o filtro
+    // não casar, a pergunta fica pendurada e um "2" futuro poderia ser aplicado a ela.
+    const r = await mandar(FONE, { content: 'gastei 9 no mercado' })
+    assert.match(r.texto, /Pagou como/, 'o cenário depende de a Granninha perguntar a conta')
+    const r2 = await mandar(FONE, { content: '1' })
+    assert.match(r2.texto, /R\$ 9,00/)
+    const c = (await sb.from('conversas').select('pendente').eq('telefone', FONE).maybeSingle()).data as { pendente: unknown } | null
+    assert.ok(!c || c.pendente === null, 'a pergunta saiu do banco: ' + JSON.stringify(c?.pendente))
+  })
+  await caso('figurinha não recebe resposta', async () => {
+    const r = await mandar(FONE, { type: 'STICKER', fileUrl: '/api/media/granninha-STK.webp' }, { esperarNada: true })
+    assert.equal(r.texto, '', 'figurinha fica em silêncio')
+  })
+  await caso('vídeo continua recebendo a mensagem de ajuda', async () => {
+    const r = await mandar(FONE, { type: 'VIDEO', fileUrl: '/api/media/granninha-VID.mp4' })
+    assert.match(r.texto, /texto, áudio, foto de comprovante e PDF/)
   })
 } finally {
   const arqs = (await sb.storage.from('comprovantes').list(uid)).data ?? []

@@ -211,9 +211,42 @@ export async function reverter(userId: string, ef: Efeitos) {
 }
 
 /** Última mensagem do cliente que gravou algo e ainda não foi desfeita (até 3 dias atrás). */
-export async function ultimaComEfeito(userId: string) {
+/**
+ * A mensagem gravou ou mudou alguma coisa? Pergunta, saudação e a própria resposta do DESFAZER saem
+ * com as listas vazias, e nessas não há nada para reverter.
+ */
+export function temEfeito(e: Efeitos | null | undefined): boolean {
+  if (!e) return false
+  return Object.values(e).some((v) => Array.isArray(v) && v.length > 0)
+}
+
+export interface MensagemComEfeito {
+  id: string
+  texto: string
+  tipo: string
+  intencao: string | null
+  efeitos: Efeitos
+  criado_em: string
+}
+
+/**
+ * A última mensagem que REALMENTE gravou algo, para o DESFAZER e a correção.
+ *
+ * O filtro tem que ser no código: `efeitos` vem com as listas montadas ({"lancamentos":[],...}),
+ * então "diferente de {}" não distingue quem gravou de quem só respondeu. Antes disto, "paguei 89 de
+ * luz" → "quanto sobrou?" → "desfazer" respondia «desfiz: "quanto sobrou?"» e os R$ 89 ficavam lá.
+ */
+export async function ultimaComEfeito(userId: string): Promise<MensagemComEfeito | null> {
   const desde = new Date(Date.now() - 3 * 86400_000).toISOString()
-  const { data, error } = await sb.from('mensagens').select('id,texto,efeitos,criado_em').eq('user_id', userId).eq('status', 'ok').eq('desfeita', false).gte('criado_em', desde).order('criado_em', { ascending: false }).limit(1).maybeSingle()
+  const { data, error } = await sb.from('mensagens').select('id,texto,tipo,intencao,efeitos,criado_em').eq('user_id', userId).eq('status', 'ok').eq('desfeita', false).gte('criado_em', desde).order('criado_em', { ascending: false }).limit(30)
   falhou(error, 'ultimaComEfeito')
-  return data as { id: string; texto: string; efeitos: Efeitos; criado_em: string } | null
+  return ((data ?? []) as MensagemComEfeito[]).find((m) => temEfeito(m.efeitos)) ?? null
+}
+
+/** A última mensagem do cliente, com efeito ou não: diz se ele acabou de mandar um DESFAZER. */
+export async function ultimaMensagem(userId: string): Promise<MensagemComEfeito | null> {
+  const desde = new Date(Date.now() - 86400_000).toISOString()
+  const { data, error } = await sb.from('mensagens').select('id,texto,tipo,intencao,efeitos,criado_em').eq('user_id', userId).eq('status', 'ok').gte('criado_em', desde).order('criado_em', { ascending: false }).limit(1).maybeSingle()
+  falhou(error, 'ultimaMensagem')
+  return (data as MensagemComEfeito | null) ?? null
 }

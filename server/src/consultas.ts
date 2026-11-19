@@ -295,10 +295,32 @@ export type Consulta =
  * aí a pergunta segue para a IA (que responde só com o resumo calculado aqui). Errar para null é seguro; errar para
  * outra consulta não é, então os padrões são fechados.
  */
+/** Números escritos em palavra. Em áudio o valor vem sempre assim: a transcrição não tem dígito. */
+const EXTENSO =
+  '(um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa|cem|cento|duzentos|trezentos|quatrocentos|quinhentos|seiscentos|setecentos|oitocentos|novecentos|mil|milhao|milhoes)'
+const VALOR_EXTENSO = new RegExp(`\\b${EXTENSO}(\\s+e\\s+${EXTENSO})*\\s+(reais?|real|conto|contos|pila|mango|mangos)\\b`)
+const REGISTRO_EXTENSO = new RegExp(
+  `\\b(gastei|paguei|comprei|recebi|vendi|ganhei|faturei|transferi|depositei|saquei|cobrei)\\s+((uns?|umas?|mais|cerca|quase|tipo|la)\\s+(de\\s+)?)?${EXTENSO}\\b`,
+)
+
+/**
+ * A frase diz um VALOR por extenso ("gastei cinquenta reais de gasolina hoje")? Então é lançamento,
+ * não consulta.
+ *
+ * Achado pelo fluxo.ts com IA real em 2026-11-19: a guarda só olhava dígito, e áudio nunca tem
+ * dígito. Resultado em produção: o gasto ditado era respondido com um relatório do dia e NUNCA era
+ * anotado — a pessoa achava que estava registrado. Áudio é o jeito mais natural de usar a Granninha.
+ */
+export function temValorPorExtenso(texto: string): boolean {
+  const t = norm(texto)
+  return VALOR_EXTENSO.test(t) || REGISTRO_EXTENSO.test(t)
+}
+
 export function reconhecer(texto: string): Consulta | null {
   const t = norm(texto)
   // Com número solto na frase ("paguei 50 de luz") é lançamento, não consulta. Só "7 dias", "15 dias" são pedido de período.
   if (/\d/.test(t.replace(/\d{1,2}\s+dias/g, ''))) return null
+  if (temValorPorExtenso(t)) return null
   if (/\b(fixo|fixos|fixa|fixas)\b/.test(t) && /(gasto|despesa|conta|custo|quanto|quais|lista|mostr)/.test(t)) return { tipo: 'fixas' }
   const periodo: QualPeriodo | null = /\bontem\b/.test(t)
     ? 'ontem'
@@ -363,7 +385,16 @@ export function ehPerguntaClara(texto: string): boolean {
   // "meus gastos de hoje", "gastos por dia", "o que vence": pedido sem pergunta, mas é um dos que o código sabe responder.
   // Frase que começa contando algo que o dono FEZ ("gastei", "recebi") é lançamento, não pedido.
   // "esse recebimento foi de serviço" fala do último lançamento (é correção), mesmo tendo a palavra "recebimento".
-  return !FEZ_ALGO.test(t) && !temPistaDeCorrecao(texto) && t.length <= 60 && reconhecer(texto) !== null
+  // A saudação sai antes: em áudio a frase quase sempre começa com "oi Granninha, gastei...", e com ela
+  // no caminho o FEZ_ALGO (ancorado no início) não reconhecia o lançamento.
+  return !FEZ_ALGO.test(semSaudacao(t)) && !temPistaDeCorrecao(texto) && t.length <= 60 && reconhecer(texto) !== null
+}
+
+const SAUDACAO = /^(oi+|ola+|opa|e ai|eai|fala|bom dia|boa tarde|boa noite|granninha|granina|grannamei|granna)\b[\s,.!]*/
+function semSaudacao(t: string): string {
+  let s = t.trim()
+  for (let i = 0; i < 3 && SAUDACAO.test(s); i++) s = s.replace(SAUDACAO, '').trim()
+  return s
 }
 const FEZ_ALGO = /^(gastei|paguei|recebi|comprei|vendi|ganhei|passei|transferi|depositei|saquei|tirei|cobrei|fiz|entrou|saiu|caiu|anota|anotar|registra|registrar|lanca|lancar|coloca|adiciona)\b/
 

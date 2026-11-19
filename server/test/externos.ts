@@ -15,6 +15,8 @@ const db = createServer((req, res) => {
   let corpo: unknown = []
   if (req.method === 'GET' && tabela === 'verificacoes' && url.search.includes(CODIGO_VALIDO)) corpo = [{ user_id: 'u-1' }]
   if (req.method === 'PATCH' && tabela === 'perfis') corpo = [{ nome: 'Camila Teste' }]
+  // A linha nasce 'recebida': a trava de "começou" (granninha.ts) casa com ela e devolve o id.
+  if (req.method === 'PATCH' && tabela === 'mensagens') corpo = [{ id: /id=eq\.([^&]+)/.exec(url.search)?.[1] ?? 'm' }]
   const arr = corpo as unknown[]
   if (umSo) {
     if (!arr.length) {

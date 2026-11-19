@@ -64,6 +64,9 @@ const db = createServer(async (req, res) => {
   } else if (tabela === 'conversas' && req.method === 'DELETE') {
     const tel = /telefone=eq\.(\d+)/.exec(q)?.[1] ?? ''
     delete estado.conversas[tel]
+  } else if (tabela === 'mensagens' && req.method === 'PATCH') {
+    // A linha acabou de ser inserida como 'recebida': a trava de "começou" casa com ela.
+    corpo = [{ id: /id=eq\.([^&]+)/.exec(q)?.[1] ?? 'm' }]
   }
   const arr = Array.isArray(corpo) ? corpo : [corpo]
   if (umSo) {

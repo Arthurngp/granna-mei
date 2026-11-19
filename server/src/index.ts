@@ -11,11 +11,15 @@ import { sb } from './banco.ts'
 import { rotaAdmin } from './admin.ts'
 import { assinaturaValida, enviarTexto, statusSessao } from './gateway.ts'
 import { excluirVencidas, soltarNumerosDeExcluidas } from './excluir.ts'
-import { hojeSP, processar, type EventoGateway } from './granninha.ts'
+import { hojeSP, processar, registrarChegada, type EventoGateway } from './granninha.ts'
+import { clientePorNumero } from './banco.ts'
+import { PISO_MS, varrerPresas, type Presa } from './presas.ts'
 
 const PORTA = Number(process.env.PORT ?? 3000)
 let ultimaMensagem: string | null = null
 let erros = 0
+/** Ids que este processo está tratando agora: a varredura não encosta neles. */
+const emVoo = new Set<string>()
 
 // Uma fila por número: duas mensagens seguidas do mesmo cliente são tratadas na ordem em que chegaram.
 const filas = new Map<string, Promise<void>>()
@@ -25,6 +29,25 @@ function enfileirar(chave: string, tarefa: () => Promise<void>) {
     if (filas.get(chave) === proxima) filas.delete(chave)
   })
   filas.set(chave, proxima)
+}
+
+/**
+ * Entrega a resposta e, se não conseguir depois das tentativas, deixa registro na mensagem.
+ * O status fica como está de propósito: o lançamento foi gravado e o DESFAZER precisa continuar
+ * achando essa mensagem (ele procura status 'ok'). O que muda é o campo `erro`, que o admin mostra.
+ */
+async function entregar(para: string, texto: string, msgId?: string): Promise<void> {
+  try {
+    await enviarTexto(para, texto)
+  } catch (e) {
+    erros++
+    const motivo = ('resposta não entregue: ' + (e as Error).message).slice(0, 500)
+    console.error('[envio]', msgId ?? '-', motivo)
+    if (msgId) {
+      const up = await sb.from('mensagens').update({ erro: motivo }).eq('id', msgId)
+      if (up.error) console.error('[envio] registrar falha', up.error.message)
+    }
+  }
 }
 
 function corpo(req: IncomingMessage, limite = 2_000_000): Promise<string> {
@@ -42,6 +65,36 @@ function corpo(req: IncomingMessage, limite = 2_000_000): Promise<string> {
   })
 }
 
+let semColunaEvento = false
+/** De onde a varredura tira o que precisa. Exportado para o teste exercitar as peças de verdade. */
+export const varredura = {
+  buscar: async (desde: string): Promise<Presa[]> => {
+    const ate = new Date(Date.now() - PISO_MS).toISOString()
+    const campos = 'id,telefone,tipo,texto,erro,criado_em'
+    for (let i = 0; i < 2; i++) {
+      const r = await sb.from('mensagens').select(semColunaEvento ? campos : campos + ',evento')
+        .eq('status', 'recebida').gte('criado_em', desde).lte('criado_em', ate).order('criado_em', { ascending: false }).limit(50)
+      if (!r.error) return (r.data ?? []).map((m) => ({ ...(m as unknown as Presa), evento: (m as unknown as Presa).evento ?? null }))
+      if (!semColunaEvento && (r.error.code === 'PGRST204' || r.error.code === '42703')) {
+        semColunaEvento = true
+        continue
+      }
+      throw new Error(r.error.message)
+    }
+    return []
+  },
+  fechar: async (id: string, erro: string): Promise<boolean> => {
+    const r = await sb.from('mensagens').update({ status: 'erro', erro: erro.slice(0, 500) }).eq('id', id).eq('status', 'recebida').select('id')
+    if (r.error) throw new Error(r.error.message)
+    return Boolean(r.data?.length)
+  },
+  enfileirar,
+  processar,
+  enviar: entregar,
+  ehCliente: async (telefone: string) => Boolean(await clientePorNumero(telefone)),
+  emVoo: () => emVoo,
+}
+
 export function iniciar(porta = PORTA) {
   const srv = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://x')
@@ -54,16 +107,33 @@ export function iniciar(porta = PORTA) {
           return
         }
         const ev = JSON.parse(bruto) as EventoGateway
+        // A chegada é gravada ANTES do 200: o gateway não reenvia, então mensagem que só existe na
+        // memória deste processo desaparece no próximo deploy. Se o banco estiver fora, é melhor
+        // devolver erro (fica no log do gateway) do que engolir a mensagem calado.
+        let chegada: 'nova' | 'duplicada' | 'ignorar'
+        try {
+          chegada = await registrarChegada(ev)
+        } catch (e) {
+          erros++
+          console.error('[webhook] não deu para registrar a chegada:', (e as Error).message)
+          res.writeHead(503, { 'Content-Type': 'application/json' }).end('{"ok":false}')
+          return
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"ok":true}')
+        if (chegada !== 'nova') return
         const chave = (ev.data?.from ?? ev.data?.key?.remoteJid ?? 'x').split('@')[0]
+        const idEmVoo = ev.data?.key?.id
+        if (idEmVoo) emVoo.add(idEmVoo)
         enfileirar(chave, async () => {
           try {
-            const r = await processar(ev)
+            const r = await processar(ev, { jaRegistrada: true })
             if (r.status !== 'ignorada' || r.resposta) ultimaMensagem = new Date().toISOString()
-            if (r.para && r.resposta) await enviarTexto(r.para, r.resposta)
+            if (r.para && r.resposta) await entregar(r.para, r.resposta, r.msgId)
           } catch (e) {
             erros++
             console.error('[webhook]', (e as Error).message)
+          } finally {
+            if (idEmVoo) emVoo.delete(idEmVoo)
           }
         })
         return
@@ -109,6 +179,11 @@ export function iniciar(porta = PORTA) {
       if (soltos) console.log('[excluir] números soltos de contas em exclusão:', soltos)
     } catch (e) {
       console.error('[excluir] soltar números:', (e as Error).message)
+    }
+    try {
+      for (const linha of await varrerPresas(varredura)) console.log('[presas]', linha)
+    } catch (e) {
+      console.error('[presas] varrer:', (e as Error).message)
     }
     await varrerVencidas()
   }

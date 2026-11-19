@@ -19,6 +19,10 @@ export interface LancAntigo {
   carteira_id: string
   pessoal: boolean
   descricao?: string
+  /** Comprovante guardado, para a correção herdar em vez de nascer sem foto. */
+  anexo_path?: string | null
+  /** De onde veio (texto, áudio, foto, pdf). */
+  origem?: string | null
 }
 
 const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
@@ -57,6 +61,26 @@ export function devePerguntar(textoNovo: string, textoAntigo: string): boolean {
   return temPistaDeCorrecao(textoNovo) || mesmoTexto(textoNovo, textoAntigo)
 }
 
+const MIDIA = new Set(['audio', 'foto', 'pdf'])
+
+/**
+ * Reenvio da MESMA mídia. Áudio e foto demoram alguns segundos para virar lançamento; a pessoa acha
+ * que travou e manda de novo, e aí o mesmo gasto entra duas vezes.
+ *
+ * Em texto isso não vale (dois cortes de R$ 40 seguidos são duas vendas de verdade, e a mesma frase
+ * repetida já cai em `devePerguntar`). Em mídia, mandar duas vezes o mesmo valor em poucos minutos é
+ * quase sempre reenvio — mas não dá para descartar calado, então a Granninha pergunta.
+ */
+export function pareceReenvio(origemNova: string, origemAntiga: string | null | undefined, antigos: LancAntigo[], novas: Acao[]): LancAntigo | null {
+  if (!MIDIA.has(origemNova) || !origemAntiga || !MIDIA.has(origemAntiga)) return null
+  return pareceMesmoLancamento(antigos, novas)
+}
+
+export function perguntaReenvio(a: LancAntigo, ctx: Contexto, minutos: number): string {
+  const quando = minutos < 1 ? 'agora mesmo' : `há ${minutos} ${minutos === 1 ? 'minuto' : 'minutos'}`
+  return `Já anotei ${quando}: ${descreverAntigo(a, ctx)}. É o mesmo?\n\n1. Sim, é o mesmo (não anoto de novo)\n2. Não, é outro lançamento\n\nResponda com o número.`
+}
+
 const nomeCat = (ctx: Contexto, id: string | null) => ctx.categorias.find((c) => c.id === id)?.nome ?? 'Sem categoria'
 const nomeCart = (ctx: Contexto, id: string) => ctx.carteiras.find((c) => c.id === id)?.nome ?? 'carteira'
 
@@ -75,6 +99,12 @@ export function perguntaDuplicata(a: LancAntigo, ctx: Contexto): string {
 export function antesEAgora(antigos: LancAntigo[], novas: Acao[], ctx: Contexto): string {
   if (antigos.length !== 1 || novas.length !== 1) return ''
   return `Antes: ${descreverAntigo(antigos[0], ctx)}\nAgora: ${descreverNovo(novas[0], ctx)}`
+}
+
+/** 1/sim ou 2/não, para as perguntas de confirmação (mesmas palavras aceitas). */
+export function respostaSimNao(texto: string): 'sim' | 'nao' | null {
+  const r = respostaDuplicata(texto)
+  return r === 'corrigir' ? 'sim' : r === 'novo' ? 'nao' : null
 }
 
 /** Resposta do cliente à pergunta 1 ou 2. null = não é resposta (é outra mensagem). */

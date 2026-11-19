@@ -6,14 +6,14 @@
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, usoDoMes } from './banco.ts'
 import { despedidaDe, RESPOSTA_DESPEDIDA } from './despedida.ts'
 import { faturaDe } from './cartao.ts'
-import { executar, reverter, ultimaComEfeito, type Efeitos, type Origem } from './executar.ts'
+import { executar, reverter, ultimaComEfeito, ultimaMensagem, type Efeitos, type Origem } from './executar.ts'
 import { baixarMidia } from './gateway.ts'
 import { BOLETO, conferir, interpretar, NEGOCIO, opcaoEscolhida, PESSOAL, type Acao, type Contexto, type Opcao } from './interpretar.ts'
 import { lerDocumento, textoDoDocumento, type Transacao } from './midia.ts'
 import { transcrever, type Uso } from './openai.ts'
 import { responderPergunta } from './perguntas.ts'
 import { carregarBase } from './base.ts'
-import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, perguntaDuplicata, respostaDuplicata, type LancAntigo } from './duplicata.ts'
+import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, pareceReenvio, perguntaDuplicata, perguntaReenvio, respostaDuplicata, respostaSimNao, type LancAntigo } from './duplicata.ts'
 import { ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta } from './consultas.ts'
 import { foraDoDisponivel } from './cartao.ts'
 
@@ -41,7 +41,22 @@ export interface Saida {
   status: string
   para?: string
   resposta?: string
+  /** Id da mensagem no WhatsApp, para o servidor registrar se a resposta não foi entregue. */
+  msgId?: string
 }
+
+/**
+ * Marcas no campo `erro` que dizem em que pé está a mensagem (sem precisar de coluna nova):
+ * - NA_FILA: gravada pelo código NOVO e ainda não começou. É a única que pode ser reprocessada.
+ * - PROCESSANDO: já começou. Nunca é reprocessada, porque pode ter gravado ou revertido algo.
+ *
+ * Linha 'recebida' SEM nenhuma dessas marcas é legado: foi gravada pelo código antigo, que começava
+ * a processar logo depois do insert. No deploy deste próprio PR, o container velho morre no meio e
+ * deixa linhas assim, possivelmente com o lançamento já gravado. Reprocessar seria o lançamento em
+ * dobro que esta fase existe para matar, então essas só podem ser avisadas.
+ */
+export const NA_FILA = 'na fila'
+export const PROCESSANDO = 'processando'
 
 type Status = 'ok' | 'pergunta' | 'ignorada' | 'bloqueada' | 'erro' | 'limite'
 
@@ -50,6 +65,19 @@ export function hojeSP(): string {
 }
 
 const brl = (n: number) => 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/**
+ * Figurinha e reação (o 👍 numa resposta) não são tentativa de registrar nada: respondê-las com
+ * "por aqui eu entendo texto, áudio..." faz a Granninha parecer boba e enche a conversa. Elas ficam
+ * em silêncio, como "ok" e "beleza" (ver despedida.ts).
+ *
+ * Vídeo, contato, localização e documento que não é PDF continuam recebendo a mensagem de ajuda,
+ * porque ali a pessoa quis mandar alguma coisa de verdade.
+ */
+function ehRuido(d: EventoGateway['data']): boolean {
+  const t = (d.type ?? '').toUpperCase()
+  return t.includes('STICKER') || t.includes('REACTION') || t.includes('REACT')
+}
 
 function tipoDaMensagem(d: EventoGateway['data']): Origem | 'outro' {
   const t = (d.type ?? '').toUpperCase()
@@ -68,31 +96,75 @@ const AJUDA = `É só me mandar do seu jeito:
 "comprei 1.200 de material em 4x"
 Também entendo áudio, foto do comprovante e PDF. E você pode perguntar: "quanto sobrou esse mês?"`
 
-export async function processar(ev: EventoGateway): Promise<Saida> {
-  if (ev.event !== 'message.received') return { status: 'ignorada' }
+/**
+ * Os cortes que valem antes de gravar qualquer coisa: evento que não é mensagem recebida, mensagem
+ * que a própria Granninha mandou, grupo, ou falta de id/número. Usado pelo registro e pelo processar.
+ */
+export function dadosDaChegada(ev: EventoGateway): { msgId: string; telefone: string; de: string; tipo: Origem | 'outro' } | null {
+  if (ev.event !== 'message.received') return null
   const d = ev.data ?? {}
-  if (d.key?.fromMe || d.isGroup || (d.chatType && d.chatType !== 'PERSONAL')) return { status: 'ignorada' }
+  if (d.key?.fromMe || d.isGroup || (d.chatType && d.chatType !== 'PERSONAL')) return null
   const msgId = d.key?.id
   const de = d.from || d.key?.remoteJid || ''
   const telefone = de.split('@')[0].split(':')[0].replace(/\D/g, '')
-  if (!msgId || !telefone || !chaveDoNumero(de)) return { status: 'ignorada' }
+  if (!msgId || !telefone || !chaveDoNumero(de)) return null
+  return { msgId, telefone, de, tipo: tipoDaMensagem(d) }
+}
 
-  // Modo teste: com WA_SOMENTE_NUMEROS preenchido, só esses números conversam. O resto é ignorado em silêncio
-  // (sem resposta, sem IA, sem gravar nada além do registro de que chegou).
-  const liberados = (process.env.WA_SOMENTE_NUMEROS ?? '').split(',').map((n) => chaveDoNumero(n.trim())).filter(Boolean)
-  if (liberados.length && !liberados.includes(chaveDoNumero(de))) {
-    await sb.from('mensagens').insert({ id: msgId, telefone, tipo: 'outro', texto: '', status: 'ignorada', resposta: null, erro: 'fora da lista de números liberados' })
-    return { status: 'ignorada' }
+let semColunaEvento = false
+/** Só para o teste: volta a tentar gravar a coluna `evento`. */
+export function tentarColunaEvento() {
+  semColunaEvento = false
+}
+
+/**
+ * Grava a chegada ANTES de o webhook responder 200. O gateway não reenvia: mensagem que só existe
+ * na memória do processo desaparece sem rastro no deploy (que republica os 4 apps a cada merge).
+ * Guarda o evento inteiro, porque sem o fileUrl não há como retomar áudio nem foto.
+ */
+export async function registrarChegada(ev: EventoGateway): Promise<'nova' | 'duplicada' | 'ignorar'> {
+  const c = dadosDaChegada(ev)
+  if (!c) return 'ignorar'
+  const d = ev.data ?? {}
+  const linha: Record<string, unknown> = {
+    id: c.msgId, telefone: c.telefone, tipo: c.tipo === 'outro' ? 'outro' : c.tipo, texto: (d.content ?? d.caption ?? '').slice(0, 2000),
+    // A marca é o que diz à varredura que esta linha é do código novo e ainda não começou.
+    erro: NA_FILA,
   }
+  for (let i = 0; i < 2; i++) {
+    const ins = await sb.from('mensagens').insert(semColunaEvento ? linha : { ...linha, evento: ev })
+    if (!ins.error) return 'nova'
+    if (ins.error.code === '23505') return 'duplicada'
+    // Antes da migration do `evento` a coluna não existe: grava sem ela e não tenta mais (um insert por mensagem).
+    const semColuna = ins.error.code === 'PGRST204' || ins.error.code === '42703'
+    if (!semColunaEvento && semColuna) {
+      semColunaEvento = true
+      console.error('[mensagens] coluna `evento` não existe: retomada de áudio e foto fica de fora até a migration rodar')
+      continue
+    }
+    falhou(ins.error, 'registrar mensagem')
+  }
+  return 'nova'
+}
 
-  const tipo = tipoDaMensagem(d)
+export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolean } = {}): Promise<Saida> {
+  const c = dadosDaChegada(ev)
+  if (!c) return { status: 'ignorada' }
+  const { msgId, telefone, de, tipo } = c
+  const d = ev.data ?? {}
+
+  // Quem chama pelo webhook já gravou a chegada antes de responder ao gateway.
+  if (!opts.jaRegistrada && (await registrarChegada(ev)) === 'duplicada') return { status: 'duplicada' }
+
+  // Trava de "começou": só um processo trabalha nesta mensagem, e o que já começou nunca é
+  // reprocessado. DESFAZER e correção terminam com efeitos vazios, então "não gravou nada" não serve
+  // de sinal — retomar um desfazer desfaria um segundo lançamento. Ver presas.ts.
+  const claim = await sb.from('mensagens').update({ erro: PROCESSANDO }).eq('id', msgId).eq('status', 'recebida').eq('erro', NA_FILA).select('id')
+  falhou(claim.error, 'marcar mensagem em processamento')
+  if (!claim.data?.length) return { status: 'duplicada', msgId }
+
   const t0 = Date.now()
   let tokens: Uso = { entrada: 0, saida: 0, audio: 0 }
-
-  // Registro com o id do WhatsApp: se a mesma mensagem chegar de novo, para aqui.
-  const ins = await sb.from('mensagens').insert({ id: msgId, telefone, tipo: tipo === 'outro' ? 'outro' : tipo, texto: (d.content ?? d.caption ?? '').slice(0, 2000) })
-  if (ins.error?.code === '23505') return { status: 'duplicada' }
-  falhou(ins.error, 'registrar mensagem')
 
   let userId: string | null = null
   let status: Status = 'ok'
@@ -101,8 +173,21 @@ export async function processar(ev: EventoGateway): Promise<Saida> {
   let intencao: string | null = null
   let textoFinal = d.content ?? ''
   let erro: string | null = null
+  /** Preenchido pelo conversar() com o `atualizado_em` da pergunta em aberto que ele leu. */
+  const consumo: { pendenteLida?: string | null } = {}
 
-  try {
+  // Modo teste: com WA_SOMENTE_NUMEROS preenchido, só esses números conversam. O resto é ignorado em
+  // silêncio (sem resposta, sem IA), mas a linha sai de "recebida" para a varredura não voltar nela.
+  const liberados = (process.env.WA_SOMENTE_NUMEROS ?? '').split(',').map((n) => chaveDoNumero(n.trim())).filter(Boolean)
+  const fora = liberados.length > 0 && !liberados.includes(chaveDoNumero(de))
+  if (fora) {
+    status = 'ignorada'
+    erro = 'fora da lista de números liberados'
+    textoFinal = ''
+  }
+
+  // Número fora da lista não passa por aqui: nada de banco, nada de IA.
+  if (!fora) try {
     const cliente = await clientePorNumero(de)
     if (!cliente) {
       ;({ status, resposta, userId } = await numeroDesconhecido(telefone, de, d.content ?? ''))
@@ -119,6 +204,8 @@ export async function processar(ev: EventoGateway): Promise<Saida> {
         resposta = uso.lancamentos >= LIMITE_LANCAMENTOS
           ? `Você chegou ao limite de ${LIMITE_LANCAMENTOS} lançamentos deste mês. No dia 1 o contador zera. Se precisar de mais, fala com a gente pelo painel.`
           : `Você chegou ao limite de ${LIMITE_MIDIAS} áudios, fotos e PDFs deste mês. Texto continua funcionando normal, e no dia 1 o contador zera.`
+      } else if (tipo === 'outro' && ehRuido(d)) {
+        status = 'ignorada'
       } else if (tipo === 'outro') {
         status = 'ignorada'
         resposta = 'Por aqui eu entendo texto, áudio, foto de comprovante e PDF. Me manda de um desses jeitos?'
@@ -128,7 +215,7 @@ export async function processar(ev: EventoGateway): Promise<Saida> {
         status = 'ignorada'
         resposta = `Esse número já está confirmado nesta conta, então não dá para usá-lo em outra ao mesmo tempo. Se quiser levá-lo para a conta nova, troque o número aqui em ${PAINEL()}/ajustes (ou peça a exclusão desta conta) e confirme lá.`
       } else {
-        const r = await conversar(cliente, hoje, tipo, d, msgId, telefone)
+        const r = await conversar(cliente, hoje, tipo, d, msgId, telefone, consumo)
         ;({ status, resposta, efeitos, intencao } = r)
         textoFinal = r.texto
         tokens = r.tokens
@@ -145,12 +232,20 @@ export async function processar(ev: EventoGateway): Promise<Saida> {
     console.error('[granninha]', msgId, erro)
   }
 
+  // A pergunta em aberto só sai agora, e só se deu certo: deu erro no meio (IA fora, transcrição),
+  // ela continua lá para a resposta seguinte fazer sentido. O filtro por `atualizado_em` é o que
+  // impede de apagar uma pergunta NOVA que o próprio processamento acabou de gravar.
+  if (consumo.pendenteLida && status !== 'erro') {
+    const lim = await sb.from('conversas').update({ pendente: null, atualizado_em: new Date().toISOString() }).eq('telefone', telefone).eq('atualizado_em', consumo.pendenteLida)
+    if (lim.error) console.error('[granninha] limpar pergunta em aberto', lim.error.message)
+  }
+
   const up = await sb.from('mensagens').update({
     user_id: userId, intencao, status, resposta, efeitos, erro, texto: textoFinal.slice(0, 2000), ms: Date.now() - t0,
     tokens: tokens.entrada + tokens.saida, tokens_entrada: tokens.entrada, tokens_saida: tokens.saida, audio_tokens: tokens.audio || null, audio_seg: tokens.audioSeg ?? null,
   }).eq('id', msgId)
   if (up.error) console.error('[granninha] atualizar mensagem', up.error.message)
-  return { status, para: telefone, resposta }
+  return { status, para: telefone, resposta, msgId }
 }
 
 /**
@@ -283,7 +378,7 @@ interface Conversa {
   tokens: Uso
 }
 
-async function conversar(cliente: { id: string; nome: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string): Promise<Conversa> {
+async function conversar(cliente: { id: string; nome: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string, saida: { pendenteLida?: string | null } = {}): Promise<Conversa> {
   const tokens: Uso = { entrada: 0, saida: 0, audio: 0 }
   const soma = (u: Uso) => {
     tokens.entrada += u.entrada
@@ -300,13 +395,21 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   const { data: conv } = await sb.from('conversas').select('pendente,atualizado_em').eq('telefone', telefone).maybeSingle()
   const pend = conv?.pendente as { tipo?: string; texto?: string; pergunta?: string; transacoes?: Transacao[]; opcoes?: Opcao[]; anexo?: string; forcar?: { carteira?: string; pessoal?: boolean }; documento?: { valor: number; movimento: 'entrada' | 'saida' }; origem?: Origem; acoes?: Acao[]; anteriorMsg?: string } | null
   const fresco = conv && Date.now() - new Date(conv.atualizado_em).getTime() < 30 * 60_000
-  if (pend?.tipo) await sb.from('conversas').update({ pendente: null, atualizado_em: new Date().toISOString() }).eq('telefone', telefone)
+  // A pergunta em aberto NÃO é apagada aqui. Antes era, e se a transcrição ou a IA falhassem no meio
+  // a pergunta sumia: o "2" seguinte chegava sem contexto. Quem apaga é o processar(), só quando
+  // deu certo, e só se nada novo tiver sido gravado por cima (`pendenteLida` guarda o atualizado_em).
+  saida.pendenteLida = pend?.tipo ? (conv!.atualizado_em as string) : null
 
   if (tipo === 'audio') {
     const m = await baixarMidia(d.fileUrl ?? '')
     const tr = await transcrever(m.buffer, m.mime)
     texto = tr.texto
     soma(tr.uso)
+    // Transcrição vazia (áudio mudo, ruído, gravação de meio segundo): dizer isso, em vez de mandar
+    // a lista de exemplos como se a pessoa tivesse escrito algo que não dá para entender.
+    if (!texto.replace(/[\s.,!?-]/g, '')) {
+      return { status: 'ok', resposta: 'Não consegui entender o áudio. Pode mandar de novo, falando um pouco mais perto?', efeitos: {}, intencao: 'audio_vazio', texto: '', tokens }
+    }
   } else if (tipo === 'foto' || tipo === 'pdf') {
     const m = await baixarMidia(d.fileUrl ?? '')
     const ext = tipo === 'pdf' ? 'pdf' : m.mime.includes('png') ? 'png' : 'jpg'
@@ -375,6 +478,35 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     if (r) return resolverDuplicata(cliente.id, ctx, pend.acoes, pend.anteriorMsg ?? '', r, pend.origem ?? tipo, pend.anexo ?? null, texto, tokens)
   }
 
+  // Resposta à pergunta "quer desfazer o anterior também?" depois de dois DESFAZER seguidos.
+  if (pend?.tipo === 'desfazer_mais' && fresco && pend.anteriorMsg) {
+    const r = respostaSimNao(texto)
+    if (r === 'nao') return { status: 'ok', resposta: 'Beleza, parei aí. Nada mais foi desfeito.', efeitos: {}, intencao: 'desfazer', texto, tokens }
+    if (r === 'sim') {
+      const alvo = await ultimaComEfeito(cliente.id)
+      // Só desfaz se continua sendo aquele mesmo: se algo entrou no meio, não mexe em nada.
+      if (!alvo || alvo.id !== pend.anteriorMsg) {
+        return { status: 'ok', resposta: 'Esse lançamento já não é mais o último, então não mexi em nada. Se quiser, me diz qual apagar.', efeitos: {}, intencao: 'desfazer', texto, tokens }
+      }
+      await reverter(cliente.id, alvo.efeitos)
+      await sb.from('mensagens').update({ desfeita: true }).eq('id', alvo.id).eq('user_id', cliente.id)
+      return { status: 'ok', resposta: `Pronto, desfiz também: "${alvo.texto.slice(0, 120)}"${await saldoDepois(cliente.id, null)}`, efeitos: {}, intencao: 'desfazer', texto, tokens }
+    }
+  }
+
+  // Resposta à pergunta de reenvio ("já anotei isso há 2 minutos, é o mesmo?"): 1 não grava nada,
+  // 2 grava como lançamento novo. Nada foi gravado antes, então "1" é só deixar como está.
+  if (pend?.tipo === 'reenvio' && fresco && pend.acoes?.length) {
+    const r = respostaDuplicata(texto)
+    if (r === 'corrigir') {
+      return { status: 'ok', resposta: 'Então deixei só o de antes, sem anotar de novo.', efeitos: {}, intencao: 'acoes', texto, tokens }
+    }
+    if (r === 'novo') {
+      const ex = await executar(cliente.id, ctx, pend.acoes, pend.origem ?? tipo, pend.anexo ?? null)
+      return { status: 'ok', resposta: `${ex.linhas.join('\n\n')}${await saldoDepois(cliente.id, pend.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: ex.efeitos, intencao: 'acoes', texto, tokens }
+    }
+  }
+
   if (pend?.tipo === 'importar_fatura' && fresco) {
     if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei a fatura.', efeitos: {}, intencao: 'fatura', texto, tokens }
     const esc = opcaoEscolhida(texto, pend.opcoes ?? [])
@@ -434,24 +566,46 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
       await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta: it.perguntar, opcoes: it.opcoes, forcar, documento, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
       return { status: 'pergunta', resposta: it.perguntar, efeitos: {}, intencao: 'acoes', texto, tokens }
     }
-    // Trava: o que ia ser gravado é igual ao último lançamento e a frase soa como correção? Pergunta antes de gravar.
-    if (!documento && !anexo) {
-      const ult = await ultimaComEfeito(cliente.id)
-      if (ult && Date.now() - new Date(ult.criado_em).getTime() < JANELA_MIN * 60_000 && devePerguntar(texto, ult.texto)) {
-        const antigo = pareceMesmoLancamento(await lancsDe(cliente.id, ult.efeitos.lancamentos ?? []), it.acoes)
+    // Travas contra lançar duas vezes a mesma coisa. Nada é gravado antes de a pessoa responder.
+    const ultima = await ultimaComEfeito(cliente.id)
+    const idade = ultima ? Date.now() - new Date(ultima.criado_em).getTime() : Infinity
+    if (ultima && idade < JANELA_MIN * 60_000) {
+      const antigos = await lancsDe(cliente.id, ultima.efeitos.lancamentos ?? [])
+      // Mídia primeiro: o mesmo áudio ou a mesma foto mandados de novo porque pareceu que travou.
+      // (Áudio com transcrição idêntica também cairia na trava de texto abaixo, mas a pergunta certa
+      // aqui é "já anotei isso, é o mesmo?", não "quer corrigir o anterior?".)
+      const reenvio = pareceReenvio(origemFinal, ultima.tipo, antigos, it.acoes)
+      if (reenvio) {
+        await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'reenvio', acoes: it.acoes, anteriorMsg: ultima.id, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
+        return { status: 'pergunta', resposta: perguntaReenvio(reenvio, ctx, Math.floor(idade / 60_000)), efeitos: {}, intencao: 'acoes', texto, tokens }
+      }
+      // Texto: igual ao último e a frase soa como correção ("não, esse foi de...").
+      if (!documento && !anexo && devePerguntar(texto, ultima.texto)) {
+        const antigo = pareceMesmoLancamento(antigos, it.acoes)
         if (antigo) {
-          await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'duplicata', acoes: it.acoes, anteriorMsg: ult.id, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
+          await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'duplicata', acoes: it.acoes, anteriorMsg: ultima.id, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
           return { status: 'pergunta', resposta: perguntaDuplicata(antigo, ctx), efeitos: {}, intencao: 'acoes', texto, tokens }
         }
       }
     }
-    const anteriores = it.acoes.some((a) => a.tipo_acao === 'criar_categoria') ? (await ultimaComEfeito(cliente.id))?.efeitos : undefined
+    const anteriores = it.acoes.some((a) => a.tipo_acao === 'criar_categoria') ? ultima?.efeitos : undefined
     const r = await executar(cliente.id, ctx, it.acoes, origemFinal, anexo, anteriores)
     return { status: 'ok', resposta: `${r.linhas.join('\n\n')}${await saldoDepois(cliente.id, it.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
   }
   if (it.intencao === 'desfazer') {
     const ult = await ultimaComEfeito(cliente.id)
     if (!ult) return { status: 'ok', resposta: 'Não achei nada recente para desfazer.', efeitos: {}, intencao: 'desfazer', texto, tokens }
+    // Dois DESFAZER seguidos (a pessoa achou que o primeiro não pegou): o segundo reverteria o
+    // lançamento ANTERIOR, que ela não pediu para desfazer. Pergunta antes.
+    const anterior = await ultimaMensagem(cliente.id)
+    if (anterior?.intencao === 'desfazer' && Date.now() - new Date(anterior.criado_em).getTime() < 10 * 60_000) {
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'desfazer_mais', anteriorMsg: ult.id }, atualizado_em: new Date().toISOString() })
+      return {
+        status: 'pergunta',
+        resposta: `Eu já tinha desfeito o último. O anterior é: "${ult.texto.slice(0, 80)}". Quer desfazer esse também?\n\n1. Sim, desfaz\n2. Não, para aí\n\nResponda com o número.`,
+        efeitos: {}, intencao: 'desfazer', texto, tokens,
+      }
+    }
     await reverter(cliente.id, ult.efeitos)
     await sb.from('mensagens').update({ desfeita: true }).eq('id', ult.id).eq('user_id', cliente.id)
     return { status: 'ok', resposta: `Pronto, desfiz: "${ult.texto.slice(0, 120)}"${await saldoDepois(cliente.id, null)}`, efeitos: {}, intencao: 'desfazer', texto, tokens }
@@ -468,7 +622,9 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     const antes = await lancsDe(cliente.id, ult.efeitos.lancamentos ?? [])
     await reverter(cliente.id, ult.efeitos)
     await sb.from('mensagens').update({ desfeita: true }).eq('id', ult.id).eq('user_id', cliente.id)
-    const r = await executar(cliente.id, await contextoDe(cliente.id, hoje), it2.acoes, tipo, anexo)
+    // O lançamento corrigido fica com o comprovante e a origem do original.
+    const h = herdarComprovante(antes, anexo, tipo)
+    const r = await executar(cliente.id, await contextoDe(cliente.id, hoje), it2.acoes, h.origem, h.anexo)
     const mudou = antesEAgora(antes, it2.acoes, ctx)
     return { status: 'ok', resposta: `Corrigido.\n\n${r.linhas.join('\n\n')}${mudou ? `\n\n${mudou}` : ''}${await saldoDepois(cliente.id, it2.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'corrigir', texto: novo, tokens }
   }
@@ -557,9 +713,20 @@ async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Or
 /** Lançamentos do cliente por id (para comparar antes e depois de uma correção). */
 async function lancsDe(userId: string, ids: string[]): Promise<LancAntigo[]> {
   if (!ids.length) return []
-  const { data, error } = await sb.from('lancamentos').select('id,tipo,valor,categoria_id,carteira_id,pessoal,descricao').eq('user_id', userId).in('id', ids)
+  const { data, error } = await sb.from('lancamentos').select('id,tipo,valor,categoria_id,carteira_id,pessoal,descricao,anexo_path,origem').eq('user_id', userId).in('id', ids)
   falhou(error, 'lançamentos do último registro')
   return (data ?? []).map((l) => ({ ...l, valor: Number(l.valor), pessoal: !!l.pessoal }))
+}
+
+/**
+ * De quem a correção herda o comprovante. Foto do comprovante e depois "não, foi 90": o lançamento
+ * corrigido nascia sem a foto e marcado como texto, e o arquivo ficava guardado mas solto.
+ * Se a própria mensagem de correção trouxer anexo, vale o dela.
+ */
+function herdarComprovante(antigos: LancAntigo[], anexoAtual: string | null, origemAtual: Origem): { anexo: string | null; origem: Origem } {
+  if (anexoAtual) return { anexo: anexoAtual, origem: origemAtual }
+  const a = antigos.find((x) => x.anexo_path)
+  return a ? { anexo: a.anexo_path ?? null, origem: (a.origem as Origem) ?? origemAtual } : { anexo: null, origem: origemAtual }
 }
 
 /** O cliente respondeu 1 (é o mesmo: corrige o anterior) ou 2 (é outro: lança). */
@@ -576,7 +743,8 @@ async function resolverDuplicata(userId: string, ctx: Contexto, acoes: Acao[], a
   const antes = await lancsDe(userId, ult.efeitos.lancamentos ?? [])
   await reverter(userId, ult.efeitos)
   await sb.from('mensagens').update({ desfeita: true }).eq('id', ult.id).eq('user_id', userId)
-  const r = await executar(userId, ctx, acoes, origem, anexo)
+  const h = herdarComprovante(antes, anexo, origem)
+  const r = await executar(userId, ctx, acoes, h.origem, h.anexo)
   const mudou = antesEAgora(antes, acoes, ctx)
   return { status: 'ok', resposta: `Corrigido.\n\n${r.linhas.join('\n\n')}${mudou ? `\n\n${mudou}` : ''}${await saldoDepois(userId, acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'corrigir', texto, tokens }
 }
