@@ -340,6 +340,78 @@ try {
     assert.equal(s.whatsapp.estado, 'CONNECTED')
     assert.ok(s.mensagens_24h > 0)
   })
+
+  console.log('6. conversa sem falha (fase cv)')
+  await caso('a chegada está no banco ANTES do 200: nada se perde no deploy', async () => {
+    const id = `PRESA-TESTE-${Date.now()}`
+    const corpo = JSON.stringify({ event: 'message.received', sessionId: 'granninha', data: { key: { id, remoteJid: `${FONE}@s.whatsapp.net`, fromMe: false }, from: `${FONE}@s.whatsapp.net`, isGroup: false, chatType: 'PERSONAL', type: 'TEXT', content: 'paguei 7 de estacionamento no pix' } })
+    const sig = 'sha256=' + createHmac('sha256', 'segredo-teste').update(corpo).digest('hex')
+    const r = await fetch(SERV + '/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Webhook-Signature': sig }, body: corpo })
+    assert.equal(r.status, 200)
+    // Sem esperar nada: a linha tem que existir já, porque o 200 só sai depois de gravar.
+    const m = (await sb.from('mensagens').select('id,status,erro').eq('id', id).maybeSingle()).data
+    assert.ok(m, 'a mensagem está no banco no instante do 200')
+    assert.ok(['recebida', 'ok', 'pergunta'].includes(String((m as { status: string }).status)))
+    // deixa terminar para não sujar os casos seguintes
+    const t0 = Date.now()
+    while (Date.now() - t0 < 60000) {
+      const x = (await sb.from('mensagens').select('status').eq('id', id).maybeSingle()).data as { status: string } | null
+      if (x && x.status !== 'recebida') break
+      await new Promise((ok2) => setTimeout(ok2, 200))
+    }
+  })
+  await caso('mensagem presa (deploy no meio) é retomada pela varredura', async () => {
+    const { varredura } = await import('../src/index.ts')
+    const { varrerPresas } = await import('../src/presas.ts')
+    const id = `RETOMAR-TESTE-${Date.now()}`
+    const evento = { event: 'message.received', sessionId: 'granninha', data: { key: { id, remoteJid: `${FONE}@s.whatsapp.net`, fromMe: false }, from: `${FONE}@s.whatsapp.net`, isGroup: false, chatType: 'PERSONAL', type: 'TEXT', content: 'recebi 33 de corte no pix' } }
+    // Como se o processo tivesse morrido antes de começar: linha 'recebida', erro nulo, 5 min atrás.
+    const ins = await sb.from('mensagens').insert({ id, telefone: FONE, tipo: 'texto', texto: 'recebi 33 de corte no pix', evento, criado_em: new Date(Date.now() - 5 * 60_000).toISOString() })
+    if (ins.error) throw new Error('precisa da migration 20261119120000_mensagens_evento: ' + ins.error.message)
+    const antes = enviados.length
+    const log = await varrerPresas(varredura)
+    assert.ok(log.some((l) => l.includes(id)), 'a varredura pegou a mensagem: ' + JSON.stringify(log))
+    const t0 = Date.now()
+    while (Date.now() - t0 < 60000 && enviados.length === antes) await new Promise((ok2) => setTimeout(ok2, 200))
+    assert.ok(enviados.length > antes, 'a resposta saiu')
+    assert.ok((await lancs(uid)).some((l) => Number(l.valor) === 33), 'o lançamento que tinha se perdido foi gravado')
+  })
+  await caso('mensagem que JÁ tinha começado não é reprocessada, e avisa', async () => {
+    const { varredura } = await import('../src/index.ts')
+    const { varrerPresas } = await import('../src/presas.ts')
+    const id = `MEIO-TESTE-${Date.now()}`
+    await sb.from('mensagens').insert({ id, telefone: FONE, tipo: 'texto', texto: 'desfazer', erro: 'processando', criado_em: new Date(Date.now() - 5 * 60_000).toISOString() })
+    const quantos = (await lancs(uid)).length
+    const antes = enviados.length
+    await varrerPresas(varredura)
+    const t0 = Date.now()
+    while (Date.now() - t0 < 20000 && enviados.length === antes) await new Promise((ok2) => setTimeout(ok2, 200))
+    assert.equal((await lancs(uid)).length, quantos, 'nada foi desfeito de novo')
+    const m = (await sb.from('mensagens').select('status,erro').eq('id', id).single()).data as { status: string; erro: string }
+    assert.equal(m.status, 'erro')
+    assert.match(m.erro, /interrompida/)
+    assert.match(enviados[enviados.length - 1].texto, /não consegui terminar de anotar/)
+  })
+  await caso('pergunta no meio não rouba o DESFAZER', async () => {
+    const r1 = await mandar(FONE, { content: 'paguei 61 de luz no pix' })
+    assert.match(r1.texto, /R\$ 61,00/)
+    await mandar(FONE, { content: 'quanto sobrou esse mês?' })
+    const r3 = await mandar(FONE, { content: 'desfazer' })
+    assert.match(r3.texto, /desfiz/)
+    assert.ok(!(await lancs(uid)).some((l) => Number(l.valor) === 61), 'os R$ 61 saíram de verdade')
+  })
+  await caso('dois DESFAZER seguidos: o segundo pergunta antes de apagar outro', async () => {
+    const r = await mandar(FONE, { content: 'desfazer' })
+    assert.match(r.texto, /já tinha desfeito|Não achei nada recente/)
+  })
+  await caso('figurinha não recebe resposta', async () => {
+    const r = await mandar(FONE, { type: 'STICKER', fileUrl: '/api/media/granninha-STK.webp' }, { esperarNada: true })
+    assert.equal(r.texto, '', 'figurinha fica em silêncio')
+  })
+  await caso('vídeo continua recebendo a mensagem de ajuda', async () => {
+    const r = await mandar(FONE, { type: 'VIDEO', fileUrl: '/api/media/granninha-VID.mp4' })
+    assert.match(r.texto, /texto, áudio, foto de comprovante e PDF/)
+  })
 } finally {
   const arqs = (await sb.storage.from('comprovantes').list(uid)).data ?? []
   if (arqs.length) await sb.storage.from('comprovantes').remove(arqs.map((a) => `${uid}/${a.name}`))
