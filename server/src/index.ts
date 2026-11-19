@@ -11,7 +11,7 @@ import { sb } from './banco.ts'
 import { rotaAdmin } from './admin.ts'
 import { assinaturaValida, enviarTexto, statusSessao } from './gateway.ts'
 import { excluirVencidas, soltarNumerosDeExcluidas } from './excluir.ts'
-import { hojeSP, processar, registrarChegada, type EventoGateway } from './granninha.ts'
+import { hojeSP, marcarColunaEventoFaltando, processar, registrarChegada, semColunaEvento, type EventoGateway } from './granninha.ts'
 import { clientePorNumero } from './banco.ts'
 import { PISO_MS, varrerPresas, type Presa } from './presas.ts'
 
@@ -65,18 +65,19 @@ function corpo(req: IncomingMessage, limite = 2_000_000): Promise<string> {
   })
 }
 
-let semColunaEvento = false
 /** De onde a varredura tira o que precisa. Exportado para o teste exercitar as peças de verdade. */
 export const varredura = {
   buscar: async (desde: string): Promise<Presa[]> => {
     const ate = new Date(Date.now() - PISO_MS).toISOString()
     const campos = 'id,telefone,tipo,texto,erro,criado_em'
     for (let i = 0; i < 2; i++) {
-      const r = await sb.from('mensagens').select(semColunaEvento ? campos : campos + ',evento')
+      // A ausência da coluna vale por um tempo, não para sempre: a migration pode rodar com o app no ar.
+      const semColuna = semColunaEvento()
+      const r = await sb.from('mensagens').select(semColuna ? campos : campos + ',evento')
         .eq('status', 'recebida').gte('criado_em', desde).lte('criado_em', ate).order('criado_em', { ascending: false }).limit(50)
       if (!r.error) return (r.data ?? []).map((m) => ({ ...(m as unknown as Presa), evento: (m as unknown as Presa).evento ?? null }))
-      if (!semColunaEvento && (r.error.code === 'PGRST204' || r.error.code === '42703')) {
-        semColunaEvento = true
+      if (!semColuna && (r.error.code === 'PGRST204' || r.error.code === '42703')) {
+        marcarColunaEventoFaltando()
         continue
       }
       throw new Error(r.error.message)

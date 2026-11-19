@@ -111,10 +111,22 @@ export function dadosDaChegada(ev: EventoGateway): { msgId: string; telefone: st
   return { msgId, telefone, de, tipo: tipoDaMensagem(d) }
 }
 
-let semColunaEvento = false
-/** Só para o teste: volta a tentar gravar a coluna `evento`. */
+/**
+ * Quando descobrimos que a coluna `evento` não existe (banco sem a migration), paramos de tentar —
+ * mas só por um tempo. Sem esse prazo, o processo que subiu antes da migration continuaria gravando
+ * sem o evento até o próximo deploy, e a retomada de áudio e foto ficaria quebrada em silêncio mesmo
+ * depois de a coluna existir. Aconteceu de verdade em 2026-11-19: a migration foi aplicada com o app
+ * já rodando.
+ */
+const retentarColunaMs = () => Number(process.env.RETENTAR_COLUNA_MS ?? 600_000)
+let colunaFaltouEm = 0
+export const semColunaEvento = () => colunaFaltouEm > 0 && Date.now() - colunaFaltouEm < retentarColunaMs()
+export const marcarColunaEventoFaltando = () => {
+  colunaFaltouEm = Date.now()
+}
+/** Só para o teste: volta a tentar gravar a coluna `evento` agora. */
 export function tentarColunaEvento() {
-  semColunaEvento = false
+  colunaFaltouEm = 0
 }
 
 /**
@@ -132,13 +144,14 @@ export async function registrarChegada(ev: EventoGateway): Promise<'nova' | 'dup
     erro: NA_FILA,
   }
   for (let i = 0; i < 2; i++) {
-    const ins = await sb.from('mensagens').insert(semColunaEvento ? linha : { ...linha, evento: ev })
+    const semColuna = semColunaEvento()
+    const ins = await sb.from('mensagens').insert(semColuna ? linha : { ...linha, evento: ev })
     if (!ins.error) return 'nova'
     if (ins.error.code === '23505') return 'duplicada'
-    // Antes da migration do `evento` a coluna não existe: grava sem ela e não tenta mais (um insert por mensagem).
-    const semColuna = ins.error.code === 'PGRST204' || ins.error.code === '42703'
-    if (!semColunaEvento && semColuna) {
-      semColunaEvento = true
+    // Antes da migration do `evento` a coluna não existe: grava sem ela por um tempo (um insert por
+    // mensagem), e volta a tentar depois, porque a migration pode rodar com o app já no ar.
+    if (!semColuna && (ins.error.code === 'PGRST204' || ins.error.code === '42703')) {
+      marcarColunaEventoFaltando()
       console.error('[mensagens] coluna `evento` não existe: retomada de áudio e foto fica de fora até a migration rodar')
       continue
     }

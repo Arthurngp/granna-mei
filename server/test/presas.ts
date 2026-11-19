@@ -280,6 +280,28 @@ await caso('sem a coluna evento o serviço continua gravando a chegada', async (
   assert.equal(lancsU1().length, 1)
 })
 
+await caso('migration rodando com o app NO AR: ele volta a gravar o evento', async () => {
+  // Caso real de 2026-11-19: o app subiu antes da migration, marcou "a coluna não existe" e, sem um
+  // prazo, continuaria gravando sem o evento até o próximo deploy — com a coluna já existindo.
+  ia.regras = [[/gasolina/, GASOLINA]]
+  E.recusarColuna = 'evento'
+  await postar(evento('gastei 50 de gasolina', 'ANTES-MIG'))
+  await esperar(() => Boolean(linha('ANTES-MIG')))
+  assert.equal(linha('ANTES-MIG')?.evento, undefined, 'antes da migration grava sem o evento')
+
+  // A migration roda com o app no ar: a coluna passa a existir e o PRAZO de reteste vence sozinho,
+  // sem ninguém reiniciar nada (é isso que tem de funcionar em produção).
+  E.recusarColuna = null
+  process.env.RETENTAR_COLUNA_MS = '300'
+  await new Promise((ok) => setTimeout(ok, 350))
+  await postar(evento('gastei 50 de gasolina', 'DEPOIS-MIG'))
+  await esperar(() => Boolean(linha('DEPOIS-MIG')))
+  assert.ok(linha('DEPOIS-MIG')?.evento, 'sem reiniciar o app, o evento volta a ser gravado')
+  // Deixa a fila deste caso terminar: senão o envio atrasado é contado pelo caso seguinte.
+  await esperar(() => envios.length >= 2)
+  delete process.env.RETENTAR_COLUNA_MS
+})
+
 await caso('sem a coluna evento, texto ainda é retomado e mídia é avisada', async () => {
   ia.regras = [[/gasolina/, GASOLINA]]
   E.recusarColuna = 'evento'
