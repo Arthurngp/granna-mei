@@ -76,6 +76,24 @@ async function mandar(de: string, d: Record<string, unknown>, opt: { id?: string
   return { id, texto: '' }
 }
 
+/**
+ * Manda a mensagem e responde "1" a cada pergunta de opções, até a Granninha fechar.
+ *
+ * A ORDEM das perguntas depende da IA: ela decide se "conta de luz" pode ser gasto pessoal, e nesse
+ * caso a pergunta de negócio/pessoal vem antes da de conta. Fixar a sequência num teste com IA real é
+ * frágil — em 19/11 a ordem mudou e três casos reprovaram sem nenhum defeito no produto. O caso cobra
+ * o resultado (o lançamento fechado com o valor certo), e as perguntas feitas vão na mensagem de erro.
+ */
+async function responderAte(de: string, conteudo: string, limite = 4) {
+  let r = await mandar(de, { content: conteudo })
+  const perguntas: string[] = []
+  for (let i = 0; i < limite && /Responda com o n[úu]mero/i.test(r.texto); i++) {
+    perguntas.push(r.texto.split('\n')[0].slice(0, 60))
+    r = await mandar(de, { content: '1' })
+  }
+  return { texto: r.texto, perguntas }
+}
+
 async function caso(nome: string, fn: () => Promise<void>) {
   try {
     await fn()
@@ -162,10 +180,8 @@ try {
     const r1 = await mandar(FONE, { content: 'paguei a luz' })
     assert.match(r1.texto, /valor|quanto/i)
     assert.equal((await lancs(uid)).length, 0)
-    const r2 = await mandar(FONE, { content: '89' })
-    assert.match(r2.texto, /Pagou como/)
-    const r3 = await mandar(FONE, { content: '1' })
-    assert.match(r3.texto, /saída de R\$ 89,00/)
+    const r = await responderAte(FONE, '89')
+    assert.match(r.texto, /saída de R\$ 89,00/, 'perguntas feitas: ' + r.perguntas.join(' | '))
     const ls = await lancs(uid)
     assert.equal(ls.length, 1)
     assert.equal(Number(ls[0].valor), 89)
@@ -174,7 +190,10 @@ try {
   await caso('pergunta ignorada: a mensagem nova vale sozinha e a pergunta antiga some', async () => {
     const n = (await lancs(uid)).length
     const r1 = await mandar(FONE, { content: 'paguei 20 de pão' })
-    assert.match(r1.texto, /Pagou como/)
+    // Qual pergunta ela faz aqui depende da IA (se marcar "pão" como talvez pessoal, vem a de
+    // negócio/pessoal antes da conta). O que o caso prova é que o lançamento fica em aberto.
+    assert.match(r1.texto, /Responda com o n[úu]mero/i, 'ela pergunta algo e não grava ainda: ' + r1.texto.slice(0, 80))
+    assert.equal((await lancs(uid)).length, n, 'nada gravado enquanto a pergunta está em aberto')
     const r2 = await mandar(FONE, { content: 'recebi 300 de uma escova no pix' })
     assert.match(r2.texto, /entrada de R\$ 300,00/)
     const novos = (await lancs(uid)).slice(n)
@@ -234,8 +253,16 @@ try {
     assert.equal(Number(f[0].valor), 950)
   })
   await caso('pergunta livre responde com os números do cliente', async () => {
+    // O esperado sai do BANCO, não de um número fixo: o roteiro acima muda conforme casos são
+    // acrescentados, e um 174 cravado quebra sem nenhum defeito no produto. Neste ponto não há compra
+    // no cartão, então a soma das saídas não pessoais do mês é o mesmo que a resposta deve mostrar.
+    const mes = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).slice(0, 7)
+    const saidas = (await lancs(uid)).filter((l) => l.tipo === 'saida' && !l.pessoal && String(l.data).startsWith(mes))
+    const total = saidas.reduce((a, l) => a + Number(l.valor), 0)
+    assert.ok(total > 0, 'o roteiro precisa ter criado alguma saída antes desta pergunta')
     const r = await mandar(FONE, { content: 'quanto eu gastei esse mês?' })
-    assert.match(r.texto, /174/)
+    const esperado = total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    assert.ok(r.texto.includes(esperado), `esperava R$ ${esperado} (soma do banco), veio: ${r.texto.slice(0, 120)}`)
   })
 
   console.log('4. áudio, foto e extrato')
