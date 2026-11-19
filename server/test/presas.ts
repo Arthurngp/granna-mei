@@ -53,7 +53,9 @@ process.env.PRESAS_PISO_MS = '1000'
 process.env.PRESAS_TETO_MS = '5000'
 
 const { iniciar, varredura } = await import('../src/index.ts')
-const { varrerPresas, decidir, AVISO_INTERROMPIDA } = await import('../src/presas.ts')
+const { varrerPresas, varrerRetomarIA, decidir, AVISO_INTERROMPIDA } = await import('../src/presas.ts')
+const { zerarEstadoIA } = await import('../src/ia-estado.ts')
+const COTA = { status: 429, corpo: JSON.stringify({ error: { message: 'You exceeded your current quota', type: 'insufficient_quota' } }) }
 const { processar, registrarChegada, tentarColunaEvento, PROCESSANDO, NA_FILA } = await import('../src/granninha.ts')
 
 const srv = iniciar(0)
@@ -354,7 +356,82 @@ await caso('pedido inválido não é repetido', async () => {
   assert.equal(tentativas, 1, '400 daria o mesmo erro de novo: não insiste')
 })
 
-/* ---------------- 6. decisão isolada ---------------- */
+/* ---------------- 6. retomada depois de a IA voltar ---------------- */
+
+await caso('IA voltou: a mensagem que ela deixou cair é anotada sem a cliente mandar de novo', async () => {
+  zerarEstadoIA()
+  ia.erro = COTA
+  const ev = evento('gastei 50 de gasolina', 'IA-1')
+  await postar(ev)
+  await esperar(() => /IA_RETOMAR/.test(String(linha('IA-1')?.erro)))
+  assert.equal(lancsU1().length, 0, 'nada entrou enquanto a IA estava fora')
+
+  // O crédito entra: a varredura reprocessa sozinha.
+  ia.erro = null
+  ia.regras = [[/gasolina/, GASOLINA]]
+  const log = await varrerRetomarIA({ ...varredura, buscar: varredura.buscarRetomarIA })
+  assert.ok(log.some((l) => l.includes('IA-1')), 'entra na fila: ' + JSON.stringify(log))
+  await esperar(() => lancsU1().length > 0)
+  assert.equal(lancsU1().length, 1, 'o lançamento perdido entrou')
+  assert.equal(linha('IA-1')?.status, 'ok')
+})
+
+await caso('IA ainda fora: tenta UMA como sonda e deixa as outras esperando', async () => {
+  // A sonda existe porque a IA só volta a ser "ok" quando alguma chamada dá certo. Sem ela, nada seria
+  // retomado até algum cliente escrever de novo — e se ninguém escrevesse, o perdido ficaria perdido.
+  zerarEstadoIA()
+  ia.erro = COTA
+  await postar(evento('gastei 50 de gasolina', 'IA-2a'))
+  await esperar(() => /IA_RETOMAR/.test(String(linha('IA-2a')?.erro)))
+  await postar(evento('gastei 70 de material', 'IA-2b'))
+  await esperar(() => /IA_RETOMAR/.test(String(linha('IA-2b')?.erro)))
+
+  const log = await varrerRetomarIA({ ...varredura, buscar: varredura.buscarRetomarIA })
+  assert.ok(log.some((l) => /sonda/.test(l)), 'diz no log que está só sondando: ' + JSON.stringify(log))
+  assert.equal(log.filter((l) => l.startsWith('retomando')).length, 1, 'uma tentativa por volta, não todas')
+  await esperar(() => false, 300)
+  assert.match(String(linha('IA-2a')?.erro), /IA_RETOMAR/, 'a sonda que falhou continua esperando')
+  assert.match(String(linha('IA-2b')?.erro), /IA_RETOMAR/, 'e a outra nem foi tocada')
+  assert.equal(lancsU1().length, 0)
+})
+
+await caso('se a cliente já relançou no meio, a retomada descarta em silêncio', async () => {
+  zerarEstadoIA()
+  ia.erro = COTA
+  await postar(evento('gastei 50 de gasolina', 'IA-3'))
+  await esperar(() => /IA_RETOMAR/.test(String(linha('IA-3')?.erro)))
+
+  // A IA volta e a cliente, sem saber, manda de novo: esse lançamento entra normalmente.
+  ia.erro = null
+  ia.regras = [[/gasolina/, GASOLINA]]
+  await postar(evento('gastei 50 de gasolina', 'IA-3-DENOVO'))
+  await esperar(() => lancsU1().length > 0)
+  assert.equal(lancsU1().length, 1)
+
+  const envios0 = envios.length
+  await varrerRetomarIA({ ...varredura, buscar: varredura.buscarRetomarIA })
+  await esperar(() => linha('IA-3')?.status !== 'erro', 2000)
+  assert.equal(lancsU1().length, 1, 'não vira lançamento em dobro')
+  assert.equal(envios.length, envios0, 'e não manda pergunta do nada para a cliente')
+  assert.equal(linha('IA-3')?.intencao, 'retomada_duplicada')
+})
+
+await caso('mensagem velha demais: desiste em vez de retomar', async () => {
+  zerarEstadoIA()
+  E.tabelas.mensagens ??= []
+  E.tabelas.mensagens.push({
+    id: 'IA-VELHA', telefone: NUM, tipo: 'texto', texto: 'gastei 50 de gasolina', status: 'erro',
+    erro: 'IA_RETOMAR IA sem_cota: quota', efeitos: {}, desfeita: false, evento: null,
+    criado_em: new Date(Date.now() - 40 * 60_000).toISOString(),
+  })
+  ia.regras = [[/gasolina/, GASOLINA]]
+  const log = await varrerRetomarIA({ ...varredura, buscar: varredura.buscarRetomarIA })
+  assert.ok(log.some((l) => /desisti de IA-VELHA/.test(l)), JSON.stringify(log))
+  assert.equal(lancsU1().length, 0, 'não retoma mensagem de 40 minutos atrás')
+  assert.doesNotMatch(String(linha('IA-VELHA')?.erro), /IA_RETOMAR/, 'e não fica voltando nela')
+})
+
+/* ---------------- 7. decisão isolada ---------------- */
 
 await caso('a decisão por si só: cada estado tem um caminho', async () => {
   const agora = Date.now()

@@ -13,8 +13,8 @@ import { assinaturaValida, enviarTexto, statusSessao } from './gateway.ts'
 import { excluirVencidas, soltarNumerosDeExcluidas } from './excluir.ts'
 import { hojeSP, marcarColunaEventoFaltando, processar, registrarChegada, semColunaEvento, type EventoGateway } from './granninha.ts'
 import { clientePorNumero } from './banco.ts'
-import { PISO_MS, varrerPresas, type Presa } from './presas.ts'
-import { estadoIA } from './ia-estado.ts'
+import { PISO_MS, varrerPresas, varrerRetomarIA, type Presa } from './presas.ts'
+import { estadoIA, MARCA_RETOMAR } from './ia-estado.ts'
 
 const PORTA = Number(process.env.PORT ?? 3000)
 let ultimaMensagem: string | null = null
@@ -93,6 +93,28 @@ export const varredura = {
   enfileirar,
   processar,
   enviar: entregar,
+  iaOk: () => estadoIA().ok,
+  desistir: async (id: string, motivo: string): Promise<boolean> => {
+    // Tira a marca de retomada, mantendo o registro do que aconteceu para o admin.
+    const r = await sb.from('mensagens').update({ erro: motivo.slice(0, 500) }).eq('id', id).eq('status', 'erro').like('erro', `${MARCA_RETOMAR}%`).select('id')
+    if (r.error) throw new Error(r.error.message)
+    return Boolean(r.data?.length)
+  },
+  buscarRetomarIA: async (desde: string): Promise<Presa[]> => {
+    const campos = 'id,telefone,tipo,texto,erro,criado_em'
+    for (let i = 0; i < 2; i++) {
+      const semColuna = semColunaEvento()
+      const r = await sb.from('mensagens').select(semColuna ? campos : campos + ',evento')
+        .eq('status', 'erro').like('erro', `${MARCA_RETOMAR}%`).gte('criado_em', desde).order('criado_em', { ascending: true }).limit(50)
+      if (!r.error) return (r.data ?? []).map((m) => ({ ...(m as unknown as Presa), evento: (m as unknown as Presa).evento ?? null }))
+      if (!semColuna && (r.error.code === 'PGRST204' || r.error.code === '42703')) {
+        marcarColunaEventoFaltando()
+        continue
+      }
+      throw new Error(r.error.message)
+    }
+    return []
+  },
   ehCliente: async (telefone: string) => Boolean(await clientePorNumero(telefone)),
   emVoo: () => emVoo,
 }
@@ -186,6 +208,12 @@ export function iniciar(porta = PORTA) {
       for (const linha of await varrerPresas(varredura)) console.log('[presas]', linha)
     } catch (e) {
       console.error('[presas] varrer:', (e as Error).message)
+    }
+    // O que a IA deixou cair volta sozinho quando ela voltar.
+    try {
+      for (const linha of await varrerRetomarIA({ ...varredura, buscar: varredura.buscarRetomarIA })) console.log('[ia]', linha)
+    } catch (e) {
+      console.error('[ia] retomar:', (e as Error).message)
     }
     await varrerVencidas()
   }

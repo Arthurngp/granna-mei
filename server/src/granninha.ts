@@ -5,7 +5,7 @@
  */
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, usoDoMes } from './banco.ts'
 import { despedidaDe, RESPOSTA_DESPEDIDA } from './despedida.ts'
-import { ErroIA, recadoDaFalhaIA } from './ia-estado.ts'
+import { ErroIA, MARCA_RETOMAR, recadoDaFalhaIA, valeRetomarIA } from './ia-estado.ts'
 import { faturaDe } from './cartao.ts'
 import { executar, reverter, ultimaComEfeito, ultimaMensagem, type Efeitos, type Origem } from './executar.ts'
 import { baixarMidia } from './gateway.ts'
@@ -161,7 +161,7 @@ export async function registrarChegada(ev: EventoGateway): Promise<'nova' | 'dup
   return 'nova'
 }
 
-export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolean } = {}): Promise<Saida> {
+export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolean; retomada?: boolean } = {}): Promise<Saida> {
   const c = dadosDaChegada(ev)
   if (!c) return { status: 'ignorada' }
   const { msgId, telefone, de, tipo } = c
@@ -173,7 +173,12 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
   // Trava de "começou": só um processo trabalha nesta mensagem, e o que já começou nunca é
   // reprocessado. DESFAZER e correção terminam com efeitos vazios, então "não gravou nada" não serve
   // de sinal — retomar um desfazer desfaria um segundo lançamento. Ver presas.ts.
-  const claim = await sb.from('mensagens').update({ erro: PROCESSANDO }).eq('id', msgId).eq('status', 'recebida').eq('erro', NA_FILA).select('id')
+  //
+  // Na retomada por IA o ponto de partida é outro: a mensagem terminou com status 'erro' e a marca
+  // de retomada. O claim é o mesmo mecanismo (só um processo ganha), sobre esse outro estado.
+  const claim = opts.retomada
+    ? await sb.from('mensagens').update({ erro: PROCESSANDO }).eq('id', msgId).eq('status', 'erro').like('erro', `${MARCA_RETOMAR}%`).select('id')
+    : await sb.from('mensagens').update({ erro: PROCESSANDO }).eq('id', msgId).eq('status', 'recebida').eq('erro', NA_FILA).select('id')
   falhou(claim.error, 'marcar mensagem em processamento')
   if (!claim.data?.length) return { status: 'duplicada', msgId }
 
@@ -229,7 +234,7 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
         status = 'ignorada'
         resposta = `Esse número já está confirmado nesta conta, então não dá para usá-lo em outra ao mesmo tempo. Se quiser levá-lo para a conta nova, troque o número aqui em ${PAINEL()}/ajustes (ou peça a exclusão desta conta) e confirme lá.`
       } else {
-        const r = await conversar(cliente, hoje, tipo, d, msgId, telefone, consumo)
+        const r = await conversar(cliente, hoje, tipo, d, msgId, telefone, consumo, opts.retomada === true)
         ;({ status, resposta, efeitos, intencao } = r)
         textoFinal = r.texto
         tokens = r.tokens
@@ -245,7 +250,12 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
     // Falha da IA tem causa conhecida (cota, limite, chave, instabilidade): o erro gravado diz qual,
     // para o admin não mostrar só "erro", e a resposta à cliente deixa claro que o problema é nosso.
     if (e instanceof ErroIA) {
-      erro = `IA ${e.tipo}: ${e.message}`.slice(0, 500)
+      // A marca de retomada só entra em falha externa e temporária: a varredura reprocessa essa
+      // mensagem quando a IA voltar, e a cliente não precisa mandar de novo.
+      // A marca fica mesmo quando é uma retomada que falhou de novo: a mensagem continua esperando, e
+      // quem limita a insistência é a janela de tempo (presas.ts), não a perda da marca.
+      const marca = valeRetomarIA(e.tipo) ? MARCA_RETOMAR + ' ' : ''
+      erro = `${marca}IA ${e.tipo}: ${e.message}`.slice(0, 500)
       resposta = recadoDaFalhaIA(e.tipo)
       console.error('[granninha] IA', e.tipo, msgId, e.message.slice(0, 200))
     } else {
@@ -400,7 +410,7 @@ interface Conversa {
   tokens: Uso
 }
 
-async function conversar(cliente: { id: string; nome: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string, saida: { pendenteLida?: string | null } = {}): Promise<Conversa> {
+async function conversar(cliente: { id: string; nome: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string, saida: { pendenteLida?: string | null } = {}, retomada = false): Promise<Conversa> {
   const tokens: Uso = { entrada: 0, saida: 0, audio: 0 }
   const soma = (u: Uso) => {
     tokens.entrada += u.entrada
@@ -597,6 +607,12 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
       // (Áudio com transcrição idêntica também cairia na trava de texto abaixo, mas a pergunta certa
       // aqui é "já anotei isso, é o mesmo?", não "quer corrigir o anterior?".)
       const reenvio = pareceReenvio(origemFinal, ultima.tipo, antigos, it.acoes)
+      // Numa retomada a cliente não está esperando nada: se o lançamento já existe (ela mandou de
+      // novo enquanto a IA estava fora), descarta em silêncio em vez de perguntar do nada.
+      if (retomada && (reenvio || pareceMesmoLancamento(antigos, it.acoes))) {
+        // 'ignorada' porque é o que de fato aconteceu, e é um dos status que a coluna aceita.
+        return { status: 'ignorada', resposta: '', efeitos: {}, intencao: 'retomada_duplicada', texto, tokens }
+      }
       if (reenvio) {
         await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'reenvio', acoes: it.acoes, anteriorMsg: ultima.id, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
         return { status: 'pergunta', resposta: perguntaReenvio(reenvio, ctx, Math.floor(idade / 60_000)), efeitos: {}, intencao: 'acoes', texto, tokens }

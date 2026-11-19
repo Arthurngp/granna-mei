@@ -48,7 +48,16 @@ function casa(l: Linha, k: string, v: string): boolean {
   else if (op === 'gt') ok = x != null && comparar(x, arg) > 0
   else if (op === 'lte') ok = x != null && comparar(x, arg) <= 0
   else if (op === 'lt') ok = x != null && comparar(x, arg) < 0
-  else throw new Error(`operador do banco falso não suportado: ${op}`)
+  else if (op === 'like' || op === 'ilike') {
+    // O PostgREST aceita os DOIS curingas: o * da query string e o % do SQL, que o supabase-js
+    // repassa como está. O falso tem que aceitar os dois, senão um filtro que funciona em produção
+    // volta vazio aqui — e o teste reprova sem defeito nenhum no código.
+    const padrao = arg
+      .split(/[*%]/)
+      .map((parte) => parte.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('.*')
+    ok = new RegExp(`^${padrao}$`, op === 'ilike' ? 'i' : '').test(String(x ?? ''))
+  } else throw new Error(`operador do banco falso não suportado: ${op}`)
   return neg ? !ok : ok
 }
 const RESERVADOS = new Set(['select', 'order', 'limit', 'offset', 'on_conflict', 'columns'])

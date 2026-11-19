@@ -34,6 +34,19 @@ export function classificarFalhaIA(status: number, corpo: string): TipoFalhaIA {
  */
 export const valeTentarDeNovoIA = (tipo: TipoFalhaIA) => tipo === 'limite' || tipo === 'fora'
 
+/**
+ * Marca no campo `erro` de mensagens que podem ser retomadas quando a IA voltar.
+ *
+ * Só vale para falha EXTERNA e temporária. A premissa de segurança é que uma falha de IA acontece
+ * sempre ANTES de gravar qualquer coisa: as chamadas de IA (transcrever, ler documento, interpretar)
+ * vêm todas antes do executar(), e nenhum caminho que grava chama IA depois. `test/ia-fora.ts` prova
+ * isso caminho por caminho — se alguém mover uma chamada de IA para depois do executar, o teste cai.
+ */
+export const MARCA_RETOMAR = 'IA_RETOMAR'
+
+/** Dá para tentar essa mensagem de novo quando a IA voltar? Erro nosso (400) não melhora com o tempo. */
+export const valeRetomarIA = (tipo: TipoFalhaIA) => tipo === 'sem_cota' || tipo === 'limite' || tipo === 'fora'
+
 /** Mensagem para a cliente. Nunca promete atendimento que não existe. */
 export function recadoDaFalhaIA(tipo: TipoFalhaIA): string {
   if (tipo === 'limite') return 'Estou recebendo muita coisa ao mesmo tempo e não consegui anotar essa. Me manda de novo em um minuto?'

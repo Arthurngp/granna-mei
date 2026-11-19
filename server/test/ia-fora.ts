@@ -8,9 +8,10 @@
  *   npx tsx test/ia-fora.ts
  */
 import assert from 'node:assert/strict'
-import { caso, E, fim, ia, lancsU1, msg, msgCompleta } from './_falsos.ts'
+import { caso, E, fim, ia, lancsU1, msg, msgAudio, msgCompleta, msgFoto, NUM, semear } from './_falsos.ts'
 
-const { classificarFalhaIA, estadoIA, valeTentarDeNovoIA, zerarEstadoIA, recadoDaFalhaIA } = await import('../src/ia-estado.ts')
+const { classificarFalhaIA, estadoIA, valeTentarDeNovoIA, zerarEstadoIA, recadoDaFalhaIA, MARCA_RETOMAR, valeRetomarIA } = await import('../src/ia-estado.ts')
+const { processar } = await import('../src/granninha.ts')
 
 const COTA = { status: 429, corpo: JSON.stringify({ error: { message: 'You exceeded your current quota, please check your plan and billing details.', type: 'insufficient_quota', code: 'insufficient_quota' } }) }
 const LIMITE = { status: 429, corpo: JSON.stringify({ error: { message: 'Rate limit reached for gpt-5.4-mini', type: 'requests', code: 'rate_limit_exceeded' } }) }
@@ -32,6 +33,16 @@ await caso('insiste só onde insistir resolve', async () => {
   assert.equal(valeTentarDeNovoIA('fora'), true)
   assert.equal(valeTentarDeNovoIA('sem_cota'), false, 'cota não volta em 2 segundos: repetir só faz esperar')
   assert.equal(valeTentarDeNovoIA('sem_chave'), false)
+})
+
+await caso('retomar depois vale para falha externa, não para erro nosso', async () => {
+  // Insistir AGORA e retomar DEPOIS são decisões diferentes: cota não vale insistir, mas vale retomar
+  // quando o crédito entrar.
+  assert.equal(valeRetomarIA('sem_cota'), true, 'o crédito entra e a mensagem ainda faz sentido')
+  assert.equal(valeRetomarIA('limite'), true)
+  assert.equal(valeRetomarIA('fora'), true)
+  assert.equal(valeRetomarIA('outro'), false, 'erro nosso (400) não melhora com o tempo')
+  assert.equal(valeRetomarIA('sem_chave'), false, 'chave errada precisa de gente, não de espera')
 })
 
 /* ---------------- o que acontece com a cliente ---------------- */
@@ -93,6 +104,57 @@ await caso('o estado da IA conta o problema, desde quando, e volta ao normal', a
   assert.equal(voltou.ok, true, 'voltou ao normal sozinho')
   assert.equal(voltou.problema, null)
   assert.ok(voltou.ultimo_ok)
+})
+
+/* ---------------- a premissa que torna a retomada segura ---------------- */
+
+await caso('PREMISSA: falha de IA nunca deixa nada gravado, em nenhum caminho', async () => {
+  // A retomada só é segura porque a IA é sempre chamada ANTES de gravar. Se alguém mover uma chamada
+  // de IA para depois do executar(), este caso cai — e a retomada passaria a criar lançamento em dobro.
+  for (const [nome, mandar] of [
+    ['texto', () => msg('paguei 50 de gasolina')],
+    ['áudio', () => msgAudio()],
+    ['foto', () => msgFoto()],
+  ] as [string, () => Promise<unknown>][]) {
+    semear()
+    zerarEstadoIA()
+    ia.erro = COTA
+    await mandar()
+    assert.equal(lancsU1().length, 0, `${nome}: nada gravado quando a IA falha`)
+    assert.equal((E.tabelas.contas ?? []).filter((c) => c.user_id === 'u-1' && c.id !== 'c1' && c.id !== 'c2' && c.id !== 'c3').length, 0, `${nome}: nenhuma conta nova`)
+  }
+})
+
+await caso('mensagem perdida pela IA fica marcada para retomar', async () => {
+  zerarEstadoIA()
+  ia.erro = COTA
+  await msg('paguei 50 de gasolina')
+  assert.match(String(msgDoBanco()?.erro), new RegExp('^' + MARCA_RETOMAR), 'a marca entra no começo do erro')
+})
+
+await caso('erro NOSSO (400) não é marcado para retomar: não melhora com o tempo', async () => {
+  zerarEstadoIA()
+  ia.erro = { status: 400, corpo: JSON.stringify({ error: { message: 'invalid request' } }) }
+  await msg('paguei 50 de gasolina')
+  assert.doesNotMatch(String(msgDoBanco()?.erro), new RegExp(MARCA_RETOMAR))
+})
+
+await caso('retomada que falha de novo CONTINUA esperando (quem limita é a janela)', async () => {
+  zerarEstadoIA()
+  ia.erro = COTA
+  const ev = {
+    event: 'message.received',
+    data: { key: { id: 'RETRY-1', remoteJid: `${NUM}@s.whatsapp.net`, fromMe: false }, from: `${NUM}@s.whatsapp.net`, isGroup: false, chatType: 'PERSONAL', type: 'TEXT', content: 'paguei 50 de gasolina' },
+  }
+  await processar(ev as Parameters<typeof processar>[0])
+  const linha = (E.tabelas.mensagens ?? []).find((m) => m.id === 'RETRY-1')!
+  assert.match(String(linha.erro), new RegExp('^' + MARCA_RETOMAR), 'a primeira falha marca')
+  // A retomada roda com a IA ainda fora: a mensagem tem que CONTINUAR na fila, senão ela seria
+  // esquecida justamente no cenário em que a cota demora para entrar. O limite é a janela de tempo.
+  const r = await processar(ev as Parameters<typeof processar>[0], { jaRegistrada: true, retomada: true })
+  assert.equal(r.status, 'erro', 'a retomada falhou porque a IA segue fora')
+  const depois = (E.tabelas.mensagens ?? []).find((m) => m.id === 'RETRY-1')!
+  assert.match(String(depois.erro), new RegExp('^' + MARCA_RETOMAR), 'continua marcada para a próxima volta')
 })
 
 await caso('o recado nunca promete atendimento que não existe', async () => {
