@@ -114,9 +114,11 @@ try {
     const r = await mandar(ESTRANHO, { content: 'oi' }, { esperarNada: true })
     assert.equal(r.texto, '')
   })
-  await caso('nem com código errado', async () => {
-    const r = await mandar(ESTRANHO, { content: 'meu código 000000' }, { esperarNada: true })
-    assert.equal(r.texto, '')
+  await caso('código errado deixa de ser silêncio (mudança do PR #28)', async () => {
+    // Antes era silêncio; desde 2026-11-18 quem manda algo que PARECE código recebe resposta, senão
+    // fica esperando para sempre achando que a Granninha não funciona. Estranho sem código segue mudo.
+    const r = await mandar(ESTRANHO, { content: 'meu código 000000' })
+    assert.match(r.texto, /não confere ou já venceu/)
   })
   await caso('número só digitado no cadastro NÃO é reconhecido e fica sem resposta (precisa confirmar)', async () => {
     const r = await mandar(FONE, { content: 'recebi 150 no pix' }, { esperarNada: true })
@@ -291,9 +293,11 @@ try {
     assert.equal(l.carteira_id, 'banco')
     assert.equal(l.carteira_destino_id, 'cartao-nu')
   })
-  await caso('figurinha recebe a explicação do que ela entende', async () => {
-    const r = await mandar(FONE, { type: 'STICKER', content: '' })
-    assert.match(r.texto, /texto, áudio/)
+  await caso('figurinha fica em silêncio (fase cv)', async () => {
+    // Antes cada figurinha recebia "por aqui eu entendo texto, áudio...". Vídeo e localização continuam
+    // recebendo a ajuda; o caso disso está na seção 6.
+    const r = await mandar(FONE, { type: 'STICKER', content: '' }, { esperarNada: true })
+    assert.equal(r.texto, '')
   })
 
   console.log('5. acesso, cortesia e mensagens que não são para ela')
@@ -335,10 +339,19 @@ try {
       delete process.env.WA_SOMENTE_NUMEROS
     }
   })
-  await caso('saúde do serviço responde com o estado do número', async () => {
-    const s = await (await fetch(SERV + '/saude')).json()
-    assert.equal(s.whatsapp.estado, 'CONNECTED')
-    assert.ok(s.mensagens_24h > 0)
+  await caso('saúde: fechada sem a chave, detalhada com ela (mudança do PR #27)', async () => {
+    // Desde 2026-11-18 o /saude sem chave diz só que está de pé: o número da Granninha e o volume de
+    // mensagens não são para qualquer um na internet.
+    const fechada = await (await fetch(SERV + '/saude')).json()
+    assert.deepEqual(fechada, { ok: true }, 'sem chave não vaza número nem volume')
+    process.env.SAUDE_CHAVE = 'chave-do-fluxo'
+    try {
+      const s = await (await fetch(SERV + '/saude', { headers: { Authorization: 'Bearer chave-do-fluxo' } })).json()
+      assert.equal(s.whatsapp.estado, 'CONNECTED')
+      assert.ok(s.mensagens_24h > 0)
+    } finally {
+      delete process.env.SAUDE_CHAVE
+    }
   })
 
   console.log('6. conversa sem falha (fase cv)')

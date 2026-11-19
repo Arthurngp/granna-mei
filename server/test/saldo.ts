@@ -408,4 +408,37 @@ caso('o resumo da IA traz o saldo real pronto e os períodos calculados', () => 
   assert.equal(r.carteiras.find((c) => c.nome === 'Nubank')?.saldo, 1584)
 })
 
+// ---------- valor por extenso: o caso que o fluxo.ts com IA real achou em 19/11 ----------
+// "gastei cinquenta reais de gasolina hoje" virava CONSULTA (a guarda só olhava dígito, e áudio não
+// tem dígito): a Granninha respondia o relatório do dia e o gasto nunca era anotado.
+caso('valor por extenso é lançamento, não consulta', () => {
+  for (const f of [
+    'gastei cinquenta reais de gasolina hoje',
+    'Oi Granninha, gastei cinquenta reais de gasolina hoje.',
+    'paguei duzentos reais de luz',
+    'recebi mil e duzentos reais hoje',
+    'gastei cem no mercado',
+    'comprei uns trinta reais de material',
+    'paguei quarenta conto de uber ontem',
+  ]) {
+    assert.equal(reconhecer(f), null, f)
+    assert.equal(ehPerguntaClara(f), false, f)
+  }
+})
+caso('consulta de verdade continua sendo consulta', () => {
+  assert.deepEqual(reconhecer('quanto saiu hoje?'), { tipo: 'periodo', periodo: 'hoje', direcao: 'saida', porDia: false })
+  assert.deepEqual(reconhecer('quanto gastei esse mês?'), { tipo: 'periodo', periodo: 'mes', direcao: 'saida', porDia: false })
+  assert.deepEqual(reconhecer('meus gastos de ontem'), { tipo: 'periodo', periodo: 'ontem', direcao: 'saida', porDia: false })
+  assert.deepEqual(reconhecer('quanto eu recebi na semana'), { tipo: 'periodo', periodo: 'semana', direcao: 'entrada', porDia: false })
+  assert.equal(reconhecer('o que vence nos proximos 7 dias')?.tipo, 'proximos')
+  assert.equal(reconhecer('qual meu saldo')?.tipo, 'saldo')
+  for (const f of ['quanto saiu hoje?', 'meus gastos de hoje', 'resumo do mes']) assert.equal(ehPerguntaClara(f), true, f)
+})
+caso('saudação antes do lançamento não faz dele uma pergunta', () => {
+  // FEZ_ALGO é ancorado no início; em áudio a frase começa com "oi Granninha".
+  for (const f of ['oi granninha, gastei no mercado hoje', 'bom dia, paguei a luz hoje', 'ola! recebi hoje']) {
+    assert.equal(ehPerguntaClara(f), false, f)
+  }
+})
+
 console.log(`\n${n} casos ok`)
