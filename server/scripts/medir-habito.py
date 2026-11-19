@@ -30,14 +30,32 @@ APP = "xav797i93gs2kiumpkqhmr4d"
 SP = timezone(timedelta(hours=-3))  # as semanas são contadas no fuso de São Paulo
 
 
+def instante(iso: str) -> datetime:
+    """
+    Converte o timestamp que o Postgres devolve.
+
+    O `/usr/bin/python3` do macOS é 3.9, e o `fromisoformat` dele só aceita fração de segundo com 3 ou
+    6 dígitos. O Postgres manda sem os zeros à direita ("...44.95071+00:00", 5 dígitos) e isso derrubava
+    o script inteiro. Normaliza a fração para 6 dígitos e aceita Z, offset sem dois-pontos e sem fuso.
+    """
+    s = iso.strip().replace("z", "Z").replace("Z", "+00:00")
+    m = re.match(r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:\.(\d+))?([+-]\d{2}:?\d{2})?$", s)
+    if not m:
+        raise ValueError("timestamp que não reconheço: %r" % iso)
+    base, frac, fuso = m.group(1), m.group(2) or "", m.group(3) or "+00:00"
+    if ":" not in fuso:
+        fuso = fuso[:3] + ":" + fuso[3:]
+    return datetime.fromisoformat("%s.%s%s" % (base.replace(" ", "T"), (frac + "000000")[:6], fuso))
+
+
 def semana_de(iso: str) -> str:
     """Segunda-feira da semana daquele instante, em São Paulo."""
-    d = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(SP).date()
+    d = instante(iso).astimezone(SP).date()
     return (d - timedelta(days=d.weekday())).isoformat()
 
 
 def dia_de(iso: str) -> str:
-    return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(SP).date().isoformat()
+    return instante(iso).astimezone(SP).date().isoformat()
 
 
 def agregar(pessoas, lancs, msgs, hoje: date, minimo: int):
@@ -135,17 +153,44 @@ def contar_no_corte(por_pessoa, lancs, minimo):
 # ---------------------------------------------------------------- teste das contas
 if "--teste" in sys.argv:
     hoje = date(2026, 11, 19)  # quinta
+    # Os formatos aqui são os REAIS do Postgres, com fração de segundo de tamanho variável. A primeira
+    # versão deste teste usava timestamps redondos, passou, e o script quebrou na primeira rodada de
+    # verdade com ".95071" (5 dígitos). Formato de dado entra no teste, não só a aritmética.
+    erros_formato = []
+    for bruto, esperado in [
+        ("2026-11-16T15:11:44.95071+00:00", "2026-11-16"),   # 5 dígitos: o que derrubou o script
+        ("2026-11-16T15:11:44.9+00:00", "2026-11-16"),       # 1 dígito
+        ("2026-11-16T15:11:44.950710+00:00", "2026-11-16"),  # 6 dígitos
+        ("2026-11-16T15:11:44+00:00", "2026-11-16"),         # sem fração
+        ("2026-11-16T15:11:44.123Z", "2026-11-16"),          # Z no lugar do offset
+        ("2026-11-16T15:11:44.123+0000", "2026-11-16"),      # offset sem dois-pontos
+        ("2026-11-16T15:11:44.123", "2026-11-16"),           # sem fuso (assume UTC)
+        ("2026-11-17T01:30:00+00:00", "2026-11-16"),         # 22h30 em SP: ainda é o dia 16
+    ]:
+        try:
+            veio = dia_de(bruto)
+            if veio != esperado:
+                erros_formato.append("%s -> %s (esperado %s)" % (bruto, veio, esperado))
+        except Exception as e:  # noqa: BLE001
+            erros_formato.append("%s -> erro: %s" % (bruto, e))
+    if erros_formato:
+        print("FALHOU na leitura de timestamp:")
+        for e in erros_formato:
+            print("  -", e)
+        sys.exit(1)
+    print("formatos de timestamp do Postgres: 8 ok")
+
     pessoas = [
-        {"id": "u1", "nome": "Ana Souza", "ramo": "beleza", "criado_em": "2026-10-20T12:00:00+00:00"},
-        {"id": "u2", "nome": "Bruno Lima", "ramo": "servicos", "criado_em": "2026-11-10T12:00:00+00:00"},
-        {"id": "u3", "nome": "Carla Dias", "ramo": "comida", "criado_em": "2026-11-18T12:00:00+00:00"},
+        {"id": "u1", "nome": "Ana Souza", "ramo": "beleza", "criado_em": "2026-10-20T12:00:00.95071+00:00"},
+        {"id": "u2", "nome": "Bruno Lima", "ramo": "servicos", "criado_em": "2026-11-10T12:00:00.1+00:00"},
+        {"id": "u3", "nome": "Carla Dias", "ramo": "comida", "criado_em": "2026-11-18T12:00:00Z"},
     ]
     # u1: 4 lançamentos na semana de 09/11 e 3 na de 16/11 (duas semanas seguidas no corte)
     lancs = [{"user_id": "u1", "criado_em": d, "origem": o} for d, o in [
-        ("2026-11-09T13:00:00+00:00", "texto"), ("2026-11-10T13:00:00+00:00", "audio"),
-        ("2026-11-11T13:00:00+00:00", "texto"), ("2026-11-12T13:00:00+00:00", "foto"),
-        ("2026-11-16T13:00:00+00:00", "texto"), ("2026-11-17T13:00:00+00:00", "texto"),
-        ("2026-11-18T13:00:00+00:00", "texto"),
+        ("2026-11-09T13:00:00.95071+00:00", "texto"), ("2026-11-10T13:00:00.1+00:00", "audio"),
+        ("2026-11-11T13:00:00Z", "texto"), ("2026-11-12T13:00:00+00:00", "foto"),
+        ("2026-11-16T13:00:00.123456+00:00", "texto"), ("2026-11-17T13:00:00.45+00:00", "texto"),
+        ("2026-11-18T13:00:00.6789+00:00", "texto"),
     ]]
     # u2: 2 lançamentos numa semana só (não passa do corte de 3)
     lancs += [{"user_id": "u2", "criado_em": "2026-11-10T14:00:00+00:00", "origem": "texto"},
