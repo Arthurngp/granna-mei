@@ -56,6 +56,19 @@ export function hojeSP(): string {
 
 const brl = (n: number) => 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+/**
+ * Figurinha e reação (o 👍 numa resposta) não são tentativa de registrar nada: respondê-las com
+ * "por aqui eu entendo texto, áudio..." faz a Granninha parecer boba e enche a conversa. Elas ficam
+ * em silêncio, como "ok" e "beleza" (ver despedida.ts).
+ *
+ * Vídeo, contato, localização e documento que não é PDF continuam recebendo a mensagem de ajuda,
+ * porque ali a pessoa quis mandar alguma coisa de verdade.
+ */
+function ehRuido(d: EventoGateway['data']): boolean {
+  const t = (d.type ?? '').toUpperCase()
+  return t.includes('STICKER') || t.includes('REACTION') || t.includes('REACT')
+}
+
 function tipoDaMensagem(d: EventoGateway['data']): Origem | 'outro' {
   const t = (d.type ?? '').toUpperCase()
   if (t === 'TEXT') return 'texto'
@@ -179,6 +192,8 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
         resposta = uso.lancamentos >= LIMITE_LANCAMENTOS
           ? `Você chegou ao limite de ${LIMITE_LANCAMENTOS} lançamentos deste mês. No dia 1 o contador zera. Se precisar de mais, fala com a gente pelo painel.`
           : `Você chegou ao limite de ${LIMITE_MIDIAS} áudios, fotos e PDFs deste mês. Texto continua funcionando normal, e no dia 1 o contador zera.`
+      } else if (tipo === 'outro' && ehRuido(d)) {
+        status = 'ignorada'
       } else if (tipo === 'outro') {
         status = 'ignorada'
         resposta = 'Por aqui eu entendo texto, áudio, foto de comprovante e PDF. Me manda de um desses jeitos?'
@@ -378,6 +393,11 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     const tr = await transcrever(m.buffer, m.mime)
     texto = tr.texto
     soma(tr.uso)
+    // Transcrição vazia (áudio mudo, ruído, gravação de meio segundo): dizer isso, em vez de mandar
+    // a lista de exemplos como se a pessoa tivesse escrito algo que não dá para entender.
+    if (!texto.replace(/[\s.,!?-]/g, '')) {
+      return { status: 'ok', resposta: 'Não consegui entender o áudio. Pode mandar de novo, falando um pouco mais perto?', efeitos: {}, intencao: 'audio_vazio', texto: '', tokens }
+    }
   } else if (tipo === 'foto' || tipo === 'pdf') {
     const m = await baixarMidia(d.fileUrl ?? '')
     const ext = tipo === 'pdf' ? 'pdf' : m.mime.includes('png') ? 'png' : 'jpg'
