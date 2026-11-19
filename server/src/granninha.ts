@@ -5,6 +5,7 @@
  */
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, usoDoMes } from './banco.ts'
 import { despedidaDe, RESPOSTA_DESPEDIDA } from './despedida.ts'
+import { ErroIA, recadoDaFalhaIA } from './ia-estado.ts'
 import { faturaDe } from './cartao.ts'
 import { executar, reverter, ultimaComEfeito, ultimaMensagem, type Efeitos, type Origem } from './executar.ts'
 import { baixarMidia } from './gateway.ts'
@@ -241,8 +242,16 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
   } catch (e) {
     status = 'erro'
     erro = (e as Error).message.slice(0, 500)
-    resposta = 'Tive um problema para anotar agora. Pode mandar de novo daqui a pouco?'
-    console.error('[granninha]', msgId, erro)
+    // Falha da IA tem causa conhecida (cota, limite, chave, instabilidade): o erro gravado diz qual,
+    // para o admin não mostrar só "erro", e a resposta à cliente deixa claro que o problema é nosso.
+    if (e instanceof ErroIA) {
+      erro = `IA ${e.tipo}: ${e.message}`.slice(0, 500)
+      resposta = recadoDaFalhaIA(e.tipo)
+      console.error('[granninha] IA', e.tipo, msgId, e.message.slice(0, 200))
+    } else {
+      resposta = 'Tive um problema para anotar agora. Pode mandar de novo daqui a pouco?'
+      console.error('[granninha]', msgId, erro)
+    }
   }
 
   // A pergunta em aberto só sai agora, e só se deu certo: deu erro no meio (IA fora, transcrição),

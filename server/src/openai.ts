@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { classificarFalhaIA, ErroIA, registrarFalhaIA, registrarOkIA, valeTentarDeNovoIA } from './ia-estado.ts'
 
 export const MODELO = process.env.OPENAI_MODELO ?? 'gpt-5.4-mini'
 export const MODELO_AUDIO = process.env.OPENAI_MODELO_AUDIO ?? 'gpt-4o-mini-transcribe'
@@ -17,15 +18,23 @@ async function pedir(caminho: string, init: RequestInit, tentativas = 3): Promis
         await new Promise((ok) => setTimeout(ok, 800 * 2 ** i))
         continue
       }
-      throw e
+      registrarFalhaIA('fora', (e as Error).message)
+      throw new ErroIA('fora', `OpenAI fora: ${(e as Error).message}`)
     }
-    if (r.ok) return r
-    // Limite de taxa ou instabilidade do lado deles: espera e tenta de novo. Erro nosso (400) não adianta repetir.
-    if (i + 1 < tentativas && (r.status === 429 || r.status >= 500)) {
+    if (r.ok) {
+      registrarOkIA()
+      return r
+    }
+    const corpo = (await r.text()).slice(0, 300)
+    const tipo = classificarFalhaIA(r.status, corpo)
+    // Insistir só quando insistir resolve. Cota esgotada e chave inválida não passam em 2 segundos:
+    // repetir três vezes fazia a cliente esperar mais para receber exatamente o mesmo erro.
+    if (i + 1 < tentativas && valeTentarDeNovoIA(tipo)) {
       await new Promise((ok) => setTimeout(ok, 800 * 2 ** i))
       continue
     }
-    throw new Error(`OpenAI ${r.status}: ${(await r.text()).slice(0, 300)}`)
+    registrarFalhaIA(tipo, corpo)
+    throw new ErroIA(tipo, `OpenAI ${r.status} (${tipo}): ${corpo}`, r.status)
   }
 }
 

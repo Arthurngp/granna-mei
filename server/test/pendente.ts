@@ -25,7 +25,9 @@ await caso('IA fora no meio: a pergunta em aberto NÃO se perde', async () => {
   // A IA cai justamente quando a pessoa responde "2".
   ia.queda = true
   const caiu = await msg('2')
-  assert.match(caiu, /Tive um problema/)
+  // Desde 19/11 a falha da IA tem recado próprio (a queda é classificada como "fora"); o que este
+  // caso prova é que ela AVISA e não engole a pergunta.
+  assert.match(caiu, /problema técnico aqui do meu lado|Tive um problema/, caiu)
   assert.equal(pendente()?.tipo, 'pergunta', 'a pergunta continua em aberto para a próxima tentativa')
 
   // Com a IA de volta, o "2" ainda faz sentido: é respondido contra a pergunta que ficou guardada.

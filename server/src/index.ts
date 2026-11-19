@@ -14,6 +14,7 @@ import { excluirVencidas, soltarNumerosDeExcluidas } from './excluir.ts'
 import { hojeSP, marcarColunaEventoFaltando, processar, registrarChegada, semColunaEvento, type EventoGateway } from './granninha.ts'
 import { clientePorNumero } from './banco.ts'
 import { PISO_MS, varrerPresas, type Presa } from './presas.ts'
+import { estadoIA } from './ia-estado.ts'
 
 const PORTA = Number(process.env.PORT ?? 3000)
 let ultimaMensagem: string | null = null
@@ -155,7 +156,7 @@ export function iniciar(porta = PORTA) {
           sb.from('mensagens').select('id', { count: 'exact', head: true }).gte('criado_em', desde).eq('status', 'erro'),
         ])
         res.writeHead(200, { 'Content-Type': 'application/json' }).end(
-          JSON.stringify({ ok: true, whatsapp: wa, mensagens_24h: hoje.count ?? null, erros_24h: falhas.count ?? null, erros_envio_desde_inicio: erros, ultima_mensagem: ultimaMensagem, fila: filas.size }),
+          JSON.stringify({ ok: true, whatsapp: wa, ia: estadoIA(), mensagens_24h: hoje.count ?? null, erros_24h: falhas.count ?? null, erros_envio_desde_inicio: erros, ultima_mensagem: ultimaMensagem, fila: filas.size }),
         )
         return
       }

@@ -168,6 +168,10 @@ export const ia = {
   /** Prompt de sistema da última interpretação (para provar o que a IA recebeu). */
   ultimoSistema: '',
   queda: false,
+  /** Faz a IA falsa responder um erro HTTP específico (ex.: 429 insufficient_quota). */
+  erro: null as { status: number; corpo: string } | null,
+  /** Quantas vezes a IA falsa foi chamada (para provar que cota não é repetida 3x). */
+  pedidos: 0,
   /** O que a transcrição de áudio devolve. */
   transcricao: 'paguei 50 de gasolina',
   /** O que a leitura de foto/PDF devolve (formato Leitura de midia.ts). */
@@ -179,6 +183,11 @@ const iaServer = createServer(async (req, res) => {
     req.on('data', (c) => (t += c))
     req.on('end', () => ok(t))
   })
+  ia.pedidos++
+  if (ia.erro) {
+    res.writeHead(ia.erro.status, { 'Content-Type': 'application/json' })
+    return res.end(ia.erro.corpo)
+  }
   if (ia.queda) {
     res.writeHead(500, { 'Content-Type': 'application/json' })
     return res.end(JSON.stringify({ error: 'IA fora do ar (provocado pelo teste)' }))
@@ -254,6 +263,8 @@ export function semear() {
   ia.ultimoResumo = null
   ia.ultimoSistema = ''
   ia.queda = false
+  ia.erro = null
+  ia.pedidos = 0
   ia.transcricao = 'paguei 50 de gasolina'
   ia.documento = { tipo: 'comprovante', meio: 'pix', vencimento: null, resumo: 'Comprovante de R$ 50', transacoes: [{ descricao: 'Gasolina', valor: 50, movimento: 'saida', data: null }] }
   const cats = (u: string) => [
