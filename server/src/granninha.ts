@@ -6,14 +6,14 @@
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, usoDoMes } from './banco.ts'
 import { despedidaDe, RESPOSTA_DESPEDIDA } from './despedida.ts'
 import { faturaDe } from './cartao.ts'
-import { executar, reverter, ultimaComEfeito, type Efeitos, type Origem } from './executar.ts'
+import { executar, reverter, ultimaComEfeito, ultimaMensagem, type Efeitos, type Origem } from './executar.ts'
 import { baixarMidia } from './gateway.ts'
 import { BOLETO, conferir, interpretar, NEGOCIO, opcaoEscolhida, PESSOAL, type Acao, type Contexto, type Opcao } from './interpretar.ts'
 import { lerDocumento, textoDoDocumento, type Transacao } from './midia.ts'
 import { transcrever, type Uso } from './openai.ts'
 import { responderPergunta } from './perguntas.ts'
 import { carregarBase } from './base.ts'
-import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, pareceReenvio, perguntaDuplicata, perguntaReenvio, respostaDuplicata, type LancAntigo } from './duplicata.ts'
+import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, pareceReenvio, perguntaDuplicata, perguntaReenvio, respostaDuplicata, respostaSimNao, type LancAntigo } from './duplicata.ts'
 import { ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta } from './consultas.ts'
 import { foraDoDisponivel } from './cartao.ts'
 
@@ -433,6 +433,22 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     if (r) return resolverDuplicata(cliente.id, ctx, pend.acoes, pend.anteriorMsg ?? '', r, pend.origem ?? tipo, pend.anexo ?? null, texto, tokens)
   }
 
+  // Resposta à pergunta "quer desfazer o anterior também?" depois de dois DESFAZER seguidos.
+  if (pend?.tipo === 'desfazer_mais' && fresco && pend.anteriorMsg) {
+    const r = respostaSimNao(texto)
+    if (r === 'nao') return { status: 'ok', resposta: 'Beleza, parei aí. Nada mais foi desfeito.', efeitos: {}, intencao: 'desfazer', texto, tokens }
+    if (r === 'sim') {
+      const alvo = await ultimaComEfeito(cliente.id)
+      // Só desfaz se continua sendo aquele mesmo: se algo entrou no meio, não mexe em nada.
+      if (!alvo || alvo.id !== pend.anteriorMsg) {
+        return { status: 'ok', resposta: 'Esse lançamento já não é mais o último, então não mexi em nada. Se quiser, me diz qual apagar.', efeitos: {}, intencao: 'desfazer', texto, tokens }
+      }
+      await reverter(cliente.id, alvo.efeitos)
+      await sb.from('mensagens').update({ desfeita: true }).eq('id', alvo.id).eq('user_id', cliente.id)
+      return { status: 'ok', resposta: `Pronto, desfiz também: "${alvo.texto.slice(0, 120)}"${await saldoDepois(cliente.id, null)}`, efeitos: {}, intencao: 'desfazer', texto, tokens }
+    }
+  }
+
   // Resposta à pergunta de reenvio ("já anotei isso há 2 minutos, é o mesmo?"): 1 não grava nada,
   // 2 grava como lançamento novo. Nada foi gravado antes, então "1" é só deixar como está.
   if (pend?.tipo === 'reenvio' && fresco && pend.acoes?.length) {
@@ -534,6 +550,17 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   if (it.intencao === 'desfazer') {
     const ult = await ultimaComEfeito(cliente.id)
     if (!ult) return { status: 'ok', resposta: 'Não achei nada recente para desfazer.', efeitos: {}, intencao: 'desfazer', texto, tokens }
+    // Dois DESFAZER seguidos (a pessoa achou que o primeiro não pegou): o segundo reverteria o
+    // lançamento ANTERIOR, que ela não pediu para desfazer. Pergunta antes.
+    const anterior = await ultimaMensagem(cliente.id)
+    if (anterior?.intencao === 'desfazer' && Date.now() - new Date(anterior.criado_em).getTime() < 10 * 60_000) {
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'desfazer_mais', anteriorMsg: ult.id }, atualizado_em: new Date().toISOString() })
+      return {
+        status: 'pergunta',
+        resposta: `Eu já tinha desfeito o último. O anterior é: "${ult.texto.slice(0, 80)}". Quer desfazer esse também?\n\n1. Sim, desfaz\n2. Não, para aí\n\nResponda com o número.`,
+        efeitos: {}, intencao: 'desfazer', texto, tokens,
+      }
+    }
     await reverter(cliente.id, ult.efeitos)
     await sb.from('mensagens').update({ desfeita: true }).eq('id', ult.id).eq('user_id', cliente.id)
     return { status: 'ok', resposta: `Pronto, desfiz: "${ult.texto.slice(0, 120)}"${await saldoDepois(cliente.id, null)}`, efeitos: {}, intencao: 'desfazer', texto, tokens }

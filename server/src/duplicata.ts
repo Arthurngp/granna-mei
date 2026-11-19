@@ -97,6 +97,12 @@ export function antesEAgora(antigos: LancAntigo[], novas: Acao[], ctx: Contexto)
   return `Antes: ${descreverAntigo(antigos[0], ctx)}\nAgora: ${descreverNovo(novas[0], ctx)}`
 }
 
+/** 1/sim ou 2/não, para as perguntas de confirmação (mesmas palavras aceitas). */
+export function respostaSimNao(texto: string): 'sim' | 'nao' | null {
+  const r = respostaDuplicata(texto)
+  return r === 'corrigir' ? 'sim' : r === 'novo' ? 'nao' : null
+}
+
 /** Resposta do cliente à pergunta 1 ou 2. null = não é resposta (é outra mensagem). */
 export function respostaDuplicata(texto: string): 'corrigir' | 'novo' | null {
   const t = norm(texto).replace(/[.!)]+$/, '')
