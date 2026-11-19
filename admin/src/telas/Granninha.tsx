@@ -1,5 +1,5 @@
 import { CircleCheck, QrCode, TriangleAlert } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Mascote } from '../../../src/components/ui'
 import { api } from '../sb'
 import { Carregando, dataHora, Falha } from './comum'
@@ -10,6 +10,38 @@ export function Granninha() {
   const [qr, setQr] = useState<{ conectado: boolean; imagem: string | null; estado: string } | null>(null)
   const [erroQr, setErroQr] = useState('')
   const [ocupado, setOcupado] = useState(false)
+  const [alerta, setAlerta] = useState({ whats: '', ligado: false })
+  const [recadoAlerta, setRecadoAlerta] = useState('')
+  const [salvando, setSalvando] = useState(false)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await api<{ alerta_whats: string; alerta_ligado: boolean; alerta_tipo: string | null }>('/admin/alerta')
+        setAlerta({ whats: r.alerta_whats ?? '', ligado: !!r.alerta_ligado })
+        if (r.alerta_tipo) setRecadoAlerta(`Hoje há um problema em aberto já avisado (${r.alerta_tipo}).`)
+      } catch {
+        // a tela funciona sem isto: o campo fica vazio e o recado aparece ao salvar
+      }
+    })()
+  }, [])
+
+  const salvarAlerta = async () => {
+    setSalvando(true)
+    setRecadoAlerta('')
+    try {
+      const r = await api<{ alerta_whats: string; alerta_ligado: boolean }>('/admin/alerta', {
+        method: 'POST',
+        body: JSON.stringify({ whats: alerta.whats, ligado: alerta.ligado }),
+      })
+      setAlerta({ whats: r.alerta_whats, ligado: r.alerta_ligado })
+      setRecadoAlerta(r.alerta_ligado ? 'Pronto. Vou avisar neste número se algo parar.' : 'Aviso desligado.')
+    } catch (e) {
+      setRecadoAlerta((e as Error).message)
+    } finally {
+      setSalvando(false)
+    }
+  }
 
   if (erro) return <Falha texto={erro} />
   if (!p) return <Carregando />
@@ -70,6 +102,34 @@ export function Granninha() {
             </div>
           )}
         </section>
+        <section className="card g-6">
+          <div className="card-cab"><h2>Me avisar se parar</h2></div>
+          <p className="suave" style={{ marginBottom: 12 }}>
+            Se a IA ficar sem crédito ou parar de responder, a Granninha manda uma mensagem para este número.
+            Um aviso por problema, sem repetir — e outro quando voltar ao normal.
+          </p>
+          <input
+            className="campo"
+            inputMode="tel"
+            placeholder="(81) 99999-8888"
+            value={alerta.whats}
+            onChange={(e) => setAlerta({ ...alerta, whats: e.target.value })}
+            aria-label="Número que recebe o aviso"
+          />
+          <label className="suave" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0' }}>
+            <input type="checkbox" checked={alerta.ligado} onChange={(e) => setAlerta({ ...alerta, ligado: e.target.checked })} />
+            Ligado
+          </label>
+          <button type="button" className="btn btn-pri btn-bloco" onClick={salvarAlerta} disabled={salvando}>
+            {salvando ? 'Salvando…' : 'Salvar'}
+          </button>
+          {recadoAlerta && <p className="suave pq" style={{ marginTop: 10 }}>{recadoAlerta}</p>}
+          <p className="suave pq" style={{ marginTop: 10 }}>
+            O aviso sai pelo WhatsApp da própria Granninha, então ele <b>não</b> cobre o caso de o WhatsApp dela cair —
+            para isso existe o monitoramento de fora.
+          </p>
+        </section>
+
         <section className="card g-6">
           <div className="card-cab">
             <h2>Últimos erros</h2>

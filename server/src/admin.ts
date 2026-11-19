@@ -6,6 +6,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { falhou, sb } from './banco.ts'
 import { garantirSessao, qrDaSessao } from './gateway.ts'
 import { ErroExclusao, excluirContaDefinitivo } from './excluir.ts'
+import { numeroDeAviso } from './alerta.ts'
 
 // Os dois domínios valem sempre, além do que vier em ADMIN_ORIGENS: trocar o domínio não pode derrubar o admin.
 const ORIGENS = [...new Set([...(process.env.ADMIN_ORIGENS ?? '').split(','), 'https://granninha.amplasoft.me', 'https://grannamei.amplasoft.me'].map((s) => s.trim()).filter(Boolean))]
@@ -51,6 +52,29 @@ export async function rotaAdmin(req: IncomingMessage, res: ServerResponse, camin
   // 403 (e não 401): o painel admin não desloga quem recebe 403, só mostra a mensagem.
   if (!admin) {
     json(res, 403, { erro: 'Sem permissão de admin ou sem a segunda etapa.' })
+    return true
+  }
+  // Para quem avisar quando a Granninha parar. O número fica no banco (não em variável) porque é o
+  // Arthur que troca, pelo painel, sem precisar de deploy.
+  if (req.method === 'GET' && caminho === '/admin/alerta') {
+    const r = await sb.from('granninha_saude').select('alerta_whats,alerta_ligado,alerta_tipo,alerta_em').eq('id', 1).maybeSingle()
+    falhou(r.error, 'ler config de alerta')
+    json(res, 200, r.data ?? { alerta_whats: '', alerta_ligado: false, alerta_tipo: null, alerta_em: null })
+    return true
+  }
+  if (req.method === 'POST' && caminho === '/admin/alerta') {
+    const body = JSON.parse((await corpo()) || '{}') as { whats?: string; ligado?: boolean }
+    const numero = numeroDeAviso(body.whats ?? '')
+    const ligado = body.ligado === true
+    if (ligado && !numero) {
+      json(res, 400, { erro: 'Número inválido. Use DDD + número, por exemplo 81999998888.' })
+      return true
+    }
+    // Trocar o número zera o que já foi avisado: o aviso do problema atual tem que chegar no destino novo.
+    const up = await sb.from('granninha_saude').upsert({ id: 1, alerta_whats: numero, alerta_ligado: ligado, alerta_tipo: null, alerta_em: null })
+    falhou(up.error, 'gravar config de alerta')
+    await sb.from('admin_auditoria').insert({ admin_id: admin, acao: 'alerta', detalhe: ligado ? `ligado para …${numero.slice(-4)}` : 'desligado' })
+    json(res, 200, { ok: true, alerta_whats: numero, alerta_ligado: ligado })
     return true
   }
   if (req.method === 'GET' && caminho === '/admin/qr') {

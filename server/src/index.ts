@@ -15,6 +15,7 @@ import { hojeSP, marcarColunaEventoFaltando, processar, registrarChegada, semCol
 import { clientePorNumero } from './banco.ts'
 import { PISO_MS, varrerPresas, varrerRetomarIA, type Presa } from './presas.ts'
 import { estadoIA, MARCA_RETOMAR } from './ia-estado.ts'
+import { decidirAviso, textoVoltou, type ConfigAlerta } from './alerta.ts'
 
 const PORTA = Number(process.env.PORT ?? 3000)
 let ultimaMensagem: string | null = null
@@ -67,6 +68,37 @@ function corpo(req: IncomingMessage, limite = 2_000_000): Promise<string> {
 }
 
 /** De onde a varredura tira o que precisa. Exportado para o teste exercitar as peças de verdade. */
+/**
+ * Avisa o dono no WhatsApp quando a Granninha para. Roda junto do batimento, uma vez por minuto.
+ * O aviso de WhatsApp caído NÃO sai (é o próprio canal que está quebrado), mas fica registrado para o
+ * admin e para o olho de fora que bate no /saude.
+ */
+async function avisarDono(whatsappEstado: string | null) {
+  const cfg = await sb.from('granninha_saude').select('alerta_whats,alerta_ligado,alerta_tipo,alerta_em').eq('id', 1).maybeSingle()
+  if (cfg.error || !cfg.data) return
+  const c = cfg.data as ConfigAlerta
+  const ia = estadoIA()
+  const d = decidirAviso(c, { iaOk: ia.ok, iaProblema: ia.problema, iaDesde: ia.desde, whatsappEstado })
+  if (d.acao === 'nada') return
+  const agora = new Date().toISOString()
+  if (d.acao === 'avisar' && !d.aviso!.entregavel) {
+    console.error('[alerta] problema sem como avisar por WhatsApp:', d.aviso!.tipo)
+    await sb.from('granninha_saude').update({ alerta_tipo: d.aviso!.tipo, alerta_em: agora }).eq('id', 1)
+    return
+  }
+  const texto = d.acao === 'voltou' ? textoVoltou(c.alerta_tipo ?? '') : d.aviso!.texto
+  try {
+    await enviarTexto(c.alerta_whats, texto)
+    console.log('[alerta]', d.acao, '·', d.motivo, '· para …' + c.alerta_whats.slice(-4))
+    await sb.from('granninha_saude').update({
+      alerta_tipo: d.acao === 'voltou' ? null : d.aviso!.tipo,
+      alerta_em: d.acao === 'voltou' ? null : agora,
+    }).eq('id', 1)
+  } catch (e) {
+    console.error('[alerta] não consegui avisar:', (e as Error).message)
+  }
+}
+
 export const varredura = {
   buscar: async (desde: string): Promise<Presa[]> => {
     const ate = new Date(Date.now() - PISO_MS).toISOString()
@@ -194,6 +226,7 @@ export function iniciar(porta = PORTA) {
     try {
       const wa = await statusSessao().catch((e) => ({ estado: 'gateway fora: ' + (e as Error).message.slice(0, 80), numero: null }))
       await sb.from('granninha_saude').upsert({ id: 1, whatsapp_estado: wa.estado, whatsapp_numero: wa.numero, fila: filas.size, atualizado_em: new Date().toISOString() })
+      await avisarDono(wa.estado)
     } catch (e) {
       console.error('[saude]', (e as Error).message)
     }

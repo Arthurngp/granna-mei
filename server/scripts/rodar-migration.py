@@ -9,6 +9,8 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
 
   evento  20261119120000_mensagens_evento.sql   coluna `evento` + índice: retomada de mensagem presa
           (opcional; sem ela a retomada atende só texto)
+  alerta  20261119200000_alerta_admin.sql       colunas para o aviso no WhatsApp quando a Granninha
+          parar (configurado no painel admin). Sem ela a tela "Me avisar se parar" não salva.
   oferta  20261118020000_oferta_ate_31_12.sql   PRAZO 01/12: quem criar conta até 31/12 usa de graça
           até 31/12. Sem ela, cadastro de dezembro pega 7 dias e bate em bloqueio sem como pagar.
 
@@ -27,12 +29,16 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 MIGRATIONS = {
     "evento": "20261119120000_mensagens_evento.sql",
     "oferta": "20261118020000_oferta_ate_31_12.sql",
+    "alerta": "20261119200000_alerta_admin.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
     "evento": "select count(*) as colunas_evento from information_schema.columns where table_name='mensagens' and column_name='evento'",
     # A oferta tem três efeitos: o default do prazo, o prazo de quem já está em teste e o fuso dentro
     # da função de acesso. Conferir só o default deixaria dois terços sem prova.
+    "alerta": """select
+        (select count(*) from information_schema.columns
+          where table_name='granninha_saude' and column_name in ('alerta_whats','alerta_ligado','alerta_tipo','alerta_em')) as colunas_de_alerta""",
     "oferta": """select
         (select pg_get_expr(d.adbin, d.adrelid) from pg_attrdef d
            join pg_attribute a on a.attrelid=d.adrelid and a.attnum=d.adnum
