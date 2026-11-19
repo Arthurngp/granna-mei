@@ -19,6 +19,10 @@ export interface LancAntigo {
   carteira_id: string
   pessoal: boolean
   descricao?: string
+  /** Comprovante guardado, para a correção herdar em vez de nascer sem foto. */
+  anexo_path?: string | null
+  /** De onde veio (texto, áudio, foto, pdf). */
+  origem?: string | null
 }
 
 const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()

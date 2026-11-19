@@ -148,6 +148,8 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
   let intencao: string | null = null
   let textoFinal = d.content ?? ''
   let erro: string | null = null
+  /** Preenchido pelo conversar() com o `atualizado_em` da pergunta em aberto que ele leu. */
+  const consumo: { pendenteLida?: string | null } = {}
 
   // Modo teste: com WA_SOMENTE_NUMEROS preenchido, só esses números conversam. O resto é ignorado em
   // silêncio (sem resposta, sem IA), mas a linha sai de "recebida" para a varredura não voltar nela.
@@ -186,7 +188,7 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
         status = 'ignorada'
         resposta = `Esse número já está confirmado nesta conta, então não dá para usá-lo em outra ao mesmo tempo. Se quiser levá-lo para a conta nova, troque o número aqui em ${PAINEL()}/ajustes (ou peça a exclusão desta conta) e confirme lá.`
       } else {
-        const r = await conversar(cliente, hoje, tipo, d, msgId, telefone)
+        const r = await conversar(cliente, hoje, tipo, d, msgId, telefone, consumo)
         ;({ status, resposta, efeitos, intencao } = r)
         textoFinal = r.texto
         tokens = r.tokens
@@ -201,6 +203,14 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
     erro = (e as Error).message.slice(0, 500)
     resposta = 'Tive um problema para anotar agora. Pode mandar de novo daqui a pouco?'
     console.error('[granninha]', msgId, erro)
+  }
+
+  // A pergunta em aberto só sai agora, e só se deu certo: deu erro no meio (IA fora, transcrição),
+  // ela continua lá para a resposta seguinte fazer sentido. O filtro por `atualizado_em` é o que
+  // impede de apagar uma pergunta NOVA que o próprio processamento acabou de gravar.
+  if (consumo.pendenteLida && status !== 'erro') {
+    const lim = await sb.from('conversas').update({ pendente: null, atualizado_em: new Date().toISOString() }).eq('telefone', telefone).eq('atualizado_em', consumo.pendenteLida)
+    if (lim.error) console.error('[granninha] limpar pergunta em aberto', lim.error.message)
   }
 
   const up = await sb.from('mensagens').update({
@@ -341,7 +351,7 @@ interface Conversa {
   tokens: Uso
 }
 
-async function conversar(cliente: { id: string; nome: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string): Promise<Conversa> {
+async function conversar(cliente: { id: string; nome: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string, saida: { pendenteLida?: string | null } = {}): Promise<Conversa> {
   const tokens: Uso = { entrada: 0, saida: 0, audio: 0 }
   const soma = (u: Uso) => {
     tokens.entrada += u.entrada
@@ -358,7 +368,10 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   const { data: conv } = await sb.from('conversas').select('pendente,atualizado_em').eq('telefone', telefone).maybeSingle()
   const pend = conv?.pendente as { tipo?: string; texto?: string; pergunta?: string; transacoes?: Transacao[]; opcoes?: Opcao[]; anexo?: string; forcar?: { carteira?: string; pessoal?: boolean }; documento?: { valor: number; movimento: 'entrada' | 'saida' }; origem?: Origem; acoes?: Acao[]; anteriorMsg?: string } | null
   const fresco = conv && Date.now() - new Date(conv.atualizado_em).getTime() < 30 * 60_000
-  if (pend?.tipo) await sb.from('conversas').update({ pendente: null, atualizado_em: new Date().toISOString() }).eq('telefone', telefone)
+  // A pergunta em aberto NÃO é apagada aqui. Antes era, e se a transcrição ou a IA falhassem no meio
+  // a pergunta sumia: o "2" seguinte chegava sem contexto. Quem apaga é o processar(), só quando
+  // deu certo, e só se nada novo tiver sido gravado por cima (`pendenteLida` guarda o atualizado_em).
+  saida.pendenteLida = pend?.tipo ? (conv!.atualizado_em as string) : null
 
   if (tipo === 'audio') {
     const m = await baixarMidia(d.fileUrl ?? '')
@@ -577,7 +590,9 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     const antes = await lancsDe(cliente.id, ult.efeitos.lancamentos ?? [])
     await reverter(cliente.id, ult.efeitos)
     await sb.from('mensagens').update({ desfeita: true }).eq('id', ult.id).eq('user_id', cliente.id)
-    const r = await executar(cliente.id, await contextoDe(cliente.id, hoje), it2.acoes, tipo, anexo)
+    // O lançamento corrigido fica com o comprovante e a origem do original.
+    const h = herdarComprovante(antes, anexo, tipo)
+    const r = await executar(cliente.id, await contextoDe(cliente.id, hoje), it2.acoes, h.origem, h.anexo)
     const mudou = antesEAgora(antes, it2.acoes, ctx)
     return { status: 'ok', resposta: `Corrigido.\n\n${r.linhas.join('\n\n')}${mudou ? `\n\n${mudou}` : ''}${await saldoDepois(cliente.id, it2.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'corrigir', texto: novo, tokens }
   }
@@ -666,9 +681,20 @@ async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Or
 /** Lançamentos do cliente por id (para comparar antes e depois de uma correção). */
 async function lancsDe(userId: string, ids: string[]): Promise<LancAntigo[]> {
   if (!ids.length) return []
-  const { data, error } = await sb.from('lancamentos').select('id,tipo,valor,categoria_id,carteira_id,pessoal,descricao').eq('user_id', userId).in('id', ids)
+  const { data, error } = await sb.from('lancamentos').select('id,tipo,valor,categoria_id,carteira_id,pessoal,descricao,anexo_path,origem').eq('user_id', userId).in('id', ids)
   falhou(error, 'lançamentos do último registro')
   return (data ?? []).map((l) => ({ ...l, valor: Number(l.valor), pessoal: !!l.pessoal }))
+}
+
+/**
+ * De quem a correção herda o comprovante. Foto do comprovante e depois "não, foi 90": o lançamento
+ * corrigido nascia sem a foto e marcado como texto, e o arquivo ficava guardado mas solto.
+ * Se a própria mensagem de correção trouxer anexo, vale o dela.
+ */
+function herdarComprovante(antigos: LancAntigo[], anexoAtual: string | null, origemAtual: Origem): { anexo: string | null; origem: Origem } {
+  if (anexoAtual) return { anexo: anexoAtual, origem: origemAtual }
+  const a = antigos.find((x) => x.anexo_path)
+  return a ? { anexo: a.anexo_path ?? null, origem: (a.origem as Origem) ?? origemAtual } : { anexo: null, origem: origemAtual }
 }
 
 /** O cliente respondeu 1 (é o mesmo: corrige o anterior) ou 2 (é outro: lança). */
@@ -685,7 +711,8 @@ async function resolverDuplicata(userId: string, ctx: Contexto, acoes: Acao[], a
   const antes = await lancsDe(userId, ult.efeitos.lancamentos ?? [])
   await reverter(userId, ult.efeitos)
   await sb.from('mensagens').update({ desfeita: true }).eq('id', ult.id).eq('user_id', userId)
-  const r = await executar(userId, ctx, acoes, origem, anexo)
+  const h = herdarComprovante(antes, anexo, origem)
+  const r = await executar(userId, ctx, acoes, h.origem, h.anexo)
   const mudou = antesEAgora(antes, acoes, ctx)
   return { status: 'ok', resposta: `Corrigido.\n\n${r.linhas.join('\n\n')}${mudou ? `\n\n${mudou}` : ''}${await saldoDepois(userId, acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'corrigir', texto, tokens }
 }
