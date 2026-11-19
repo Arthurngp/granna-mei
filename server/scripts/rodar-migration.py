@@ -31,7 +31,18 @@ MIGRATIONS = {
 # O que olhar antes e depois de cada uma.
 CONFERE = {
     "evento": "select count(*) as colunas_evento from information_schema.columns where table_name='mensagens' and column_name='evento'",
-    "oferta": "select pg_get_expr(d.adbin, d.adrelid) as default_trial_fim from pg_attrdef d join pg_attribute a on a.attrelid=d.adrelid and a.attnum=d.adnum join pg_class c on c.oid=d.adrelid where c.relname='assinaturas' and a.attname='trial_fim'",
+    # A oferta tem três efeitos: o default do prazo, o prazo de quem já está em teste e o fuso dentro
+    # da função de acesso. Conferir só o default deixaria dois terços sem prova.
+    "oferta": """select
+        (select pg_get_expr(d.adbin, d.adrelid) from pg_attrdef d
+           join pg_attribute a on a.attrelid=d.adrelid and a.attnum=d.adnum
+           join pg_class c on c.oid=d.adrelid
+          where c.relname='assinaturas' and a.attname='trial_fim') as default_trial_fim,
+        (select count(*) from public.assinaturas where status='trial') as em_trial,
+        (select count(*) from public.assinaturas where status='trial' and trial_fim < date '2026-12-31') as trial_fora_da_oferta,
+        (select position('Sao_Paulo' in pg_get_functiondef(p.oid)) > 0 from pg_proc p
+           join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname='acesso_liberado') as acesso_usa_fuso_sp""",
 }
 
 
