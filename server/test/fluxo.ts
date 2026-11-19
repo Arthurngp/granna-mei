@@ -362,8 +362,8 @@ try {
   })
   await caso('cortesia (parceiro liberado): grava normal', async () => {
     await sb.from('assinaturas').update({ status: 'cortesia' }).eq('user_id', uid)
-    const r = await mandar(FONE, { content: 'paguei 10 de café no pix' })
-    assert.match(r.texto, /saída de R\$ 10,00/)
+    const r = await responderAte(FONE, 'paguei 10 de café no pix')
+    assert.match(r.texto, /saída de R\$ 10,00/, 'perguntas feitas: ' + r.perguntas.join(' | '))
   })
   await caso('mensagem de grupo e mensagem enviada por ela mesma são ignoradas', async () => {
     const n = enviados.length
@@ -380,8 +380,8 @@ try {
       assert.equal(r.texto, '')
       const m = (await sb.from('mensagens').select('status,erro').eq('id', r.id).single()).data!
       assert.equal(m.status, 'ignorada')
-      const r2 = await mandar(FONE, { content: 'paguei 12 de pão no pix' })
-      assert.match(r2.texto, /R\$ 12,00/)
+      const r2 = await responderAte(FONE, 'paguei 12 de pão no pix')
+      assert.match(r2.texto, /R\$ 12,00/, 'perguntas feitas: ' + r2.perguntas.join(' | '))
     } finally {
       delete process.env.WA_SOMENTE_NUMEROS
     }
@@ -459,8 +459,8 @@ try {
     assert.match(enviados[enviados.length - 1].texto, /não consegui terminar de anotar/)
   })
   await caso('pergunta no meio não rouba o DESFAZER', async () => {
-    const r1 = await mandar(FONE, { content: 'paguei 61 de luz no pix' })
-    assert.match(r1.texto, /R\$ 61,00/)
+    const r1 = await responderAte(FONE, 'paguei 61 de luz no pix')
+    assert.match(r1.texto, /R\$ 61,00/, 'perguntas feitas: ' + r1.perguntas.join(' | '))
     await mandar(FONE, { content: 'quanto sobrou esse mês?' })
     const r3 = await mandar(FONE, { content: 'desfazer' })
     assert.match(r3.texto, /desfiz/)
