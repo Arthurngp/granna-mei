@@ -365,9 +365,15 @@ try {
     const { varrerPresas } = await import('../src/presas.ts')
     const id = `RETOMAR-TESTE-${Date.now()}`
     const evento = { event: 'message.received', sessionId: 'granninha', data: { key: { id, remoteJid: `${FONE}@s.whatsapp.net`, fromMe: false }, from: `${FONE}@s.whatsapp.net`, isGroup: false, chatType: 'PERSONAL', type: 'TEXT', content: 'recebi 33 de corte no pix' } }
-    // Como se o processo tivesse morrido antes de começar: linha 'recebida', erro nulo, 5 min atrás.
-    const ins = await sb.from('mensagens').insert({ id, telefone: FONE, tipo: 'texto', texto: 'recebi 33 de corte no pix', evento, criado_em: new Date(Date.now() - 5 * 60_000).toISOString() })
-    if (ins.error) throw new Error('precisa da migration 20261119120000_mensagens_evento: ' + ins.error.message)
+    // Como se o processo tivesse morrido antes de começar: 'recebida', marca "na fila", 5 min atrás.
+    const linha = { id, telefone: FONE, tipo: 'texto', texto: 'recebi 33 de corte no pix', erro: 'na fila', criado_em: new Date(Date.now() - 5 * 60_000).toISOString() }
+    let ins = await sb.from('mensagens').insert({ ...linha, evento })
+    if (ins.error) {
+      // Sem a migration 20261119120000 a coluna não existe: o texto se reconstrói sem ela.
+      console.log('      (sem a coluna `evento`: testando a retomada por texto)')
+      ins = await sb.from('mensagens').insert(linha)
+    }
+    if (ins.error) throw new Error('não deu para semear a mensagem presa: ' + ins.error.message)
     const antes = enviados.length
     const log = await varrerPresas(varredura)
     assert.ok(log.some((l) => l.includes(id)), 'a varredura pegou a mensagem: ' + JSON.stringify(log))
@@ -403,6 +409,16 @@ try {
   await caso('dois DESFAZER seguidos: o segundo pergunta antes de apagar outro', async () => {
     const r = await mandar(FONE, { content: 'desfazer' })
     assert.match(r.texto, /já tinha desfeito|Não achei nada recente/)
+  })
+  await caso('a pergunta em aberto é apagada de verdade no banco quando dá certo', async () => {
+    // O banco falso compara `atualizado_em` como texto; aqui é timestamptz de verdade. Se o filtro
+    // não casar, a pergunta fica pendurada e um "2" futuro poderia ser aplicado a ela.
+    const r = await mandar(FONE, { content: 'gastei 9 no mercado' })
+    assert.match(r.texto, /Pagou como/, 'o cenário depende de a Granninha perguntar a conta')
+    const r2 = await mandar(FONE, { content: '1' })
+    assert.match(r2.texto, /R\$ 9,00/)
+    const c = (await sb.from('conversas').select('pendente').eq('telefone', FONE).maybeSingle()).data as { pendente: unknown } | null
+    assert.ok(!c || c.pendente === null, 'a pergunta saiu do banco: ' + JSON.stringify(c?.pendente))
   })
   await caso('figurinha não recebe resposta', async () => {
     const r = await mandar(FONE, { type: 'STICKER', fileUrl: '/api/media/granninha-STK.webp' }, { esperarNada: true })

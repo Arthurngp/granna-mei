@@ -45,7 +45,17 @@ export interface Saida {
   msgId?: string
 }
 
-/** Marca, no campo `erro`, que esta mensagem JÁ começou a ser processada. Ver presas.ts. */
+/**
+ * Marcas no campo `erro` que dizem em que pé está a mensagem (sem precisar de coluna nova):
+ * - NA_FILA: gravada pelo código NOVO e ainda não começou. É a única que pode ser reprocessada.
+ * - PROCESSANDO: já começou. Nunca é reprocessada, porque pode ter gravado ou revertido algo.
+ *
+ * Linha 'recebida' SEM nenhuma dessas marcas é legado: foi gravada pelo código antigo, que começava
+ * a processar logo depois do insert. No deploy deste próprio PR, o container velho morre no meio e
+ * deixa linhas assim, possivelmente com o lançamento já gravado. Reprocessar seria o lançamento em
+ * dobro que esta fase existe para matar, então essas só podem ser avisadas.
+ */
+export const NA_FILA = 'na fila'
 export const PROCESSANDO = 'processando'
 
 type Status = 'ok' | 'pergunta' | 'ignorada' | 'bloqueada' | 'erro' | 'limite'
@@ -118,6 +128,8 @@ export async function registrarChegada(ev: EventoGateway): Promise<'nova' | 'dup
   const d = ev.data ?? {}
   const linha: Record<string, unknown> = {
     id: c.msgId, telefone: c.telefone, tipo: c.tipo === 'outro' ? 'outro' : c.tipo, texto: (d.content ?? d.caption ?? '').slice(0, 2000),
+    // A marca é o que diz à varredura que esta linha é do código novo e ainda não começou.
+    erro: NA_FILA,
   }
   for (let i = 0; i < 2; i++) {
     const ins = await sb.from('mensagens').insert(semColunaEvento ? linha : { ...linha, evento: ev })
@@ -147,7 +159,7 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
   // Trava de "começou": só um processo trabalha nesta mensagem, e o que já começou nunca é
   // reprocessado. DESFAZER e correção terminam com efeitos vazios, então "não gravou nada" não serve
   // de sinal — retomar um desfazer desfaria um segundo lançamento. Ver presas.ts.
-  const claim = await sb.from('mensagens').update({ erro: PROCESSANDO }).eq('id', msgId).eq('status', 'recebida').is('erro', null).select('id')
+  const claim = await sb.from('mensagens').update({ erro: PROCESSANDO }).eq('id', msgId).eq('status', 'recebida').eq('erro', NA_FILA).select('id')
   falhou(claim.error, 'marcar mensagem em processamento')
   if (!claim.data?.length) return { status: 'duplicada', msgId }
 

@@ -12,7 +12,7 @@
  *   caso a cliente recebe um aviso para mandar de novo, e a mensagem fica como erro para o admin ver.
  */
 import type { EventoGateway } from './granninha.ts'
-import { PROCESSANDO } from './granninha.ts'
+import { NA_FILA, PROCESSANDO } from './granninha.ts'
 
 /** Acima do pior caso de processamento (transcrição + IA, 25 s por chamada e até 3 tentativas). */
 export const PISO_MS = Number(process.env.PRESAS_PISO_MS ?? 180_000)
@@ -49,13 +49,19 @@ function eventoDeTexto(p: Presa): EventoGateway {
 export function decidir(p: Presa, agora = Date.now()): Decisao {
   const idade = agora - new Date(p.criado_em).getTime()
   if (idade < PISO_MS) return { acao: 'esperar' } // pode estar rodando agora
+  // Velha demais: a cliente já desistiu e provavelmente mandou de novo. Nem retoma nem avisa, só
+  // tira de 'recebida' para o admin ver (avisar aqui seria falar de uma mensagem de outro dia).
+  if (idade > TETO_MS) return { acao: 'arquivar', motivo: `não processada (${p.erro ?? 'sem marca'}, fora da janela)` }
   if (p.erro === PROCESSANDO) return { acao: 'avisar', motivo: 'interrompida no meio do processamento' }
-  if (p.erro) return { acao: 'arquivar', motivo: p.erro }
-  if (idade > TETO_MS) return { acao: 'arquivar', motivo: 'não processada (fora da janela de retomada)' }
-  if (p.evento?.data) return { acao: 'reprocessar', ev: p.evento }
-  if (p.tipo === 'texto') return { acao: 'reprocessar', ev: eventoDeTexto(p) }
-  // Áudio, foto ou PDF sem o evento guardado: o fileUrl não existe mais, não há o que reprocessar.
-  return { acao: 'avisar', motivo: 'mídia sem o evento guardado (antes da migration)' }
+  if (p.erro === NA_FILA) {
+    if (p.evento?.data) return { acao: 'reprocessar', ev: p.evento }
+    if (p.tipo === 'texto') return { acao: 'reprocessar', ev: eventoDeTexto(p) }
+    // Áudio, foto ou PDF sem o evento guardado: o fileUrl não existe mais, não há o que reprocessar.
+    return { acao: 'avisar', motivo: 'mídia sem o evento guardado (antes da migration)' }
+  }
+  // Sem marca nenhuma: linha do código antigo, que começava a processar logo depois do insert. Pode
+  // ter gravado o lançamento ou revertido um DESFAZER sem registrar, então NUNCA é reprocessada.
+  return { acao: 'avisar', motivo: p.erro ? 'interrompida: ' + p.erro : 'interrompida antes da trava (estado desconhecido)' }
 }
 
 export interface DepsVarredura {
@@ -65,8 +71,9 @@ export interface DepsVarredura {
   fechar: (id: string, erro: string) => Promise<boolean>
   /** Põe a mensagem na fila do telefone dela, como o webhook faria. */
   enfileirar: (telefone: string, tarefa: () => Promise<void>) => void
-  processar: (ev: EventoGateway, opts: { jaRegistrada: boolean }) => Promise<{ status: string; para?: string; resposta?: string }>
-  enviar: (para: string, texto: string) => Promise<void>
+  processar: (ev: EventoGateway, opts: { jaRegistrada: boolean }) => Promise<{ status: string; para?: string; resposta?: string; msgId?: string }>
+  /** Entrega a resposta; com o msgId, registra na mensagem quando não conseguir entregar. */
+  enviar: (para: string, texto: string, msgId?: string) => Promise<void>
   /** O número é de uma conta ativa? A Granninha fica muda para quem não é cliente. */
   ehCliente: (telefone: string) => Promise<boolean>
   /** Ids que este processo está tratando agora (não mexer neles). */
@@ -86,7 +93,7 @@ export async function varrerPresas(d: DepsVarredura, agora = Date.now()): Promis
       d.enfileirar(p.telefone, async () => {
         try {
           const r = await d.processar(dec.ev, { jaRegistrada: true })
-          if (r.para && r.resposta) await d.enviar(r.para, r.resposta)
+          if (r.para && r.resposta) await d.enviar(r.para, r.resposta, r.msgId ?? p.id)
         } catch (e) {
           console.error('[presas] retomar', p.id, (e as Error).message)
         }

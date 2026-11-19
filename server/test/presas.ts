@@ -54,7 +54,7 @@ process.env.PRESAS_TETO_MS = '5000'
 
 const { iniciar, varredura } = await import('../src/index.ts')
 const { varrerPresas, decidir, AVISO_INTERROMPIDA } = await import('../src/presas.ts')
-const { processar, registrarChegada, tentarColunaEvento, PROCESSANDO } = await import('../src/granninha.ts')
+const { processar, registrarChegada, tentarColunaEvento, PROCESSANDO, NA_FILA } = await import('../src/granninha.ts')
 
 const srv = iniciar(0)
 await new Promise<void>((ok) => srv.once('listening', ok))
@@ -89,7 +89,8 @@ const msgs = () => (E.tabelas.mensagens ?? []) as Record<string, unknown>[]
 const linha = (id: string) => msgs().find((m) => m.id === id)
 const presa = (x: Partial<Record<string, unknown>>) => {
   E.tabelas.mensagens ??= []
-  const l = { id: 'p1', telefone: NUM, tipo: 'texto', texto: 'gastei 50 de gasolina', status: 'recebida', erro: null, efeitos: {}, desfeita: false, evento: null, criado_em: new Date(Date.now() - 2000).toISOString(), ...x }
+  // Por padrão, uma linha do código NOVO que nunca começou: marca "na fila".
+  const l = { id: 'p1', telefone: NUM, tipo: 'texto', texto: 'gastei 50 de gasolina', status: 'recebida', erro: NA_FILA, efeitos: {}, desfeita: false, evento: null, criado_em: new Date(Date.now() - 2000).toISOString(), ...x }
   E.tabelas.mensagens.push(l)
   return l
 }
@@ -178,12 +179,34 @@ await caso('mensagem que já começou NUNCA é reprocessada (e o cliente é avis
   assert.ok(log.some((l) => l.startsWith('avisar DESF-1')), 'e fica no log do servidor')
 })
 
+await caso('linha do código ANTIGO (sem marca) nunca é reprocessada: é o deploy deste PR', async () => {
+  // O container velho morre no meio do deploy e deixa a linha 'recebida' com erro nulo, possivelmente
+  // com o lançamento JÁ gravado. Tratar isso como "nunca começou" criaria o dobro.
+  ia.regras = [[/gasolina/, GASOLINA]]
+  presa({ id: 'LEGADO-1', erro: null })
+  const log = await varrerPresas(varredura)
+  await esperar(() => envios.length > 0)
+  assert.equal(lancsU1().length, 0, 'não reprocessa o que pode já ter sido gravado')
+  assert.equal(linha('LEGADO-1')?.status, 'erro')
+  assert.match(String(linha('LEGADO-1')?.erro), /estado desconhecido/)
+  assert.equal(envios[0]?.texto, AVISO_INTERROMPIDA, 'a cliente é avisada para mandar de novo')
+  assert.ok(log.some((l) => l.startsWith('avisar LEGADO-1')))
+})
+
+await caso('legado velho demais só é arquivado, sem aviso fora de hora', async () => {
+  presa({ id: 'LEGADO-2', erro: null, criado_em: new Date(Date.now() - 6000).toISOString() })
+  await varrerPresas(varredura)
+  await esperar(() => false, 250)
+  assert.equal(envios.length, 0, 'ninguém recebe aviso sobre mensagem de outro dia')
+  assert.equal(linha('LEGADO-2')?.status, 'erro')
+})
+
 await caso('REGRESSÃO: sem a trava, o desfazer retomado desfaz um segundo lançamento', async () => {
-  // A MESMA linha, só sem a marca de "começou": aí ela é reprocessada e o estrago aparece.
+  // A MESMA linha, só com a marca de "na fila": aí ela é reprocessada e o estrago aparece.
   ia.regras = [[/desfazer/, { intencao: 'desfazer', acoes: [], pergunta: null, correcao: null, falta: null }]]
   E.tabelas.lancamentos.push({ user_id: U1, id: 'l1', tipo: 'saida', valor: 50, data: '2026-11-19', carteira_id: 'nubank', descricao: 'Gasolina', pessoal: false })
   E.tabelas.mensagens = [{ id: 'ANTES', user_id: U1, telefone: NUM, tipo: 'texto', texto: 'gastei 50 de gasolina', status: 'ok', erro: null, desfeita: false, efeitos: { lancamentos: ['l1'] }, criado_em: new Date(Date.now() - 3000).toISOString(), evento: null }]
-  presa({ id: 'DESF-2', texto: 'desfazer', erro: null })
+  presa({ id: 'DESF-2', texto: 'desfazer', erro: NA_FILA })
   await varrerPresas(varredura)
   await esperar(() => lancsU1().length === 0)
   assert.equal(lancsU1().length, 0, 'prova do estrago: reprocessar um desfazer reverte o lançamento anterior')
@@ -313,12 +336,15 @@ await caso('pedido inválido não é repetido', async () => {
 
 await caso('a decisão por si só: cada estado tem um caminho', async () => {
   const agora = Date.now()
-  const nova = { id: 'a', telefone: NUM, tipo: 'texto', texto: 'x', erro: null, criado_em: new Date(agora - 100).toISOString(), evento: null }
-  assert.equal(decidir(nova, agora).acao, 'esperar')
-  assert.equal(decidir({ ...nova, criado_em: new Date(agora - 2000).toISOString() }, agora).acao, 'reprocessar')
-  assert.equal(decidir({ ...nova, criado_em: new Date(agora - 2000).toISOString(), erro: PROCESSANDO }, agora).acao, 'avisar')
-  assert.equal(decidir({ ...nova, criado_em: new Date(agora - 6000).toISOString() }, agora).acao, 'arquivar')
-  assert.equal(decidir({ ...nova, tipo: 'audio', criado_em: new Date(agora - 2000).toISOString() }, agora).acao, 'avisar')
+  const base = { id: 'a', telefone: NUM, tipo: 'texto', texto: 'x', erro: NA_FILA, criado_em: new Date(agora - 100).toISOString(), evento: null }
+  const madura = (x: Record<string, unknown> = {}) => ({ ...base, criado_em: new Date(agora - 2000).toISOString(), ...x })
+  assert.equal(decidir(base, agora).acao, 'esperar', 'nova demais: pode estar rodando')
+  assert.equal(decidir(madura(), agora).acao, 'reprocessar', 'na fila e nunca começou')
+  assert.equal(decidir(madura({ erro: PROCESSANDO }), agora).acao, 'avisar', 'já começou: nunca reprocessa')
+  assert.equal(decidir(madura({ erro: null }), agora).acao, 'avisar', 'legado do código antigo: nunca reprocessa')
+  assert.equal(decidir(madura({ erro: 'qualquer outra coisa' }), agora).acao, 'avisar')
+  assert.equal(decidir(madura({ criado_em: new Date(agora - 6000).toISOString() }), agora).acao, 'arquivar', 'fora da janela')
+  assert.equal(decidir(madura({ tipo: 'audio' }), agora).acao, 'avisar', 'mídia sem o evento guardado')
 })
 
 srv.close()

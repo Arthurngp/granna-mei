@@ -90,7 +90,7 @@ export const varredura = {
   },
   enfileirar,
   processar,
-  enviar: enviarTexto,
+  enviar: entregar,
   ehCliente: async (telefone: string) => Boolean(await clientePorNumero(telefone)),
   emVoo: () => emVoo,
 }
