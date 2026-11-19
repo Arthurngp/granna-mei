@@ -105,4 +105,35 @@ await caso('correção de lançamento sem foto continua sem foto', async () => {
   assert.equal(l.origem, 'texto')
 })
 
+/* ---------------- conta que a pessoa usou e não tem cadastrada ---------------- */
+
+await caso('insistir numa conta que não existe não deixa a pessoa sem saída', async () => {
+  // O caso do Matheus (cliente real, 16/11/2026): ele pagou com um cartão que não tinha cadastrado,
+  // respondeu "foi no cartão de débito dentro do cartão C6 Bank" e recebeu a MESMA pergunta. Insistiu
+  // uma vez e desistiu; o gasto dele nunca foi registrado.
+  const SEM_CONTA = acoes(acao({ valor: 33.58, descricao: 'Compras mercado', meio: null, carteira_id: null }))
+  ia.regras = [[/mercado|C6|debito|débito/i, SEM_CONTA]]
+
+  const primeira = await msg('paguei 33,58 no mercado')
+  assert.match(primeira, /Pagou como/, 'ela pergunta a conta, porque há mais de uma')
+  assert.match(primeira, /cadastre em .*\/ajustes/, 'e já diz o caminho para quem usou outra conta')
+
+  // A pessoa insiste no nome da conta que ela usa de verdade.
+  const segunda = await msg('foi no cartão de débito dentro do cartão C6 Bank')
+  assert.match(segunda, /cadastre em .*\/ajustes/, 'a saída continua à vista quando ela insiste')
+  assert.equal(lancsU1().length, 0, 'nada é gravado enquanto a conta não é escolhida')
+
+  // E escolher pelo número continua funcionando.
+  const terceira = await msg('2')
+  assert.match(terceira, /R\$ 33,58/)
+  assert.equal(lancsU1().length, 1)
+})
+
+await caso('a saída aparece também quando é entrada de dinheiro', async () => {
+  ia.regras = [[/recebi/, acoes(acao({ valor: 80, movimento: 'entrada', categoria_id: 'vendas', descricao: 'Venda', meio: null, carteira_id: null }))]]
+  const r = await msg('recebi 80 de venda')
+  assert.match(r, /Onde caiu/)
+  assert.match(r, /cadastre em .*\/ajustes/)
+})
+
 fim()
