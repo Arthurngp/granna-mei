@@ -469,10 +469,22 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
   return { acoes: out, perguntar: null }
 }
 
-const SEM_PESO = new Set(['conta', 'contas', 'compra', 'compras', 'pagamento', 'paguei', 'gasto', 'gastei', 'valor', 'parcela', 'fatura', 'outros', 'outro', 'mensal', 'mensalidade', 'novembro', 'dezembro', 'janeiro'])
-/** Palavras que identificam o gasto, para lembrar a decisão do cliente ("recarga de celular" → recarga, celular). */
+const SEM_PESO = new Set([
+  'conta', 'contas', 'compra', 'compras', 'pagamento', 'paguei', 'gasto', 'gastei', 'valor', 'parcela',
+  'fatura', 'outros', 'outro', 'mensal', 'mensalidade', 'novembro', 'dezembro', 'janeiro',
+  // Palavras de três letras que não dizem o que foi o gasto (o limite abaixo é 3 por causa de "luz", "gás", "pão").
+  'com', 'sem', 'por', 'pra', 'para', 'dos', 'das', 'uma', 'uns', 'meu', 'sua', 'seu', 'nos', 'nas', 'que', 'foi', 'era', 'hoje', 'mais', 'esse', 'essa', 'isso',
+])
+/**
+ * Palavras que identificam o gasto, para lembrar a decisão do cliente ("recarga de celular" → recarga,
+ * celular).
+ *
+ * O limite é de TRÊS letras: com quatro, "luz", "gás" e "pão" ficavam de fora e a Granninha nunca
+ * aprendia se a conta de luz é do negócio ou da casa — perguntava (ou decidia sozinha) toda santa vez.
+ * Apareceu em 2026-11-19, no mesmo caso que trouxe o aviso de retirada.
+ */
 export function palavrasChave(descricao: string): string[] {
-  return tira(descricao).split(/[^a-z0-9]+/).filter((p) => p.length >= 4 && !SEM_PESO.has(p))
+  return tira(descricao).split(/[^a-z0-9]+/).filter((p) => p.length >= 3 && !SEM_PESO.has(p))
 }
 /** O cliente já decidiu esse tipo de gasto antes? Começa pela última palavra, onde costuma estar a coisa ("recarga do celular", "conserto do carro"). */
 export function lembrancaDe(descricao: string, mapa?: Record<string, boolean>): boolean | undefined {
