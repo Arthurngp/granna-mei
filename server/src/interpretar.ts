@@ -8,7 +8,7 @@
  * opções numeradas; quem só tem uma conta nunca é incomodado.
  */
 import { faturaDe } from './cartao.ts'
-import { valorConfere, temDigito } from './numeros.ts'
+import { temNumeroDeValor, valorConfere } from './numeros.ts'
 import { jsonEstruturado, type Uso } from './openai.ts'
 import { comoDado, limparSaida, limparTextoCliente, REGRA_DADO } from './seguranca.ts'
 
@@ -267,9 +267,18 @@ export function candidatas(cs: CarteiraCtx[], movimento: 'entrada' | 'saida', me
 }
 
 /** Monta a pergunta numerada. */
+/**
+ * Pergunta em qual conta entrou ou saiu o dinheiro.
+ *
+ * A última linha existe por um caso real (Matheus, 16/11/2026): ele pagou com um cartão que não tinha
+ * cadastrado, respondeu "foi no cartão de débito dentro do cartão C6 Bank", e como a lista só mostra as
+ * contas que existem, recebeu a MESMA pergunta de novo. Insistiu uma vez e desistiu — o gasto dele
+ * nunca foi registrado. Sem essa saída, quem usa uma conta que não cadastrou não tem para onde ir.
+ */
 export function perguntaDeOpcoes(movimento: 'entrada' | 'saida', descricao: string, opcoes: Opcao[]) {
   const titulo = movimento === 'entrada' ? `Onde caiu${descricao ? ` "${descricao}"` : ''}?` : `Pagou como${descricao ? ` "${descricao}"` : ''}?`
-  return `${titulo} Responda com o número:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`
+  const lista = opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')
+  return `${titulo} Responda com o número:\n${lista}\n\nSe foi por uma conta que não está aí, cadastre em ${PAINEL()}/ajustes e me mande de novo.`
 }
 
 const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.amplasoft.me/painel').replace(/\/+$/, '')
@@ -334,7 +343,7 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
       const aberta = (c.faturasAbertas ?? []).find((f) => f.cartaoId === cartaoId && f.falta > 0)
       if (a.valor === null && !aberta) return { acoes: [], perguntar: `Não achei fatura em aberto no ${cart(cartaoId)!.nome}. Quanto você pagou?` }
       const valor = a.valor ?? aberta!.falta
-      if (a.valor !== null && temDigito(texto) && !valorConfere(texto, a.valor, null)) return { acoes: [], perguntar: 'Só para conferir: quanto você pagou da fatura?' }
+      if (a.valor !== null && temNumeroDeValor(texto) && !valorConfere(texto, a.valor, null)) return { acoes: [], perguntar: 'Só para conferir: quanto você pagou da fatura?' }
       // De onde saiu: a conta citada, a resposta à pergunta, a conta que paga o cartão, ou pergunta entre os bancos.
       const bancos = c.carteiras.filter((x) => x.tipo === 'banco' || x.tipo === 'dinheiro')
       const citada = cart(a.carteira_id)
@@ -352,7 +361,9 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
 
     const precisaValor = a.tipo_acao !== 'baixar_conta'
     if (precisaValor && (a.valor === null || !(a.valor > 0))) return { acoes: [], perguntar: `Qual foi o valor${a.descricao ? ` de "${a.descricao}"` : ''}?` }
-    if (a.valor !== null && temDigito(texto) && !valorConfere(texto, a.valor, a.parcelas)) {
+    // Só desconfia quando o texto tem número que PODE ser valor: nome de conta com dígito
+    // ("C6 Bank", "99app") não é motivo para duvidar do valor que a IA leu.
+    if (a.valor !== null && temNumeroDeValor(texto) && !valorConfere(texto, a.valor, a.parcelas)) {
       return { acoes: [], perguntar: `Só para conferir: o valor de "${a.descricao}" é quanto?` }
     }
     const conta = c.contasAbertas.find((x) => x.id === a.conta_id)

@@ -48,6 +48,14 @@ const pegar = async (caminho: string, headers: Record<string, string> = {}) => {
   const { corpo } = await pegar('/saude', { Authorization: 'Bearer chave-de-teste' })
   assert.ok('whatsapp' in corpo, 'com a chave vem o estado do WhatsApp')
   assert.ok('mensagens_24h' in corpo)
+  // O estado da IA entra aqui porque é o que faltava em 19/11: a chave da OpenAI ficou sem cota, a
+  // Granninha ficou muda para todos os clientes e nada avisou ninguém.
+  const estadoIa = corpo.ia as Record<string, unknown>
+  assert.ok(estadoIa, 'o /saude conta o estado da IA')
+  assert.equal(estadoIa.ok, true, 'sem falha conhecida, diz que está ok')
+  for (const campo of ['problema', 'desde', 'ultima_falha', 'ultimo_ok', 'falhas']) {
+    assert.ok(campo in estadoIa, 'o monitoramento precisa do campo ' + campo)
+  }
 }
 // Chave certa na URL (o N8N às vezes só manda query).
 {

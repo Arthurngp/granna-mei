@@ -24,6 +24,22 @@ export function numerosDoTexto(texto: string): number[] {
 
 export const temDigito = (t: string) => /\d/.test(t)
 
+/**
+ * O texto tem algum número que PODE ser um valor em dinheiro?
+ *
+ * Nome de conta e de produto costuma ter dígito ("C6 Bank", "99app", "Loja 2"), e isso não é valor.
+ * A diferença é a fronteira: número de valor não vem colado a letra (só às unidades "mil" e "k").
+ *
+ * Caso real (Matheus, 16/11/2026): depois de desfazer um lançamento ele escreveu "foi compra no cartão
+ * de débito dentro do cartão C6 Bank". O "6" do C6 fez a trava de conferência de valor disparar, e a
+ * Granninha respondeu "só para conferir: o valor é quanto?" em vez de anotar. Ele repetiu a frase,
+ * recebeu a mesma pergunta e desistiu — o gasto nunca foi registrado.
+ */
+export function temNumeroDeValor(t: string): boolean {
+  // Número não precedido por letra/dígito e não seguido por letra, exceto "mil" e "k".
+  return /(?<![\p{L}\d])\d[\d.,]*(?:\s*(?:mil|k)\b)?(?![\p{L}\d])/u.test(t.toLowerCase())
+}
+
 /** O valor lido bate com algum número da frase (ou é o total de N parcelas de um número da frase)? */
 export function valorConfere(texto: string, valor: number, parcelas?: number | null): boolean {
   const ns = numerosDoTexto(texto)
