@@ -28,6 +28,22 @@ DIAS = int(sys.argv[1]) if len(sys.argv) > 1 else 30
 MIDIA = {"audio", "foto", "pdf"}
 
 
+def instante(iso):
+    """
+    Timestamp do Postgres, tolerante. O `/usr/bin/python3` do macOS é 3.9 e o `fromisoformat` dele só
+    aceita fração de segundo com 3 ou 6 dígitos; o Postgres manda sem zeros à direita
+    ("...44.95071+00:00") e isso derruba o script. Normaliza a fração e aceita Z e offset sem ":".
+    """
+    s = str(iso).strip().replace("z", "Z").replace("Z", "+00:00")
+    m = re.match(r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:\.(\d+))?([+-]\d{2}:?\d{2})?$", s)
+    if not m:
+        raise ValueError("timestamp que não reconheço: %r" % iso)
+    base, frac, fuso = m.group(1), m.group(2) or "", m.group(3) or "+00:00"
+    if ":" not in fuso:
+        fuso = fuso[:3] + ":" + fuso[3:]
+    return datetime.fromisoformat("%s.%s%s" % (base.replace(" ", "T"), (frac + "000000")[:6], fuso))
+
+
 def do_zshrc(nome):
     caminho = os.path.expanduser("~/.zshrc")
     if not os.path.exists(caminho):
@@ -113,8 +129,8 @@ suspeitos = {"midia": [], "texto": [], "misto": []}
 for chave, lista in por_chave.items():
     lista.sort(key=lambda x: x["criado_em"])
     for a, b in zip(lista, lista[1:]):
-        ta = datetime.fromisoformat(a["criado_em"].replace("Z", "+00:00"))
-        tb = datetime.fromisoformat(b["criado_em"].replace("Z", "+00:00"))
+        ta = instante(a["criado_em"])
+        tb = instante(b["criado_em"])
         if (tb - ta).total_seconds() > 300:
             continue
         oa, ob = (a.get("origem") or "texto"), (b.get("origem") or "texto")
