@@ -6,6 +6,7 @@
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, usoDoMes } from './banco.ts'
 import { despedidaDe, RESPOSTA_DESPEDIDA } from './despedida.ts'
 import { ErroIA, MARCA_RETOMAR, recadoDaFalhaIA, valeRetomarIA } from './ia-estado.ts'
+import { avisoDeRetirada, categoriaDeNegocio, ehDoNegocio } from './retirada.ts'
 import { faturaDe } from './cartao.ts'
 import { executar, reverter, ultimaComEfeito, ultimaMensagem, type Efeitos, type Origem } from './executar.ts'
 import { baixarMidia } from './gateway.ts'
@@ -510,6 +511,30 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     if (r) return resolverDuplicata(cliente.id, ctx, pend.acoes, pend.anteriorMsg ?? '', r, pend.origem ?? tipo, pend.anexo ?? null, texto, tokens)
   }
 
+  // "NEGÓCIO" sozinho conserta a última retirada. A Granninha avisou na confirmação que tinha anotado
+  // como gasto seu; isto é a correção de um toque, sem precisar desfazer e lançar de novo. Como a
+  // lembrança sai do próprio histórico, da próxima vez ela já acerta sem perguntar.
+  if (ehDoNegocio(texto)) {
+    const ult = await ultimaComEfeito(cliente.id)
+    const ids = ult?.efeitos.lancamentos ?? []
+    if (ids.length) {
+      const lancs = await lancsDe(cliente.id, ids)
+      const pessoais = lancs.filter((l) => l.pessoal)
+      if (pessoais.length) {
+        for (const l of pessoais) {
+          const up = await sb.from('lancamentos').update({ pessoal: false, categoria_id: categoriaDeNegocio(ctx, l.categoria_id) }).eq('user_id', cliente.id).eq('id', l.id)
+          falhou(up.error, 'mudar retirada para gasto do negócio')
+        }
+        const quais = pessoais.map((l) => l.descricao).filter(Boolean).join(', ')
+        return {
+          status: 'ok',
+          resposta: `Pronto, mudei${quais ? ` "${quais}"` : ''} para gasto do negócio. Da próxima vez eu já anoto assim.${await saldoDepois(cliente.id, null)}`,
+          efeitos: {}, intencao: 'virar_negocio', texto, tokens,
+        }
+      }
+    }
+  }
+
   // Resposta à pergunta "quer desfazer o anterior também?" depois de dois DESFAZER seguidos.
   if (pend?.tipo === 'desfazer_mais' && fresco && pend.anteriorMsg) {
     const r = respostaSimNao(texto)
@@ -628,7 +653,9 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     }
     const anteriores = it.acoes.some((a) => a.tipo_acao === 'criar_categoria') ? ultima?.efeitos : undefined
     const r = await executar(cliente.id, ctx, it.acoes, origemFinal, anexo, anteriores)
-    return { status: 'ok', resposta: `${r.linhas.join('\n\n')}${await saldoDepois(cliente.id, it.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
+    // Se ELA decidiu que o gasto foi seu e não do negócio, diz isso e oferece a correção de um toque.
+    const aviso = avisoDeRetirada(it.acoes, ctx, forcar.pessoal)
+    return { status: 'ok', resposta: `${r.linhas.join('\n\n')}${aviso}${await saldoDepois(cliente.id, it.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
   }
   if (it.intencao === 'desfazer') {
     const ult = await ultimaComEfeito(cliente.id)
