@@ -22,6 +22,8 @@ export const E = {
   recusarColuna: null as string | null,
   /** atrasa a resposta deste POST (tabela), para provar que alguém esperou por ele */
   atrasar: null as { tabela: string; ms: number } | null,
+  /** caminhos gravados no storage (comprovantes) */
+  storage: [] as string[],
 }
 export const pedidos: string[] = []
 
@@ -65,6 +67,11 @@ const db = createServer(async (req, res) => {
   const enviar = (st: number, corpo: unknown, cab: Record<string, string> = {}) => {
     res.writeHead(st, { 'Content-Type': 'application/json', ...cab })
     res.end(corpo === undefined ? '' : JSON.stringify(corpo))
+  }
+  // Storage (comprovante): não é tabela e o corpo é binário, então nem chega ao JSON.parse.
+  if (url.pathname.includes('/storage/v1/')) {
+    E.storage.push(url.pathname.split('/object/').pop() ?? url.pathname)
+    return enviar(200, { Key: E.storage[E.storage.length - 1] })
   }
   if (E.falharSelect && req.method === 'GET' && url.searchParams.get('select') === E.falharSelect) return enviar(500, { message: 'banco falso: leitura provocada', code: 'XX000' })
   if (E.falharTabela === tabela) return enviar(500, { message: 'banco falso: falha provocada', code: 'XX000' })
@@ -156,11 +163,15 @@ export const SEM_ACAO = { intencao: 'outro', acoes: [], pergunta: null, correcao
 export const ia = {
   /** Texto da mensagem (sem o invólucro) → o que a "IA" entendeu. */
   regras: [] as [RegExp, unknown][],
-  chamadas: { interpretacao: 0, resposta: 0 },
+  chamadas: { interpretacao: 0, resposta: 0, transcricao: 0, documento: 0 },
   ultimoResumo: null as null | Record<string, any>,
   /** Prompt de sistema da última interpretação (para provar o que a IA recebeu). */
   ultimoSistema: '',
   queda: false,
+  /** O que a transcrição de áudio devolve. */
+  transcricao: 'paguei 50 de gasolina',
+  /** O que a leitura de foto/PDF devolve (formato Leitura de midia.ts). */
+  documento: { tipo: 'comprovante', meio: 'pix', vencimento: null, resumo: 'Comprovante de R$ 50', transacoes: [{ descricao: 'Gasolina', valor: 50, movimento: 'saida', data: null }] } as Record<string, unknown>,
 }
 const iaServer = createServer(async (req, res) => {
   const txt = await new Promise<string>((ok) => {
@@ -172,6 +183,12 @@ const iaServer = createServer(async (req, res) => {
     res.writeHead(500, { 'Content-Type': 'application/json' })
     return res.end(JSON.stringify({ error: 'IA fora do ar (provocado pelo teste)' }))
   }
+  // Transcrição de áudio: multipart, não JSON.
+  if ((req.url ?? '').includes('/audio/transcriptions')) {
+    ia.chamadas.transcricao++
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    return res.end(JSON.stringify({ text: ia.transcricao, usage: { type: 'duration', seconds: 3 } }))
+  }
   const b = JSON.parse(txt)
   const nome = b.response_format.json_schema.name as string
   const usuario = String(b.messages[1].content)
@@ -180,6 +197,9 @@ const iaServer = createServer(async (req, res) => {
     ia.chamadas.interpretacao++
     ia.ultimoSistema = String(b.messages[0].content)
     saida = ia.regras.find(([re]) => re.test(usuario))?.[1] ?? SEM_ACAO
+  } else if (nome === 'documento') {
+    ia.chamadas.documento++
+    saida = ia.documento
   } else if (nome === 'resposta') {
     ia.chamadas.resposta++
     const m = /RESUMO \(JSON\):\n([\s\S]*?)\n\nPERGUNTA:/.exec(usuario)
@@ -190,8 +210,23 @@ const iaServer = createServer(async (req, res) => {
   res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(saida) } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }))
 })
 
+/* ---------------- gateway falso (só a mídia recebida) ---------------- */
+
+const gw = createServer((req, res) => {
+  const u = req.url ?? ''
+  if (/^\/api\/media\//.test(u)) {
+    res.writeHead(200, { 'Content-Type': u.endsWith('.ogg') ? 'audio/ogg' : 'image/jpeg' })
+    return res.end(Buffer.from(u.endsWith('.ogg') ? 'audio-falso' : 'imagem-falsa'))
+  }
+  res.writeHead(404).end()
+})
+
 await new Promise<void>((ok) => db.listen(0, '127.0.0.1', ok))
 await new Promise<void>((ok) => iaServer.listen(0, '127.0.0.1', ok))
+await new Promise<void>((ok) => gw.listen(0, '127.0.0.1', ok))
+process.env.WA_GATEWAY_URL = `http://127.0.0.1:${(gw.address() as AddressInfo).port}`
+process.env.WA_GATEWAY_API_KEY = 'falsa'
+process.env.WA_SESSAO = 'teste'
 process.env.SUPABASE_URL = `http://127.0.0.1:${(db.address() as AddressInfo).port}`
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'falsa'
 process.env.OPENAI_API_KEY = 'falsa'
@@ -213,11 +248,14 @@ export function semear() {
   E.tabelas = {}
   E.falharTabela = null
   E.falharSelect = null
+  E.storage = []
   ia.regras = []
-  ia.chamadas = { interpretacao: 0, resposta: 0 }
+  ia.chamadas = { interpretacao: 0, resposta: 0, transcricao: 0, documento: 0 }
   ia.ultimoResumo = null
   ia.ultimoSistema = ''
   ia.queda = false
+  ia.transcricao = 'paguei 50 de gasolina'
+  ia.documento = { tipo: 'comprovante', meio: 'pix', vencimento: null, resumo: 'Comprovante de R$ 50', transacoes: [{ descricao: 'Gasolina', valor: 50, movimento: 'saida', data: null }] }
   const cats = (u: string) => [
     { user_id: u, id: 'outras-saidas', nome: 'Outros gastos', tipo: 'saida', pessoal: false },
     { user_id: u, id: 'outras-entradas', nome: 'Outras entradas', tipo: 'entrada', pessoal: false },
@@ -256,6 +294,21 @@ export const msgCompleta = async (texto: string) => {
   return { resposta: r.resposta ?? '', status: r.status }
 }
 export const msg = async (texto: string) => (await msgCompleta(texto)).resposta
+
+const evMidia = (tipo: 'AUDIO' | 'IMAGE', arquivo: string, caption = '') => ({
+  event: 'message.received',
+  data: { key: { id: `M${Date.now()}${++seq}`, remoteJid: `${NUM}@s.whatsapp.net`, fromMe: false }, from: `${NUM}@s.whatsapp.net`, isGroup: false, chatType: 'PERSONAL', type: tipo, fileUrl: `/api/media/${arquivo}`, caption },
+})
+/** Áudio: o conteúdo vem de `ia.transcricao`. */
+export const msgAudio = async (arquivo = 'a1.ogg') => {
+  const r = await processar(evMidia('AUDIO', arquivo) as Parameters<typeof processar>[0])
+  return { resposta: r.resposta ?? '', status: r.status }
+}
+/** Foto de comprovante: o conteúdo vem de `ia.documento`. */
+export const msgFoto = async (arquivo = 'f1.jpg', caption = '') => {
+  const r = await processar(evMidia('IMAGE', arquivo, caption) as Parameters<typeof processar>[0])
+  return { resposta: r.resposta ?? '', status: r.status }
+}
 export const lancsU1 = () => E.tabelas.lancamentos.filter((l) => l.user_id === U1)
 export const saldoNoBanco = (carteira: string) => {
   const c = E.tabelas.carteiras.find((x) => x.user_id === U1 && x.id === carteira)!

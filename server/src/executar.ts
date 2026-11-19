@@ -213,7 +213,7 @@ export async function reverter(userId: string, ef: Efeitos) {
 /** Última mensagem do cliente que gravou algo e ainda não foi desfeita (até 3 dias atrás). */
 export async function ultimaComEfeito(userId: string) {
   const desde = new Date(Date.now() - 3 * 86400_000).toISOString()
-  const { data, error } = await sb.from('mensagens').select('id,texto,efeitos,criado_em').eq('user_id', userId).eq('status', 'ok').eq('desfeita', false).gte('criado_em', desde).order('criado_em', { ascending: false }).limit(1).maybeSingle()
+  const { data, error } = await sb.from('mensagens').select('id,texto,tipo,efeitos,criado_em').eq('user_id', userId).eq('status', 'ok').eq('desfeita', false).gte('criado_em', desde).order('criado_em', { ascending: false }).limit(1).maybeSingle()
   falhou(error, 'ultimaComEfeito')
-  return data as { id: string; texto: string; efeitos: Efeitos; criado_em: string } | null
+  return data as { id: string; texto: string; tipo: string; efeitos: Efeitos; criado_em: string } | null
 }

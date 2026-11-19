@@ -13,7 +13,7 @@ import { lerDocumento, textoDoDocumento, type Transacao } from './midia.ts'
 import { transcrever, type Uso } from './openai.ts'
 import { responderPergunta } from './perguntas.ts'
 import { carregarBase } from './base.ts'
-import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, perguntaDuplicata, respostaDuplicata, type LancAntigo } from './duplicata.ts'
+import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, pareceReenvio, perguntaDuplicata, perguntaReenvio, respostaDuplicata, type LancAntigo } from './duplicata.ts'
 import { ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta } from './consultas.ts'
 import { foraDoDisponivel } from './cartao.ts'
 
@@ -433,6 +433,19 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     if (r) return resolverDuplicata(cliente.id, ctx, pend.acoes, pend.anteriorMsg ?? '', r, pend.origem ?? tipo, pend.anexo ?? null, texto, tokens)
   }
 
+  // Resposta à pergunta de reenvio ("já anotei isso há 2 minutos, é o mesmo?"): 1 não grava nada,
+  // 2 grava como lançamento novo. Nada foi gravado antes, então "1" é só deixar como está.
+  if (pend?.tipo === 'reenvio' && fresco && pend.acoes?.length) {
+    const r = respostaDuplicata(texto)
+    if (r === 'corrigir') {
+      return { status: 'ok', resposta: 'Então deixei só o de antes, sem anotar de novo.', efeitos: {}, intencao: 'acoes', texto, tokens }
+    }
+    if (r === 'novo') {
+      const ex = await executar(cliente.id, ctx, pend.acoes, pend.origem ?? tipo, pend.anexo ?? null)
+      return { status: 'ok', resposta: `${ex.linhas.join('\n\n')}${await saldoDepois(cliente.id, pend.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: ex.efeitos, intencao: 'acoes', texto, tokens }
+    }
+  }
+
   if (pend?.tipo === 'importar_fatura' && fresco) {
     if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei a fatura.', efeitos: {}, intencao: 'fatura', texto, tokens }
     const esc = opcaoEscolhida(texto, pend.opcoes ?? [])
@@ -492,18 +505,29 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
       await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta: it.perguntar, opcoes: it.opcoes, forcar, documento, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
       return { status: 'pergunta', resposta: it.perguntar, efeitos: {}, intencao: 'acoes', texto, tokens }
     }
-    // Trava: o que ia ser gravado é igual ao último lançamento e a frase soa como correção? Pergunta antes de gravar.
-    if (!documento && !anexo) {
-      const ult = await ultimaComEfeito(cliente.id)
-      if (ult && Date.now() - new Date(ult.criado_em).getTime() < JANELA_MIN * 60_000 && devePerguntar(texto, ult.texto)) {
-        const antigo = pareceMesmoLancamento(await lancsDe(cliente.id, ult.efeitos.lancamentos ?? []), it.acoes)
+    // Travas contra lançar duas vezes a mesma coisa. Nada é gravado antes de a pessoa responder.
+    const ultima = await ultimaComEfeito(cliente.id)
+    const idade = ultima ? Date.now() - new Date(ultima.criado_em).getTime() : Infinity
+    if (ultima && idade < JANELA_MIN * 60_000) {
+      const antigos = await lancsDe(cliente.id, ultima.efeitos.lancamentos ?? [])
+      // Mídia primeiro: o mesmo áudio ou a mesma foto mandados de novo porque pareceu que travou.
+      // (Áudio com transcrição idêntica também cairia na trava de texto abaixo, mas a pergunta certa
+      // aqui é "já anotei isso, é o mesmo?", não "quer corrigir o anterior?".)
+      const reenvio = pareceReenvio(origemFinal, ultima.tipo, antigos, it.acoes)
+      if (reenvio) {
+        await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'reenvio', acoes: it.acoes, anteriorMsg: ultima.id, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
+        return { status: 'pergunta', resposta: perguntaReenvio(reenvio, ctx, Math.floor(idade / 60_000)), efeitos: {}, intencao: 'acoes', texto, tokens }
+      }
+      // Texto: igual ao último e a frase soa como correção ("não, esse foi de...").
+      if (!documento && !anexo && devePerguntar(texto, ultima.texto)) {
+        const antigo = pareceMesmoLancamento(antigos, it.acoes)
         if (antigo) {
-          await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'duplicata', acoes: it.acoes, anteriorMsg: ult.id, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
+          await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'duplicata', acoes: it.acoes, anteriorMsg: ultima.id, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
           return { status: 'pergunta', resposta: perguntaDuplicata(antigo, ctx), efeitos: {}, intencao: 'acoes', texto, tokens }
         }
       }
     }
-    const anteriores = it.acoes.some((a) => a.tipo_acao === 'criar_categoria') ? (await ultimaComEfeito(cliente.id))?.efeitos : undefined
+    const anteriores = it.acoes.some((a) => a.tipo_acao === 'criar_categoria') ? ultima?.efeitos : undefined
     const r = await executar(cliente.id, ctx, it.acoes, origemFinal, anexo, anteriores)
     return { status: 'ok', resposta: `${r.linhas.join('\n\n')}${await saldoDepois(cliente.id, it.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
   }

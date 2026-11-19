@@ -57,6 +57,26 @@ export function devePerguntar(textoNovo: string, textoAntigo: string): boolean {
   return temPistaDeCorrecao(textoNovo) || mesmoTexto(textoNovo, textoAntigo)
 }
 
+const MIDIA = new Set(['audio', 'foto', 'pdf'])
+
+/**
+ * Reenvio da MESMA mídia. Áudio e foto demoram alguns segundos para virar lançamento; a pessoa acha
+ * que travou e manda de novo, e aí o mesmo gasto entra duas vezes.
+ *
+ * Em texto isso não vale (dois cortes de R$ 40 seguidos são duas vendas de verdade, e a mesma frase
+ * repetida já cai em `devePerguntar`). Em mídia, mandar duas vezes o mesmo valor em poucos minutos é
+ * quase sempre reenvio — mas não dá para descartar calado, então a Granninha pergunta.
+ */
+export function pareceReenvio(origemNova: string, origemAntiga: string | null | undefined, antigos: LancAntigo[], novas: Acao[]): LancAntigo | null {
+  if (!MIDIA.has(origemNova) || !origemAntiga || !MIDIA.has(origemAntiga)) return null
+  return pareceMesmoLancamento(antigos, novas)
+}
+
+export function perguntaReenvio(a: LancAntigo, ctx: Contexto, minutos: number): string {
+  const quando = minutos < 1 ? 'agora mesmo' : `há ${minutos} ${minutos === 1 ? 'minuto' : 'minutos'}`
+  return `Já anotei ${quando}: ${descreverAntigo(a, ctx)}. É o mesmo?\n\n1. Sim, é o mesmo (não anoto de novo)\n2. Não, é outro lançamento\n\nResponda com o número.`
+}
+
 const nomeCat = (ctx: Contexto, id: string | null) => ctx.categorias.find((c) => c.id === id)?.nome ?? 'Sem categoria'
 const nomeCart = (ctx: Contexto, id: string) => ctx.carteiras.find((c) => c.id === id)?.nome ?? 'carteira'
 
