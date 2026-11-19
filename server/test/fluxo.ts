@@ -85,13 +85,20 @@ async function mandar(de: string, d: Record<string, unknown>, opt: { id?: string
  * o resultado (o lançamento fechado com o valor certo), e as perguntas feitas vão na mensagem de erro.
  */
 async function responderAte(de: string, conteudo: string, limite = 4) {
+  // O diário guarda a conversa inteira (o que foi mandado e o que ela respondeu). Na rodada de 19/11
+  // um caso falhou aqui e a mensagem de erro só tinha as PERGUNTAS, o que não permitia distinguir
+  // "a resposta não chegou" de "a resposta veio errada". Falha de diagnóstico não se repete.
+  const diario: string[] = []
+  const trecho = (t: string) => (t ? t.replace(/\n/g, ' / ').slice(0, 90) : '(NADA — resposta não chegou no tempo)')
   let r = await mandar(de, { content: conteudo })
+  diario.push(`eu: "${conteudo}" -> ela: ${trecho(r.texto)}`)
   const perguntas: string[] = []
   for (let i = 0; i < limite && /Responda com o n[úu]mero/i.test(r.texto); i++) {
     perguntas.push(r.texto.split('\n')[0].slice(0, 60))
     r = await mandar(de, { content: '1' })
+    diario.push(`eu: "1" -> ela: ${trecho(r.texto)}`)
   }
-  return { texto: r.texto, perguntas }
+  return { texto: r.texto, perguntas, conversa: diario.join(' || ') }
 }
 
 async function caso(nome: string, fn: () => Promise<void>) {
@@ -181,7 +188,7 @@ try {
     assert.match(r1.texto, /valor|quanto/i)
     assert.equal((await lancs(uid)).length, 0)
     const r = await responderAte(FONE, '89')
-    assert.match(r.texto, /saída de R\$ 89,00/, 'perguntas feitas: ' + r.perguntas.join(' | '))
+    assert.match(r.texto, /saída de R\$ 89,00/, 'conversa: ' + r.conversa)
     const ls = await lancs(uid)
     assert.equal(ls.length, 1)
     assert.equal(Number(ls[0].valor), 89)
@@ -363,7 +370,7 @@ try {
   await caso('cortesia (parceiro liberado): grava normal', async () => {
     await sb.from('assinaturas').update({ status: 'cortesia' }).eq('user_id', uid)
     const r = await responderAte(FONE, 'paguei 10 de café no pix')
-    assert.match(r.texto, /saída de R\$ 10,00/, 'perguntas feitas: ' + r.perguntas.join(' | '))
+    assert.match(r.texto, /saída de R\$ 10,00/, 'conversa: ' + r.conversa)
   })
   await caso('mensagem de grupo e mensagem enviada por ela mesma são ignoradas', async () => {
     const n = enviados.length
@@ -381,7 +388,7 @@ try {
       const m = (await sb.from('mensagens').select('status,erro').eq('id', r.id).single()).data!
       assert.equal(m.status, 'ignorada')
       const r2 = await responderAte(FONE, 'paguei 12 de pão no pix')
-      assert.match(r2.texto, /R\$ 12,00/, 'perguntas feitas: ' + r2.perguntas.join(' | '))
+      assert.match(r2.texto, /R\$ 12,00/, 'conversa: ' + r2.conversa)
     } finally {
       delete process.env.WA_SOMENTE_NUMEROS
     }
@@ -460,7 +467,7 @@ try {
   })
   await caso('pergunta no meio não rouba o DESFAZER', async () => {
     const r1 = await responderAte(FONE, 'paguei 61 de luz no pix')
-    assert.match(r1.texto, /R\$ 61,00/, 'perguntas feitas: ' + r1.perguntas.join(' | '))
+    assert.match(r1.texto, /R\$ 61,00/, 'conversa: ' + r1.conversa)
     await mandar(FONE, { content: 'quanto sobrou esse mês?' })
     const r3 = await mandar(FONE, { content: 'desfazer' })
     assert.match(r3.texto, /desfiz/)
