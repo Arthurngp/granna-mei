@@ -41,7 +41,12 @@ export interface Saida {
   status: string
   para?: string
   resposta?: string
+  /** Id da mensagem no WhatsApp, para o servidor registrar se a resposta não foi entregue. */
+  msgId?: string
 }
+
+/** Marca, no campo `erro`, que esta mensagem JÁ começou a ser processada. Ver presas.ts. */
+export const PROCESSANDO = 'processando'
 
 type Status = 'ok' | 'pergunta' | 'ignorada' | 'bloqueada' | 'erro' | 'limite'
 
@@ -68,31 +73,73 @@ const AJUDA = `É só me mandar do seu jeito:
 "comprei 1.200 de material em 4x"
 Também entendo áudio, foto do comprovante e PDF. E você pode perguntar: "quanto sobrou esse mês?"`
 
-export async function processar(ev: EventoGateway): Promise<Saida> {
-  if (ev.event !== 'message.received') return { status: 'ignorada' }
+/**
+ * Os cortes que valem antes de gravar qualquer coisa: evento que não é mensagem recebida, mensagem
+ * que a própria Granninha mandou, grupo, ou falta de id/número. Usado pelo registro e pelo processar.
+ */
+export function dadosDaChegada(ev: EventoGateway): { msgId: string; telefone: string; de: string; tipo: Origem | 'outro' } | null {
+  if (ev.event !== 'message.received') return null
   const d = ev.data ?? {}
-  if (d.key?.fromMe || d.isGroup || (d.chatType && d.chatType !== 'PERSONAL')) return { status: 'ignorada' }
+  if (d.key?.fromMe || d.isGroup || (d.chatType && d.chatType !== 'PERSONAL')) return null
   const msgId = d.key?.id
   const de = d.from || d.key?.remoteJid || ''
   const telefone = de.split('@')[0].split(':')[0].replace(/\D/g, '')
-  if (!msgId || !telefone || !chaveDoNumero(de)) return { status: 'ignorada' }
+  if (!msgId || !telefone || !chaveDoNumero(de)) return null
+  return { msgId, telefone, de, tipo: tipoDaMensagem(d) }
+}
 
-  // Modo teste: com WA_SOMENTE_NUMEROS preenchido, só esses números conversam. O resto é ignorado em silêncio
-  // (sem resposta, sem IA, sem gravar nada além do registro de que chegou).
-  const liberados = (process.env.WA_SOMENTE_NUMEROS ?? '').split(',').map((n) => chaveDoNumero(n.trim())).filter(Boolean)
-  if (liberados.length && !liberados.includes(chaveDoNumero(de))) {
-    await sb.from('mensagens').insert({ id: msgId, telefone, tipo: 'outro', texto: '', status: 'ignorada', resposta: null, erro: 'fora da lista de números liberados' })
-    return { status: 'ignorada' }
+let semColunaEvento = false
+/** Só para o teste: volta a tentar gravar a coluna `evento`. */
+export function tentarColunaEvento() {
+  semColunaEvento = false
+}
+
+/**
+ * Grava a chegada ANTES de o webhook responder 200. O gateway não reenvia: mensagem que só existe
+ * na memória do processo desaparece sem rastro no deploy (que republica os 4 apps a cada merge).
+ * Guarda o evento inteiro, porque sem o fileUrl não há como retomar áudio nem foto.
+ */
+export async function registrarChegada(ev: EventoGateway): Promise<'nova' | 'duplicada' | 'ignorar'> {
+  const c = dadosDaChegada(ev)
+  if (!c) return 'ignorar'
+  const d = ev.data ?? {}
+  const linha: Record<string, unknown> = {
+    id: c.msgId, telefone: c.telefone, tipo: c.tipo === 'outro' ? 'outro' : c.tipo, texto: (d.content ?? d.caption ?? '').slice(0, 2000),
   }
+  for (let i = 0; i < 2; i++) {
+    const ins = await sb.from('mensagens').insert(semColunaEvento ? linha : { ...linha, evento: ev })
+    if (!ins.error) return 'nova'
+    if (ins.error.code === '23505') return 'duplicada'
+    // Antes da migration do `evento` a coluna não existe: grava sem ela e não tenta mais (um insert por mensagem).
+    const semColuna = ins.error.code === 'PGRST204' || ins.error.code === '42703'
+    if (!semColunaEvento && semColuna) {
+      semColunaEvento = true
+      console.error('[mensagens] coluna `evento` não existe: retomada de áudio e foto fica de fora até a migration rodar')
+      continue
+    }
+    falhou(ins.error, 'registrar mensagem')
+  }
+  return 'nova'
+}
 
-  const tipo = tipoDaMensagem(d)
+export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolean } = {}): Promise<Saida> {
+  const c = dadosDaChegada(ev)
+  if (!c) return { status: 'ignorada' }
+  const { msgId, telefone, de, tipo } = c
+  const d = ev.data ?? {}
+
+  // Quem chama pelo webhook já gravou a chegada antes de responder ao gateway.
+  if (!opts.jaRegistrada && (await registrarChegada(ev)) === 'duplicada') return { status: 'duplicada' }
+
+  // Trava de "começou": só um processo trabalha nesta mensagem, e o que já começou nunca é
+  // reprocessado. DESFAZER e correção terminam com efeitos vazios, então "não gravou nada" não serve
+  // de sinal — retomar um desfazer desfaria um segundo lançamento. Ver presas.ts.
+  const claim = await sb.from('mensagens').update({ erro: PROCESSANDO }).eq('id', msgId).eq('status', 'recebida').is('erro', null).select('id')
+  falhou(claim.error, 'marcar mensagem em processamento')
+  if (!claim.data?.length) return { status: 'duplicada', msgId }
+
   const t0 = Date.now()
   let tokens: Uso = { entrada: 0, saida: 0, audio: 0 }
-
-  // Registro com o id do WhatsApp: se a mesma mensagem chegar de novo, para aqui.
-  const ins = await sb.from('mensagens').insert({ id: msgId, telefone, tipo: tipo === 'outro' ? 'outro' : tipo, texto: (d.content ?? d.caption ?? '').slice(0, 2000) })
-  if (ins.error?.code === '23505') return { status: 'duplicada' }
-  falhou(ins.error, 'registrar mensagem')
 
   let userId: string | null = null
   let status: Status = 'ok'
@@ -102,7 +149,18 @@ export async function processar(ev: EventoGateway): Promise<Saida> {
   let textoFinal = d.content ?? ''
   let erro: string | null = null
 
-  try {
+  // Modo teste: com WA_SOMENTE_NUMEROS preenchido, só esses números conversam. O resto é ignorado em
+  // silêncio (sem resposta, sem IA), mas a linha sai de "recebida" para a varredura não voltar nela.
+  const liberados = (process.env.WA_SOMENTE_NUMEROS ?? '').split(',').map((n) => chaveDoNumero(n.trim())).filter(Boolean)
+  const fora = liberados.length > 0 && !liberados.includes(chaveDoNumero(de))
+  if (fora) {
+    status = 'ignorada'
+    erro = 'fora da lista de números liberados'
+    textoFinal = ''
+  }
+
+  // Número fora da lista não passa por aqui: nada de banco, nada de IA.
+  if (!fora) try {
     const cliente = await clientePorNumero(de)
     if (!cliente) {
       ;({ status, resposta, userId } = await numeroDesconhecido(telefone, de, d.content ?? ''))
@@ -150,7 +208,7 @@ export async function processar(ev: EventoGateway): Promise<Saida> {
     tokens: tokens.entrada + tokens.saida, tokens_entrada: tokens.entrada, tokens_saida: tokens.saida, audio_tokens: tokens.audio || null, audio_seg: tokens.audioSeg ?? null,
   }).eq('id', msgId)
   if (up.error) console.error('[granninha] atualizar mensagem', up.error.message)
-  return { status, para: telefone, resposta }
+  return { status, para: telefone, resposta, msgId }
 }
 
 /**

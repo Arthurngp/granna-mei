@@ -16,16 +16,37 @@ function cabecalhos(): Record<string, string> {
 const base = () => env('WA_GATEWAY_URL').replace(/\/+$/, '')
 const sessao = () => env('WA_SESSAO', 'granninha')
 
-/** Manda texto para um número ("5581987654321" ou JID). */
-export async function enviarTexto(para: string, texto: string): Promise<void> {
+export const TENTATIVAS_ENVIO = Number(process.env.ENVIO_TENTATIVAS ?? 3)
+const ESPERA_ENVIO_MS = Number(process.env.ENVIO_ESPERA_MS ?? 1000)
+
+/**
+ * Manda texto para um número ("5581987654321" ou JID).
+ * Tenta de novo quando a falha pode ser passageira (gateway reiniciando, rede, 5xx, 429): a cliente
+ * que não recebe resposta acha que não foi anotado e manda de novo, e aí sim vira lançamento em dobro.
+ * 4xx de pedido inválido não se repete, porque daria exatamente o mesmo erro.
+ */
+export async function enviarTexto(para: string, texto: string, tentativas = TENTATIVAS_ENVIO): Promise<void> {
   const jid = para.includes('@') ? para : `${para.replace(/\D/g, '')}@s.whatsapp.net`
-  const r = await fetch(`${base()}/api/messages/${sessao()}/${encodeURIComponent(jid)}/send`, {
-    method: 'POST',
-    headers: cabecalhos(),
-    body: JSON.stringify({ message: { text: texto } }),
-    signal: AbortSignal.timeout(15_000),
-  })
-  if (!r.ok) throw new Error(`gateway envio ${r.status}: ${(await r.text()).slice(0, 200)}`)
+  let ultimo = ''
+  for (let i = 0; i < Math.max(1, tentativas); i++) {
+    if (i) await new Promise((ok) => setTimeout(ok, ESPERA_ENVIO_MS * 2 ** (i - 1)))
+    let st = 0
+    try {
+      const r = await fetch(`${base()}/api/messages/${sessao()}/${encodeURIComponent(jid)}/send`, {
+        method: 'POST',
+        headers: cabecalhos(),
+        body: JSON.stringify({ message: { text: texto } }),
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (r.ok) return
+      st = r.status
+      ultimo = `gateway envio ${r.status}: ${(await r.text()).slice(0, 200)}`
+    } catch (e) {
+      ultimo = `gateway envio: ${(e as Error).message}`
+    }
+    if (st >= 400 && st < 500 && st !== 408 && st !== 429) break
+  }
+  throw new Error(ultimo || 'gateway envio: falhou')
 }
 
 /** Baixa a mídia que o gateway guardou ("/api/media/arquivo.ogg"). Limite de 15 MB. */

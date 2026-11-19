@@ -13,8 +13,17 @@ const PKS: Record<string, string[]> = {
   mensagens: ['id'], conversas: ['telefone'], perfis: ['id'], assinaturas: ['user_id'],
   categorias: ['user_id', 'id'], carteiras: ['user_id', 'id'], lancamentos: ['user_id', 'id'], fixas: ['user_id', 'id'], contas: ['user_id', 'id'],
 }
-export const E = { tabelas: {} as Record<string, Linha[]>, falharTabela: null as string | null, /** falha só a leitura cujo `select` é exatamente este */ falharSelect: null as string | null }
-const pedidos: string[] = []
+export const E = {
+  tabelas: {} as Record<string, Linha[]>,
+  falharTabela: null as string | null,
+  /** falha só a leitura cujo `select` é exatamente este */
+  falharSelect: null as string | null,
+  /** finge que a coluna não existe (banco sem a migration): recusa insert e select que a citem */
+  recusarColuna: null as string | null,
+  /** atrasa a resposta deste POST (tabela), para provar que alguém esperou por ele */
+  atrasar: null as { tabela: string; ms: number } | null,
+}
+export const pedidos: string[] = []
 
 const comparar = (a: unknown, b: string) => {
   const sa = String(a)
@@ -59,6 +68,15 @@ const db = createServer(async (req, res) => {
   }
   if (E.falharSelect && req.method === 'GET' && url.searchParams.get('select') === E.falharSelect) return enviar(500, { message: 'banco falso: leitura provocada', code: 'XX000' })
   if (E.falharTabela === tabela) return enviar(500, { message: 'banco falso: falha provocada', code: 'XX000' })
+  // Banco sem a migration: a coluna não existe nem para gravar nem para ler.
+  if (E.recusarColuna) {
+    const col = E.recusarColuna
+    const noSelect = (url.searchParams.get('select') ?? '').split(',').includes(col)
+    const noCorpo = req.method === 'POST' && corpoTxt.includes(`"${col}":`)
+    if (noSelect || noCorpo) {
+      return enviar(400, { code: noCorpo ? 'PGRST204' : '42703', message: `Could not find the '${col}' column of '${tabela}' in the schema cache` })
+    }
+  }
   E.tabelas[tabela] ??= []
   const filtros = [...url.searchParams.entries()].filter(([k]) => !RESERVADOS.has(k))
   const filtra = () => E.tabelas[tabela].filter((l) => filtros.every(([k, v]) => casa(l, k, v)))
@@ -86,6 +104,7 @@ const db = createServer(async (req, res) => {
     return enviar(200, proj, cab)
   }
   const corpo = corpoTxt ? JSON.parse(corpoTxt) : null
+  if (req.method === 'POST' && E.atrasar?.tabela === tabela) await new Promise((ok) => setTimeout(ok, E.atrasar!.ms))
   if (req.method === 'POST') {
     const novas: Linha[] = Array.isArray(corpo) ? corpo : [corpo]
     const pk = PKS[tabela] ?? ['id']
@@ -98,7 +117,9 @@ const db = createServer(async (req, res) => {
       else if (ja && ignora) continue
       else if (ja) return enviar(409, { code: '23505', message: 'duplicate key value' })
       else {
-        const linha: Linha = { ...(tabela === 'mensagens' ? { status: 'ok', desfeita: false, efeitos: {} } : {}), criado_em: new Date().toISOString(), ...n }
+        // 'recebida' é o default real da coluna (migration 20261115190000): com 'ok' aqui, nenhuma
+        // linha pareceria presa e a trava de "começou" passaria sem ser exercitada.
+        const linha: Linha = { ...(tabela === 'mensagens' ? { status: 'recebida', desfeita: false, efeitos: {}, erro: null } : {}), criado_em: new Date().toISOString(), ...n }
         E.tabelas[tabela].push(linha)
         saida.push(linha)
       }
