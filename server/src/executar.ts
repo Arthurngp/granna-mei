@@ -161,7 +161,7 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         const r = await sb.from('contas').insert(contas)
         falhou(r.error, 'contas da fixa')
         ef.contas!.push(...contas.map((c) => c.id))
-        linhas.push(`Anotado: ${a.descricao} de ${brl(a.valor!)} todo dia ${dia}\nEu te lembro antes de vencer.`)
+        linhas.push(`Anotado: ${a.descricao} de ${brl(a.valor!)} todo dia ${dia}\nJá aparece em Contas, no painel.`)
       } else if (a.tipo_acao === 'parcelado') {
         const n = a.parcelas!
         const total = centavos(a.valor!)

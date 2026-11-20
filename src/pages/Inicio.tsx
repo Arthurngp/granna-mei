@@ -56,7 +56,7 @@ export default function Inicio() {
       const soma = atrasadas.reduce((a, c) => a + c.valor, 0)
       return { pose: 'sino', texto: <>Você tem <b>{atrasadas.length === 1 ? '1 conta atrasada' : `${atrasadas.length} contas atrasadas`}</b>, somando {brl(soma)}. Vale resolver hoje para não acumular.</> }
     }
-    if (fracMei >= 0.7) return { pose: 'mei', texto: <>Seu faturamento do ano já passou de <b>{pct(fracMei)} do limite do MEI</b>. Eu sigo de olho e te aviso antes de chegar perto do teto.</> }
+    if (fracMei >= 0.7) return { pose: 'mei', texto: <>Seu faturamento do ano já passou de <b>{pct(fracMei)} do limite do MEI</b>. Veja quanto falta em Meu MEI antes de chegar perto do teto.</> }
     if (tAnt.saiu > 0 && t.saiu < tAnt.saiu * 0.9) return { pose: 'crescimento', texto: <>Você está gastando <b>menos que no mês passado</b>. Continue assim que sobra mais no fim do mês.</> }
     return { pose: 'cafe', texto: <>Tudo em ordem por aqui. Fez uma venda ou pagou algo? <b>Me manda no WhatsApp</b> que eu anoto.</> }
   }, [s.contas, h, fracMei, t.saiu, tAnt.saiu])
