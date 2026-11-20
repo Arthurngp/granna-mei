@@ -148,3 +148,6 @@ img{display:block;max-width:100%}
 .palco3d > img.flutua{width:100px !important;right:-10px !important;bottom:-4px !important}
 .b6{flex-direction:column !important;align-items:flex-start !important;gap:16px !important}
 }
+
+/* Banner de cookies do Traqueamento: sem isso cai em Times (o shadow DOM reseta a heranca). */
+#trk-consent{font-family:Figtree,system-ui,-apple-system,"Segoe UI",sans-serif !important}

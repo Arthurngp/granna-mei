@@ -126,3 +126,6 @@
   footer .rodape-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; }
   footer .rodape-links a { color: #e7eaf5; text-decoration: none; font-weight: 600; padding: 6px 0; }
   footer .rodape-links a:hover { color: #fff; text-decoration: underline; }
+
+/* Banner de cookies do Traqueamento: sem isso cai em Times (o shadow DOM reseta a heranca). */
+#trk-consent{font-family:Figtree,system-ui,-apple-system,"Segoe UI",sans-serif !important}

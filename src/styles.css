@@ -1486,6 +1486,13 @@ select.entrada {
   align-content: start;
   gap: 16px;
 }
+/* Com o banner de cookies do rastreio aberto, ele cobre a base da tela no celular e escondia o botão
+   de criar conta de quem chega direto na página. A folga deixa o botão subir acima do banner. */
+@media (max-width: 959px) {
+  body:has(#trk-consent) .auth-caixa {
+    padding-bottom: calc(230px + var(--sab));
+  }
+}
 .auth-caixa > * {
   width: 100%;
   max-width: 420px;
@@ -2467,3 +2474,6 @@ select.entrada {
   color: var(--muted);
   font-weight: 600;
 }
+
+/* Banner de cookies do Traqueamento: sem isso cai em Times (o shadow DOM reseta a heranca). */
+#trk-consent{font-family:Figtree,system-ui,-apple-system,"Segoe UI",sans-serif !important}

@@ -1,8 +1,9 @@
 import { Eye, EyeOff, LoaderCircle } from 'lucide-react'
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FocusEvent, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Mascote, useAviso, type Pose } from '../components/ui'
 import { PRECO_MENSAL } from '../lib/config'
+import { evento } from '../lib/eventos'
 import { brl, hoje } from '../lib/format'
 import { useApp } from '../lib/store'
 
@@ -33,13 +34,13 @@ function Tela({ titulo, sub, pose, children }: { titulo: string; sub: string; po
 
 const emailOk = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e.trim())
 
-function CampoSenha({ valor, onChange, rotulo, dica, auto }: { valor: string; onChange: (v: string) => void; rotulo: string; dica?: string; auto: string }) {
+function CampoSenha({ valor, onChange, rotulo, dica, auto, campo = 'senha' }: { valor: string; onChange: (v: string) => void; rotulo: string; dica?: string; auto: string; campo?: string }) {
   const [ver, setVer] = useState(false)
   return (
     <label className="campo">
       <span>{rotulo}</span>
       <div style={{ position: 'relative' }}>
-        <input className="entrada" type={ver ? 'text' : 'password'} autoComplete={auto} value={valor} onChange={(e) => onChange(e.target.value)} style={{ paddingRight: 48 }} />
+        <input className="entrada" data-trk={campo} type={ver ? 'text' : 'password'} autoComplete={auto} value={valor} onChange={(e) => onChange(e.target.value)} style={{ paddingRight: 48 }} />
         <button type="button" className="icone-btn" style={{ position: 'absolute', right: 4, top: 4 }} aria-label={ver ? 'Esconder senha' : 'Mostrar senha'} onClick={() => setVer(!ver)}>
           {ver ? <EyeOff size={19} /> : <Eye size={19} />}
         </button>
@@ -100,7 +101,7 @@ export function Entrar() {
       <form className="pilha" onSubmit={enviar} noValidate>
         <label className="campo">
           <span>E-mail</span>
-          <input className="entrada" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" />
+          <input className="entrada" data-trk="email" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" />
         </label>
         <CampoSenha valor={senha} onChange={setSenha} rotulo="Senha" auto="current-password" />
         <Erro texto={erro} />
@@ -130,13 +131,29 @@ export function CriarConta() {
   const [erro, setErro] = useState('')
   const [ocupado, setOcupado] = useState(false)
 
+  const comecou = useRef(false)
+  useEffect(() => evento('cadastro_aberto'), [])
+  // Primeiro campo tocado: separa quem abriu a tela e foi embora de quem começou a preencher.
+  const aoFocar = (e: FocusEvent<HTMLFormElement>) => {
+    const alvo = e.target as HTMLElement
+    // Só conta campo de digitar ou marcar: o botão de enviar e o olho da senha também recebem foco.
+    if (comecou.current || alvo.tagName !== 'INPUT') return
+    comecou.current = true
+    evento('cadastro_iniciado', { campo: alvo.getAttribute('data-trk') || 'outro' })
+  }
+
   const enviar = async (e: FormEvent) => {
     e.preventDefault()
     setErro('')
-    if (nome.trim().length < 2) return setErro('Como podemos te chamar?')
-    if (!emailOk(email)) return setErro('Confira o e-mail: parece incompleto.')
-    if (senha.length < 6) return setErro('Crie uma senha com pelo menos 6 caracteres.')
-    if (!aceito) return setErro('Marque que você concorda com os termos para continuar.')
+    evento('cadastro_tentativa')
+    const recusa = (motivo: string, texto: string) => {
+      evento('cadastro_erro', { motivo })
+      setErro(texto)
+    }
+    if (nome.trim().length < 2) return recusa('nome_curto', 'Como podemos te chamar?')
+    if (!emailOk(email)) return recusa('email_invalido', 'Confira o e-mail: parece incompleto.')
+    if (senha.length < 6) return recusa('senha_curta', 'Crie uma senha com pelo menos 6 caracteres.')
+    if (!aceito) return recusa('termos_nao_marcados', 'Marque que você concorda com os termos para continuar.')
     setOcupado(true)
     const falha = await criarConta(nome.trim(), email.trim(), senha)
     setOcupado(false)
@@ -146,18 +163,18 @@ export function CriarConta() {
   return (
     <Tela titulo={hoje() <= '2026-12-31' ? 'Grátis até 31 de dezembro' : '7 dias grátis para arrumar as contas'} sub={hoje() <= '2026-12-31' ? `Para quem cria a conta até 31 de dezembro. Depois, ${brl(PRECO_MENSAL)} por mês.` : `Depois, ${brl(PRECO_MENSAL)} por mês. Cancele quando quiser.`} pose="ola">
       <h2>Criar conta</h2>
-      <form className="pilha" onSubmit={enviar} noValidate>
+      <form className="pilha" onSubmit={enviar} onFocusCapture={aoFocar} noValidate>
         <label className="campo">
           <span>Seu nome</span>
-          <input className="entrada" autoComplete="name" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome e sobrenome" />
+          <input className="entrada" data-trk="nome" autoComplete="name" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome e sobrenome" />
         </label>
         <label className="campo">
           <span>E-mail</span>
-          <input className="entrada" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" />
+          <input className="entrada" data-trk="email" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" />
         </label>
-        <CampoSenha valor={senha} onChange={setSenha} rotulo="Crie uma senha" dica="Pelo menos 6 caracteres." auto="new-password" />
+        <CampoSenha valor={senha} onChange={setSenha} rotulo="Crie uma senha" dica="Pelo menos 6 caracteres." auto="new-password" campo="senha" />
         <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 14, color: 'var(--muted)' }}>
-          <input type="checkbox" checked={aceito} onChange={(e) => setAceito(e.target.checked)} style={{ width: 20, height: 20, marginTop: 1, accentColor: '#292D54', flex: 'none' }} />
+          <input type="checkbox" data-trk="termos" checked={aceito} onChange={(e) => setAceito(e.target.checked)} style={{ width: 20, height: 20, marginTop: 1, accentColor: '#292D54', flex: 'none' }} />
           <span>Li e concordo com os termos de uso e a política de privacidade.</span>
         </label>
         <Erro texto={erro} />
