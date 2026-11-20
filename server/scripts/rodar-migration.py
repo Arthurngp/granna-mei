@@ -6,7 +6,10 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py                 # só mostra o que faria
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar evento
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
+    /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  avisos  20261120100000_avisos.sql              tabela `avisos`: registro de cada aviso de conta vencendo
+          enviado, para nunca mandar em dobro. Sem ela o serviço NÃO envia aviso nenhum (de propósito).
   evento  20261119120000_mensagens_evento.sql   coluna `evento` + índice: retomada de mensagem presa
           (opcional; sem ela a retomada atende só texto)
   alerta  20261119200000_alerta_admin.sql       colunas para o aviso no WhatsApp quando a Granninha
@@ -30,9 +33,18 @@ MIGRATIONS = {
     "evento": "20261119120000_mensagens_evento.sql",
     "oferta": "20261118020000_oferta_ate_31_12.sql",
     "alerta": "20261119200000_alerta_admin.sql",
+    "avisos": "20261120100000_avisos.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
+    # A tabela existir não basta: sem RLS ligada e com permissão para o cliente, qualquer um leria os números
+    # de WhatsApp de quem foi avisado. Confere os três efeitos.
+    "avisos": """select
+        (select count(*) from information_schema.tables where table_schema='public' and table_name='avisos') as tabela_existe,
+        (select c.relrowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace
+          where n.nspname='public' and c.relname='avisos') as rls_ligada,
+        (select count(*) from information_schema.role_table_grants
+          where table_schema='public' and table_name='avisos' and grantee in ('anon','authenticated')) as permissoes_para_cliente""",
     "evento": "select count(*) as colunas_evento from information_schema.columns where table_name='mensagens' and column_name='evento'",
     # A oferta tem três efeitos: o default do prazo, o prazo de quem já está em teste e o fuso dentro
     # da função de acesso. Conferir só o default deixaria dois terços sem prova.
