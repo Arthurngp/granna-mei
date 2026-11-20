@@ -9,7 +9,7 @@ export const SEO = {
     desc: 'Passo a passo para controlar entradas, gastos, contas e o limite do MEI pelo WhatsApp, sem planilha e sem aplicativo novo.',
     guia: ['Como controlar o financeiro do MEI pelo WhatsApp', [
       'Controlar o financeiro do MEI é anotar tudo o que entra e sai do negócio, saber o que vence e acompanhar o faturamento do ano. O problema quase nunca é saber o que fazer, e sim ter tempo para fazer. Por isso o controle precisa caber no lugar onde você já passa o dia: o WhatsApp.',
-      'Na prática, funciona assim: cada venda, cada gasto e cada conta vira uma mensagem curta, como “recebi 150 no pix” ou “paguei 89 de luz”. Quem organiza é a assistente do outro lado, que coloca o valor na categoria certa, separa o que é do negócio e lembra das contas antes de vencer.',
+      'Na prática, funciona assim: cada venda, cada gasto e cada conta vira uma mensagem curta, como “recebi 150 no pix” ou “paguei 89 de luz”. Quem organiza é a assistente do outro lado, que coloca o valor na categoria certa, separa o que é do negócio e guarda as contas a pagar, que aparecem no painel.',
       'No fim do mês, você pergunta quanto entrou, quanto saiu e quanto sobrou, e tem a resposta na conversa. Se quiser ver gráficos ou baixar relatório, o painel abre no navegador do celular.',
     ]],
   },
@@ -36,7 +36,7 @@ export const SEO = {
   lp5: {
     slug: 'limite-de-faturamento-do-mei-como-acompanhar',
     titulo: 'Limite de faturamento do MEI: como acompanhar',
-    desc: 'O MEI pode faturar até R$ 81 mil por ano. Veja como acompanhar o faturamento mês a mês e ser avisado antes de chegar perto do limite.',
+    desc: 'O MEI pode faturar até R$ 81 mil por ano. Veja como acompanhar o faturamento mês a mês e quanto falta para o limite.',
     guia: ['Como acompanhar o limite de faturamento do MEI', [
       'O MEI pode faturar até R$ 81 mil por ano, o que dá uma média de R$ 6.750 por mês. No ano em que o CNPJ é aberto, o limite é proporcional aos meses de atividade. Passar desse valor pode tirar você do MEI e gerar imposto a mais, por isso vale acompanhar de perto.',
       'O jeito mais seguro é somar todas as entradas do negócio desde janeiro e conferir quanto falta para o limite. Quem só olha o extrato do banco costuma se perder, porque ali estão misturadas entradas pessoais, transferências e devoluções.',
@@ -46,21 +46,21 @@ export const SEO = {
   lp6: {
     slug: 'como-nao-esquecer-de-pagar-o-das-do-mei',
     titulo: 'Como não esquecer de pagar o DAS do MEI',
-    desc: 'O DAS do MEI vence todo dia 20. Veja como ser lembrado todo mês pelo WhatsApp e evitar multa e juros por atraso.',
+    desc: 'O DAS do MEI vence todo dia 20. Veja como ter o DAS sempre à vista, todo mês, e evitar multa e juros por atraso.',
     guia: ['Como não esquecer de pagar o DAS do MEI', [
       'O DAS é a guia mensal do MEI e vence no dia 20 de cada mês. Ele junta a contribuição do INSS e o ICMS ou ISS da sua atividade. Pagar em dia mantém o CNPJ regular e conta para a aposentadoria e os benefícios do INSS.',
       'Quando atrasa, a guia passa a ter multa e juros, e meses em aberto podem virar dívida ativa. Na maioria das vezes o atraso não é falta de dinheiro, é esquecimento no meio da correria.',
-      'O que resolve é um lembrete que chegue antes do vencimento, no lugar em que você vai ver, todo mês, sem você ter que lembrar de lembrar. E anotar o pagamento quando fizer, para saber quanto pagou de imposto no ano.',
+      'O que resolve é ter o DAS no mesmo lugar das outras contas do mês, com o vencimento à vista, e marcar o pagamento quando fizer, para saber quanto pagou de imposto no ano. Na Granninha, o DAS de cada mês aparece no painel, em Meu MEI e em Contas, e você marca quando pagar.',
     ]],
   },
   lp7: {
     slug: 'como-nao-atrasar-contas-do-mei',
     titulo: 'Como não atrasar as contas do MEI e parar de pagar multa',
-    desc: 'Aluguel, internet, fornecedor e DAS em dia: veja como receber lembretes antes de cada conta vencer e parar de pagar multa por esquecimento.',
+    desc: 'Aluguel, internet, fornecedor e DAS em dia: veja como ter o vencimento de cada conta à vista e parar de pagar multa por esquecimento.',
     guia: ['Como parar de atrasar as contas do negócio', [
       'Multa por atraso é dinheiro jogado fora. Em boleto, costuma vir 2% de multa mais juros por dia, e no fim do ano isso soma um valor que faria diferença no caixa.',
       'O primeiro passo é ter todas as contas do negócio num lugar só, com valor e dia de vencimento: aluguel, internet, fornecedor, contador, DAS. Conta que se repete todo mês precisa ser anotada uma vez só.',
-      'O segundo é receber o aviso antes de vencer, com antecedência suficiente para separar o dinheiro. Quando o lembrete chega no WhatsApp, ele não se perde no meio dos e-mails nem depende de você abrir um aplicativo.',
+      'O segundo é olhar o que vence com antecedência suficiente para separar o dinheiro. Com as contas num lugar só, basta abrir o painel ou perguntar no WhatsApp “o que vence até sexta?”, sem procurar boleto no meio dos e-mails.',
     ]],
   },
   lp8: {
@@ -86,11 +86,11 @@ export const SEO = {
   lp10: {
     slug: 'como-controlar-clientes-que-devem-fiado',
     titulo: 'Como controlar clientes que devem e o fiado do MEI',
-    desc: 'Anote quem te deve, quanto e até quando, e seja lembrado no dia de cobrar. Controle de fiado e contas a receber para MEI pelo WhatsApp.',
+    desc: 'Anote quem te deve, quanto e até quando, e veja quem está em aberto na hora de cobrar. Controle de fiado e contas a receber para MEI pelo WhatsApp.',
     guia: ['Como controlar quem te deve', [
       'Vender fiado, aceitar pagamento depois ou parcelar um serviço é comum no dia a dia do MEI. O risco é esquecer quem deve, quanto e até quando, e o dinheiro simplesmente não voltar.',
       'Para cada valor a receber, anote três coisas: o nome do cliente, o valor e a data combinada. Quando o cliente pagar uma parte, registre o pagamento parcial para saber quanto ainda falta.',
-      'No dia combinado, você precisa ser lembrado de cobrar. Com a lista de quem está em aberto sempre à mão, a cobrança fica mais fácil e menos constrangedora, porque você sabe exatamente o que foi combinado.',
+      'No dia combinado, você precisa lembrar de cobrar. Com a lista de quem está em aberto sempre à mão, a cobrança fica mais fácil e menos constrangedora, porque você sabe exatamente o que foi combinado.',
     ]],
   },
   lp11: {
@@ -146,17 +146,17 @@ export const SEO = {
   lp16: {
     slug: 'como-controlar-contas-fixas-do-mei',
     titulo: 'Como controlar as contas fixas do MEI',
-    desc: 'Aluguel, internet, contador e DAS: anote cada conta fixa uma vez, receba lembrete todo mês e saiba quanto o seu negócio precisa vender para pagar tudo.',
+    desc: 'Aluguel, internet, contador e DAS: anote cada conta fixa uma vez, veja o que vence a cada mês e saiba quanto o seu negócio precisa vender para pagar tudo.',
     guia: ['Como controlar as contas fixas do MEI', [
       'Contas fixas são as que chegam todo mês, vendendo ou não: aluguel, internet, contador, DAS, sistema, telefone. Somadas, elas mostram o mínimo que o negócio precisa faturar para se pagar.',
-      'Cada conta fixa precisa ser anotada uma vez, com valor e dia de vencimento. A partir daí, o lembrete se repete todo mês e você só confirma o pagamento.',
+      'Cada conta fixa precisa ser anotada uma vez, com valor e dia de vencimento. A partir daí, ela entra de novo todo mês nas contas a pagar e você só confirma o pagamento.',
       'Quando o valor muda, como a luz que vem diferente a cada mês, o certo é registrar o que foi pago de verdade. Assim o controle reflete o gasto real e não uma estimativa.',
     ]],
   },
   lp17: {
     slug: 'como-controlar-compras-parceladas-do-mei',
     titulo: 'Como controlar as compras parceladas do MEI',
-    desc: 'Material em 4x, equipamento em 10x: veja como controlar cada parcela, ser lembrado no vencimento e saber quanto ainda falta pagar.',
+    desc: 'Material em 4x, equipamento em 10x: veja como controlar cada parcela, ver quando cada uma vence e saber quanto ainda falta pagar.',
     guia: ['Como controlar compras parceladas no negócio', [
       'Parcelar ajuda o caixa do MEI, mas várias compras parceladas ao mesmo tempo viram uma conta difícil de acompanhar. Quando você percebe, metade do faturamento do mês já está comprometida.',
       'Para cada compra parcelada, anote o valor total, o número de parcelas e quando vence a primeira. Assim cada parcela vira um compromisso com data, no boleto ou na fatura do cartão.',
@@ -186,11 +186,11 @@ export const SEO = {
   lp20: {
     slug: 'resumo-financeiro-semanal-para-mei',
     titulo: 'Resumo financeiro semanal para MEI',
-    desc: 'Receba todo domingo no WhatsApp o resumo da semana do seu MEI: quanto entrou, quanto saiu e o que vence na próxima semana.',
+    desc: 'Saiba como foi a semana do seu MEI: quanto entrou, quanto saiu e o que vence na próxima semana. Pergunte no WhatsApp quando quiser.',
     guia: ['Por que olhar o financeiro toda semana', [
       'Olhar o financeiro só no fim do mês é tarde demais para corrigir alguma coisa. Uma olhada por semana mostra se as vendas estão no ritmo, se algum gasto saiu do normal e o que vence nos próximos dias.',
-      'O resumo semanal funciona melhor quando chega sozinho, num dia e horário fixos, sem você precisar ir atrás. Domingo à noite é um bom momento para planejar a semana que começa.',
-      'Com o resumo, dá para separar com antecedência o dinheiro das contas da semana e acompanhar a evolução do negócio sem abrir relatório.',
+      'O resumo semanal funciona melhor com dia e hora fixos, para virar hábito. Domingo à noite é um bom momento para perguntar como foi a semana e planejar a que começa.',
+      'Com os números da semana na mão, dá para separar com antecedência o dinheiro das contas e acompanhar a evolução do negócio sem abrir relatório.',
     ]],
   },
   lp21: {
@@ -218,7 +218,7 @@ export const SEO = {
     titulo: 'Como trocar o caderno de contas pelo WhatsApp',
     desc: 'O caderninho de vendas e fiado some e não faz conta. Veja como passar o controle do caderno para mensagens no WhatsApp.',
     guia: ['Como sair do caderninho de contas', [
-      'O caderno é simples e por isso tanta gente usa. Mas ele não soma sozinho, não avisa quando alguém deve, não lembra de conta e some no dia em que você mais precisa.',
+      'O caderno é simples e por isso tanta gente usa. Mas ele não soma sozinho, não mostra quem está devendo, não organiza as contas e some no dia em que você mais precisa.',
       'A troca que funciona mantém a simplicidade do caderno: você continua escrevendo do seu jeito, só que numa mensagem de WhatsApp. “Vendi 240 no dinheiro”, “a Bia me deve 60”.',
       'A diferença é que agora as contas são feitas por você: total da semana, quem está devendo, quanto sobrou. E nada se perde.',
     ]],
