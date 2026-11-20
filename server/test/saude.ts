@@ -56,6 +56,14 @@ const pegar = async (caminho: string, headers: Record<string, string> = {}) => {
   for (const campo of ['problema', 'desde', 'ultima_falha', 'ultimo_ok', 'falhas']) {
     assert.ok(campo in estadoIa, 'o monitoramento precisa do campo ' + campo)
   }
+  // Os avisos de conta vencendo (fase f4) começam desligados, e o /saude diz isso sem vazar número nem conta.
+  const avisos = corpo.avisos as Record<string, unknown>
+  assert.ok(avisos, 'o /saude conta o estado dos avisos')
+  assert.equal(avisos.modo, 'off', 'desligado por padrão')
+  for (const campo of ['ultimo_ciclo', 'enviados_desde_inicio', 'falhas_desde_inicio', 'ultimo_erro']) {
+    assert.ok(campo in avisos, 'o monitoramento precisa do campo ' + campo)
+  }
+  assert.ok(!/\d{10,}/.test(JSON.stringify(avisos)), 'nenhum número de telefone no estado dos avisos')
 }
 // Chave certa na URL (o N8N às vezes só manda query).
 {

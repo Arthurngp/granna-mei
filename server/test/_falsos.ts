@@ -12,6 +12,7 @@ type Linha = Record<string, unknown>
 const PKS: Record<string, string[]> = {
   mensagens: ['id'], conversas: ['telefone'], perfis: ['id'], assinaturas: ['user_id'],
   categorias: ['user_id', 'id'], carteiras: ['user_id', 'id'], lancamentos: ['user_id', 'id'], fixas: ['user_id', 'id'], contas: ['user_id', 'id'],
+  avisos: ['chave'],
 }
 export const E = {
   tabelas: {} as Record<string, Linha[]>,

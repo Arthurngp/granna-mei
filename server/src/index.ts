@@ -16,6 +16,8 @@ import { clientePorNumero } from './banco.ts'
 import { PISO_MS, varrerPresas, varrerRetomarIA, type Presa } from './presas.ts'
 import { estadoIA, MARCA_RETOMAR } from './ia-estado.ts'
 import { decidirAviso, textoVoltou, type ConfigAlerta } from './alerta.ts'
+import { estado as estadoAvisos, lerConfig as lerConfigAvisos, rodarAvisos } from './avisos.ts'
+import { depsAvisosDoBanco } from './avisos-banco.ts'
 
 const PORTA = Number(process.env.PORT ?? 3000)
 let ultimaMensagem: string | null = null
@@ -210,7 +212,8 @@ export function iniciar(porta = PORTA) {
           sb.from('mensagens').select('id', { count: 'exact', head: true }).gte('criado_em', desde).eq('status', 'erro'),
         ])
         res.writeHead(200, { 'Content-Type': 'application/json' }).end(
-          JSON.stringify({ ok: true, whatsapp: wa, ia: estadoIA(), mensagens_24h: hoje.count ?? null, erros_24h: falhas.count ?? null, erros_envio_desde_inicio: erros, ultima_mensagem: ultimaMensagem, fila: filas.size }),
+          JSON.stringify({ ok: true, whatsapp: wa, ia: estadoIA(), mensagens_24h: hoje.count ?? null, erros_24h: falhas.count ?? null, erros_envio_desde_inicio: erros, ultima_mensagem: ultimaMensagem, fila: filas.size,
+            avisos: { modo: estadoAvisos.modo, ultimo_ciclo: estadoAvisos.ultimoCiclo, enviados_desde_inicio: estadoAvisos.enviados, falhas_desde_inicio: estadoAvisos.falhas, ultimo_erro: estadoAvisos.ultimoErro } }),
         )
         return
       }
@@ -221,6 +224,16 @@ export function iniciar(porta = PORTA) {
     }
   })
   srv.listen(porta, () => console.log(`Granninha ouvindo na porta ${porta}`))
+  // Aviso de conta vencendo (fase f4). Corre à parte do batimento porque dorme entre um envio e outro, e isso
+  // não pode atrasar o resto. Desligado por padrão: AVISOS=ensaio | piloto | todos (ver avisos.ts).
+  const depsAvisos = depsAvisosDoBanco(sb, enviarTexto)
+  const avisar = async () => {
+    try {
+      for (const linha of await rodarAvisos(depsAvisos, lerConfigAvisos())) console.log('[avisos]', linha)
+    } catch (e) {
+      console.error('[avisos]', (e as Error).message)
+    }
+  }
   // Batimento: a cada minuto grava o estado do número para o painel admin (e para o alerta de "parou").
   const bater = async () => {
     try {
@@ -249,6 +262,7 @@ export function iniciar(porta = PORTA) {
       console.error('[ia] retomar:', (e as Error).message)
     }
     await varrerVencidas()
+    void avisar()
   }
 
   // Uma vez por dia: apaga de vez quem passou dos 30 dias. Sai listando, sem apagar, até
