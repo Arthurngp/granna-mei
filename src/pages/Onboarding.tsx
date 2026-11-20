@@ -4,6 +4,7 @@ import { Conversa } from '../components/Conversa'
 import { IconeCarteira } from '../components/Shell'
 import { CampoDinheiro, Chave, Mascote, Seg, type Pose } from '../components/ui'
 import { linkWhats, RAMOS } from '../lib/config'
+import { evento } from '../lib/eventos'
 import { DIAS_SEMANA, documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaMeses } from '../lib/format'
 import { categoriasPadrao } from '../lib/seed'
 import { novoId, useApp } from '../lib/store'
@@ -155,10 +156,16 @@ export default function Onboarding() {
   /** Guarda o passo mais avançado que a pessoa alcançou, para medir onde o cadastro trava. */
   const setPasso = (p: number) => {
     setPassoLocal(p)
-    if (p > s.sessao.passo) mut((a) => ({ ...a, sessao: { ...a.sessao, passo: p } }))
+    if (p > s.sessao.passo) {
+      evento('onboarding_passo', { passo: p })
+      mut((a) => ({ ...a, sessao: { ...a.sessao, passo: p } }))
+    }
   }
 
-  const concluir = () => mut((a) => ({ ...a, sessao: { ...a.sessao, onboarding: true, passo: 7 } }))
+  const concluir = () => {
+    evento('onboarding_concluido')
+    mut((a) => ({ ...a, sessao: { ...a.sessao, onboarding: true, passo: 7 } }))
+  }
 
   // Último passo: gera o código e fica conferindo no banco até a Granninha confirmar o número.
   useEffect(() => {

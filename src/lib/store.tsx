@@ -2,6 +2,7 @@ import { faturaDe } from './cartao'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAviso } from '../components/ui'
 import { hoje, somaDias, somaMeses } from './format'
+import { evento as rastrear, motivoServidor } from './eventos'
 import { carregar, enviar } from './remoto'
 import { categoriasPadrao, estadoDemo, estadoVazio, VERSAO } from './seed'
 import { lerOrigem } from './origem'
@@ -247,8 +248,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         const origem = lerOrigem()
         const { data, error } = await supabase.auth.signUp({ email, password: senha, options: { data: origem ? { nome, origem } : { nome } } })
-        if (error) return traduz(error.message)
-        if (!data.session || !data.user) return 'Conta criada. Confirme pelo link que mandamos no seu e-mail e depois entre.'
+        if (error) {
+          rastrear('cadastro_erro', { motivo: motivoServidor(error.message) })
+          return traduz(error.message)
+        }
+        if (!data.session || !data.user) {
+          rastrear('cadastro_confirmar_email')
+          return 'Conta criada. Confirme pelo link que mandamos no seu e-mail e depois entre.'
+        }
+        rastrear('cadastro_concluido')
         limparDemo()
         try {
           await abrirConta(data.user.id, email)
