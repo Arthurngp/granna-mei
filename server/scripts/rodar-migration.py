@@ -12,6 +12,9 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
   adminacoes 20261121150000_admin_acoes_retencao_publico.sql   funções de leitura: ações, retenção, público
           (+ 6 colunas novas e vazias em perfis). Rodar adminvisao primeiro.
   cobranca 20261121120000_cobranca_stripe.sql    colunas da Stripe em assinaturas e faturas (só adiciona)
+  perfil  20261121160000_perfil_publico.sql      colunas do passo opcional do cadastro (nascimento, cidade, UF, faixas, ocupacao) em perfis,
+          o grant para o cliente gravar e as travas de tamanho (só adiciona). Sem ela o passo "Quer me contar mais?" e a
+          ocupação de "Outro ramo" não gravam (o cadastro segue normal).
   avisos  20261120100000_avisos.sql              tabela `avisos`: registro de cada aviso de conta vencendo
           enviado, para nunca mandar em dobro. Sem ela o serviço NÃO envia aviso nenhum (de propósito).
   evento  20261119120000_mensagens_evento.sql   coluna `evento` + índice: retomada de mensagem presa
@@ -39,11 +42,21 @@ MIGRATIONS = {
     "alerta": "20261119200000_alerta_admin.sql",
     "avisos": "20261120100000_avisos.sql",
     "cobranca": "20261121120000_cobranca_stripe.sql",
+    "perfil": "20261121160000_perfil_publico.sql",
     "adminvisao": "20261121140000_admin_visao_geral.sql",
     "adminacoes": "20261121150000_admin_acoes_retencao_publico.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
+    # Só adiciona colunas: confere as 7 colunas, o grant de UPDATE para o cliente nelas e a trava de tamanho. Sem o grant o
+    # PATCH do cliente é recusado; sem a trava o cliente poderia gravar texto sem fim.
+    "perfil": """select
+        (select count(*) from information_schema.columns where table_schema='public' and table_name='perfis'
+          and column_name in ('nascimento','cidade','uf','faturamento_faixa','ocupacao','perfil_em','renda_faixa')) as colunas_de_7,
+        (select count(*) from information_schema.column_privileges where table_schema='public' and table_name='perfis'
+          and grantee='authenticated' and privilege_type='UPDATE'
+          and column_name in ('nascimento','cidade','uf','faturamento_faixa','ocupacao','perfil_em','renda_faixa')) as grant_de_7,
+        (select count(*) from pg_constraint where conname='perfis_publico_tamanho' and conrelid='public.perfis'::regclass) as trava""",
     # Só funções de leitura do admin (custo por período, ativação, receita): confere as 3.
     "adminvisao": """select (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
         where n.nspname='public' and p.proname in ('admin_custo_periodo','admin_ativacao','admin_receita')) as funcoes_de_3""",

@@ -19,6 +19,9 @@ export type EventoFunil =
   | 'cadastro_concluido'
   | 'onboarding_passo'
   | 'onboarding_concluido'
+  | 'perfil_aberto'
+  | 'perfil_salvo'
+  | 'perfil_pulado'
 
 export function evento(nome: EventoFunil, params: Record<string, string | number> = {}): void {
   try {

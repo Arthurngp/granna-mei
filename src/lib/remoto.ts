@@ -190,6 +190,41 @@ export async function removerFoto(anterior?: string) {
   if (anterior && anterior.startsWith(id + '/')) await sb.storage.from('avatares').remove([anterior])
 }
 
+/** O que a Granninha pergunta no cadastro para conhecer o público (ocupação, nascimento, cidade e faixas). Tudo opcional, menos a ocupação de quem é de "Outro ramo". */
+export interface PerfilPublico {
+  ocupacao?: string
+  /** AAAA-MM-DD ou null para limpar */
+  nascimento?: string | null
+  cidade?: string
+  uf?: string
+  faturamento_faixa?: string
+  renda_faixa?: string
+  /** Quando a pessoa respondeu o passo "Quer me contar mais?" (só ao salvar; ao pular fica vazio). */
+  perfil_em?: string
+}
+
+/**
+ * Grava esses campos À PARTE do resto do perfil, como a foto: se a coluna ainda não existir no banco (a migration é aplicada à
+ * mão) ou o grant faltar, a gravação falha sozinha e o cadastro segue. Misturar estes campos no `perfilDe` faria o PATCH do
+ * perfil inteiro falhar e travaria o cadastro de todo mundo. Devolve se gravou.
+ */
+export async function salvarPerfilPublico(dados: PerfilPublico): Promise<boolean> {
+  if (!supabase || !Object.keys(dados).length) return false
+  try {
+    const { data, error: e1 } = await supabase.auth.getUser()
+    if (e1 || !data.user) return false
+    const { error: e2 } = await supabase.from('perfis').update(dados).eq('id', data.user.id)
+    if (e2) {
+      console.warn('[perfil] não gravei os dados do público:', e2.message)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.warn('[perfil] não gravei os dados do público:', (e as Error).message)
+    return false
+  }
+}
+
 /** Endereço temporário (1 hora) para mostrar a foto de perfil, que fica em pasta privada. */
 export async function linkFoto(path: string): Promise<string | null> {
   const { data, error } = await supabase!.storage.from('avatares').createSignedUrl(path, 3600)
