@@ -1,8 +1,11 @@
 import { CircleCheck, Copy, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Folha, useAviso } from '../../../src/components/ui'
+import { useAviso } from '../../../src/components/ui'
 import { api, rpc } from '../sb'
-import { Carregando, dataBR, dataHora, Falha, NOME_SITUACAO } from './comum'
+import { dataBR, dataHora, Falha, NOME_SITUACAO } from './comum'
+import { Cartao, Gaveta, Pagina, type HeadDef } from './visao/layout'
+import { usePainel } from './visao/painel'
+import { n } from './visao/usar'
 
 interface Cliente {
   id: string
@@ -70,52 +73,64 @@ export function Clientes() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busca, filtro])
 
+  const { p } = usePainel()
+  const sit = p?.por_situacao ?? {}
+  const heads: HeadDef[] | undefined = p
+    ? [
+        { rotulo: 'Clientes', valor: n(p.clientes), nota: `${n(p.novos_7d)} novos em 7 dias` },
+        { rotulo: 'Em dia', valor: n(sit.ativa ?? 0), nota: `${n(sit.cortesia ?? 0)} em cortesia` },
+        { rotulo: 'Em teste', valor: n(sit.trial ?? 0), nota: `${n(sit.teste_vencido ?? 0)} com teste vencido` },
+        { rotulo: 'Sem acesso', valor: n((sit.bloqueada ?? 0) + (sit.atrasada ?? 0) + (sit.teste_vencido ?? 0)), nota: 'bloqueadas, em atraso ou teste vencido', tom: (sit.bloqueada ?? 0) + (sit.atrasada ?? 0) > 0 ? 'ruim' : undefined },
+      ]
+    : undefined
+
   return (
-    <div className="pagina">
-      <div className="busca">
-        <Search size={18} />
-        <input className="entrada" type="search" placeholder="Nome, negócio, e-mail ou telefone" value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Buscar clientes" />
-      </div>
-      <div className="fichas" role="group" aria-label="Filtrar por situação">
-        {FILTROS.map(([v, r]) => (
-          <button key={v} type="button" className="ficha" aria-pressed={filtro === v} onClick={() => setFiltro(v)}>
-            {r}
-          </button>
-        ))}
-      </div>
-      {erro && <Falha texto={erro} />}
-      {!lista ? (
-        <Carregando />
-      ) : lista.length === 0 ? (
-        <div className="card"><p className="suave">Nenhum cliente encontrado.</p></div>
-      ) : (
-        <div className="card" style={{ paddingTop: 4, paddingBottom: 4 }}>
-          <div className="lista">
+    <Pagina titulo="Clientes" subtitulo="Busque, abra a ficha e mude a situação de cada conta" heads={heads}>
+      <Cartao g={12}>
+        <div className="cl-busca">
+          <Search size={18} aria-hidden="true" />
+          <input type="search" placeholder="Nome, negócio, e-mail ou telefone" value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Buscar clientes" />
+        </div>
+        <div className="filtros" role="group" aria-label="Filtrar por situação" style={{ marginBottom: 6 }}>
+          {FILTROS.map(([v, r]) => (
+            <button key={v} type="button" className={filtro === v ? 'on' : ''} aria-pressed={filtro === v} onClick={() => setFiltro(v)}>
+              {r}
+            </button>
+          ))}
+        </div>
+        {erro && <Falha texto={erro} />}
+        {!lista ? (
+          <div style={{ display: 'grid', gap: 12, marginTop: 10 }} aria-hidden="true">
+            {[0, 1, 2, 3, 4].map((k) => (
+              <span key={k} className="skel" style={{ height: 56 }} />
+            ))}
+          </div>
+        ) : lista.length === 0 ? (
+          <p className="texto-ajuda">Nenhum cliente encontrado.</p>
+        ) : (
+          <div className="linhas">
             {lista.map((c) => (
-              <button type="button" className="linha" key={c.id} onClick={() => setAberto(c)}>
-                <div className="meio">
-                  <div className="tit">
-                    {c.nome || '(sem nome)'} {c.negocio && <span className="suave" style={{ fontWeight: 500 }}>· {c.negocio}</span>}
-                  </div>
-                  <div className="det">
-                    <span>
-                      {c.whats || 'sem WhatsApp'}
-                      {c.whats && (c.verificado ? ' · confirmado' : ' · não confirmado')} · último lançamento {dataBR(c.ultimo_lancamento)}
-                    </span>
-                  </div>
+              <button type="button" className="cl-l" key={c.id} onClick={() => setAberto(c)}>
+                <div className="cl-id">
+                  <b>{c.nome || '(sem nome)'}</b>
+                  <span className="s">{c.negocio || 'sem negócio'}</span>
+                  <span className="q">
+                    {c.whats || 'sem WhatsApp'}
+                    {c.whats && (c.verificado ? ' · confirmado' : ' · não confirmado')} · último lançamento {dataBR(c.ultimo_lancamento)}
+                  </span>
                 </div>
-                <div className="val">
+                <div className="cl-v">
                   <span className={`situacao s-${c.situacao}`}>{NOME_SITUACAO[c.situacao] ?? c.situacao}</span>
                   <small>{c.mensagens_mes} msg no mês</small>
                 </div>
               </button>
             ))}
           </div>
-        </div>
-      )}
-      {lista && <p className="suave pq">{lista.length} {lista.length === 1 ? 'cliente' : 'clientes'}{lista.length === 500 ? ' (mostrando os 500 mais novos)' : ''}</p>}
+        )}
+        {lista && <p className="rodape-cartao">{lista.length} {lista.length === 1 ? 'cliente' : 'clientes'}{lista.length === 500 ? ' (mostrando os 500 mais novos)' : ''}</p>}
+      </Cartao>
       <FichaCliente c={aberto} fechar={() => setAberto(null)} mudou={carregar} />
-    </div>
+    </Pagina>
   )
 }
 
@@ -187,7 +202,9 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
 
   const def = acao ? ACOES[acao] : null
   return (
-    <Folha aberta={!!c} onFechar={fechar} titulo={c.nome || c.email}>
+    <Gaveta aberta={!!c} onFechar={fechar} rotulo="Ficha do cliente">
+      <span className="k">Cliente</span>
+      <h3>{c.nome || c.email}</h3>
       <div className="pilha">
         <div className="fatos">
           <div><span>Negócio</span><span>{c.negocio || '-'}</span></div>
@@ -329,6 +346,6 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
           </>
         )}
       </div>
-    </Folha>
+    </Gaveta>
   )
 }

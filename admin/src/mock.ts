@@ -203,6 +203,20 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
       return retencao()
     case 'admin_publico':
       return publico(vazio)
+    case 'admin_clientes': {
+      const c = (i: number, nome: string, negocio: string, situacao: string, ver: boolean, msgs: number) => ({
+        id: `c${i}`, nome, email: `${nome.split(' ')[0].toLowerCase()}@exemplo.com`, negocio, whats: `(81) 98811-20${String(i).padStart(2, '0')}`, verificado: ver, situacao, plano: 'mensal',
+        trial_fim: '2026-12-31', motivo: null, criado_em: new Date(Date.now() - i * 86_400_000).toISOString(), ultimo_lancamento: ver ? new Date(Date.now() - i * 3_600_000 * 20).toISOString() : null,
+        lancamentos: ver ? 40 - i : 0, mensagens_mes: msgs, onboarding_passo: ver ? 7 : 6, onboarding_feito: ver, papel: 'cliente',
+      })
+      return [c(1, 'Marina Costa', 'Studio Marina', 'ativa', true, 41), c(2, 'João Pedro', 'JP Reformas', 'trial', true, 33), c(3, 'Aline Souza', 'Aline Doces', 'ativa', true, 27), c(4, 'Carlos Lima', 'Lima Fretes', 'trial', true, 12), c(5, 'Bruna Alves', 'Bruna Nails', 'cortesia', true, 9), c(6, 'Tiago Bento', 'TB Fretes', 'trial', false, 0)]
+    }
+    case 'admin_auditoria_listar':
+      return [
+        { criado_em: new Date(Date.now() - 3 * 3_600_000).toISOString(), admin: 'Arthur', acao: 'estender teste', cliente: 'Marina Costa', detalhes: { motivo: 'parceira da NGP', antes: 'trial', depois: 'trial' } },
+        { criado_em: new Date(Date.now() - 2 * 86_400_000).toISOString(), admin: 'Arthur', acao: 'cortesia', cliente: 'Bruna Alves', detalhes: { motivo: 'indicação', antes: 'trial', depois: 'cortesia' } },
+        { criado_em: new Date(Date.now() - 9 * 86_400_000).toISOString(), admin: 'Arthur', acao: 'verificar numero', cliente: 'João Pedro', detalhes: { motivo: 'confirmou por telefone' } },
+      ]
     case 'admin_origens':
       return {
         por_lp: [

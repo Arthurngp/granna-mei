@@ -23,7 +23,7 @@ export function Carregando() {
 
 export function Falha({ texto }: { texto: string }) {
   return (
-    <div className="alerta ruim" role="alert">
+    <div className="vaviso ruim" role="alert">
       <TriangleAlert size={20} style={{ flex: 'none' }} />
       <span>{texto}</span>
     </div>

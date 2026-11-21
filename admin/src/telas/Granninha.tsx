@@ -2,7 +2,9 @@ import { CircleCheck, QrCode, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Mascote } from '../../../src/components/ui'
 import { api } from '../sb'
-import { Carregando, dataHora, Falha } from './comum'
+import { dataHora, Falha } from './comum'
+import { Pagina, type HeadDef } from './visao/layout'
+import { n } from './visao/usar'
 import { TrocarNumero } from './TrocarNumero'
 import { usePainel } from './Visao'
 
@@ -44,8 +46,8 @@ export function Granninha() {
     }
   }
 
-  if (erro) return <Falha texto={erro} />
-  if (!p) return <Carregando />
+  if (erro) return <Pagina titulo="Granninha" heads={[]}><Falha texto={erro} /></Pagina>
+  if (!p) return <Pagina titulo="Granninha" subtitulo="O WhatsApp e o serviço que atende os clientes"><span className="skel" style={{ height: 220 }} /></Pagina>
 
   const s = p.saude
   const minutos = s ? (Date.now() - new Date(s.atualizado_em).getTime()) / 60_000 : Infinity
@@ -65,24 +67,27 @@ export function Granninha() {
     }
   }
 
-  return (
-    <div className="pagina">
-      {problema ? (
-        <div className="alerta ruim" role="alert"><TriangleAlert size={20} style={{ flex: 'none' }} /><span>{problema}</span></div>
-      ) : (
-        <div className="alerta bom"><CircleCheck size={20} style={{ flex: 'none' }} /><span>A Granninha está no ar e o WhatsApp conectado{s?.whatsapp_numero ? ` (${s.whatsapp_numero})` : ''}.</span></div>
-      )}
+  const heads: HeadDef[] = [
+    { rotulo: 'Mensagens hoje', valor: n(p.mensagens_hoje), nota: `${n(p.respondidas_hoje)} respondidas` },
+    { rotulo: 'Erros em 24 h', valor: n(p.erros_24h), tom: p.erros_24h ? 'ruim' : undefined, nota: p.erros_24h ? 'veja a lista abaixo' : 'nenhum' },
+    { rotulo: 'Fila agora', valor: s?.fila ?? '–', nota: `último sinal ${dataHora(s?.atualizado_em)}` },
+    { rotulo: 'WhatsApp', valor: conectado ? 'Conectado' : 'Fora do ar', texto: true, tom: conectado ? undefined : 'ruim', nota: s?.whatsapp_numero ?? 'sem número' },
+  ]
 
-      <div className="kpis">
-        <div className="kpi"><small>Mensagens hoje</small><b className="num">{p.mensagens_hoje}</b></div>
-        <div className="kpi"><small>Respondidas hoje</small><b className="num">{p.respondidas_hoje}</b></div>
-        <div className="kpi"><small>Erros em 24 h</small><b className={`num ${p.erros_24h ? 'cor-out' : ''}`}>{p.erros_24h}</b></div>
-        <div className="kpi"><small>Fila agora</small><b className="num">{s?.fila ?? '-'}</b><span>último sinal {dataHora(s?.atualizado_em)}</span></div>
+  return (
+    <Pagina titulo="Granninha" subtitulo="O WhatsApp e o serviço que atende os clientes" heads={heads}>
+      <div className="g12-nota" style={{ gridColumn: '1 / -1' }}>
+        {problema ? (
+          <div className="vaviso ruim" role="alert"><TriangleAlert size={20} style={{ flex: 'none' }} /><span>{problema}</span></div>
+        ) : (
+          <div className="vaviso bom"><CircleCheck size={20} style={{ flex: 'none' }} /><span>A Granninha está no ar e o WhatsApp conectado{s?.whatsapp_numero ? ` (${s.whatsapp_numero})` : ''}.</span></div>
+        )}
       </div>
 
-      <div className="grade">
-        <section className="card g-6">
-          <div className="card-cab"><h2>Conectar o número</h2></div>
+      {(
+        <>
+        <section className="cartao g6">
+          <div className="cartao-cab"><h2>Conectar o número</h2></div>
           <p className="suave" style={{ marginBottom: 12 }}>
             Abra o WhatsApp do chip da Granninha, vá em Aparelhos conectados e leia o QR. O QR muda a cada poucos segundos: se vencer, peça outro.
           </p>
@@ -104,21 +109,21 @@ export function Granninha() {
           )}
         </section>
         <TrocarNumero conectado={conectado} numeroAtual={s?.whatsapp_numero ?? null} aoMudar={() => void recarregar()} />
-        <section className="card g-6">
-          <div className="card-cab"><h2>Me avisar se parar</h2></div>
+        <section className="cartao g6">
+          <div className="cartao-cab"><h2>Me avisar se parar</h2></div>
           <p className="suave" style={{ marginBottom: 12 }}>
             Se a IA ficar sem crédito ou parar de responder, a Granninha manda uma mensagem para este número.
             Um aviso por problema, sem repetir — e outro quando voltar ao normal.
           </p>
           <input
-            className="campo"
+            className="entrada"
             inputMode="tel"
             placeholder="(81) 99999-8888"
             value={alerta.whats}
             onChange={(e) => setAlerta({ ...alerta, whats: e.target.value })}
             aria-label="Número que recebe o aviso"
           />
-          <label className="suave" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0' }}>
+          <label className="suave" style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0', minHeight: 48 }}>
             <input type="checkbox" checked={alerta.ligado} onChange={(e) => setAlerta({ ...alerta, ligado: e.target.checked })} />
             Ligado
           </label>
@@ -132,8 +137,8 @@ export function Granninha() {
           </p>
         </section>
 
-        <section className="card g-6">
-          <div className="card-cab">
+        <section className="cartao g6">
+          <div className="cartao-cab">
             <h2>Últimos erros</h2>
             <button type="button" className="lnk" onClick={() => void recarregar()}>Atualizar</button>
           </div>
@@ -153,7 +158,8 @@ export function Granninha() {
           )}
           <p className="suave pq" style={{ marginTop: 10 }}>Última mensagem recebida: {dataHora(p.ultima_mensagem)}</p>
         </section>
-      </div>
-    </div>
+        </>
+      )}
+    </Pagina>
   )
 }

@@ -35,12 +35,25 @@ export function useRpc<T>(nome: string, args: Record<string, unknown> = {}, cada
   return r
 }
 
+/** Em qual migration cada função do admin nasce, para o aviso apontar o arquivo certo. */
+const MIGRATION_DA_FUNCAO: Record<string, string> = {
+  admin_acoes: '20261121150000_admin_acoes_retencao_publico.sql',
+  admin_retencao: '20261121150000_admin_acoes_retencao_publico.sql',
+  admin_publico: '20261121150000_admin_acoes_retencao_publico.sql',
+  admin_custo_periodo: '20261121140000_admin_visao_geral.sql',
+  admin_ativacao: '20261121140000_admin_visao_geral.sql',
+  admin_receita: '20261121140000_admin_visao_geral.sql',
+  admin_origens: '20261116210000_admin_origens.sql',
+  admin_midias_mes: '20261116200000_admin_midias.sql',
+  admin_custo_ia: '20261116093000_admin_custo.sql',
+}
+
 export function Ausente({ nome }: { nome: string }) {
   return (
-    <div className="alerta aviso" role="alert">
+    <div className="vaviso" role="alert">
       <TriangleAlert size={20} style={{ flex: 'none' }} />
       <span>
-        Esta página usa a função <b>{nome}</b>, que ainda não foi aplicada no banco. Falta rodar a migration <b>{['admin_acoes', 'admin_retencao', 'admin_publico'].includes(nome) ? '20261121150000_admin_acoes_retencao_publico.sql' : '20261121140000_admin_visao_geral.sql'}</b>.
+        Esta página usa a função <b>{nome}</b>, que ainda não foi aplicada no banco. Falta rodar a migration <b>{MIGRATION_DA_FUNCAO[nome] ?? 'do admin'}</b>.
       </span>
     </div>
   )

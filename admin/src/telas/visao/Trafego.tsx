@@ -9,8 +9,8 @@ interface Origens {
 
 export function Trafego() {
   const { dados, erro, ausente } = useRpc<Origens>('admin_origens', {}, 120_000)
-  if (ausente) return <Pagina titulo="Tráfego" quantos={3}><Ausente nome="admin_origens" /></Pagina>
-  if (erro) return <Pagina titulo="Tráfego" quantos={3}><Falha texto={erro} /></Pagina>
+  if (ausente) return <Pagina titulo="Tráfego" heads={[]}><Ausente nome="admin_origens" /></Pagina>
+  if (erro) return <Pagina titulo="Tráfego" heads={[]}><Falha texto={erro} /></Pagina>
 
   const total = dados ? dados.por_lp.reduce((s, x) => s + x.cadastros, 0) : 0
   const semOrigem = dados?.por_lp.find((x) => x.lp === 'sem origem')?.cadastros ?? 0

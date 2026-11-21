@@ -1221,7 +1221,14 @@ select.sel {
 }
 
 /* Alerta de função ausente */
-.alerta.aviso {
+.vaviso {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  font-weight: 600;
+  line-height: 1.45;
   background: var(--warn-bg);
   color: #6b4506;
 }
@@ -1933,4 +1940,77 @@ select.sel {
   position: sticky;
   top: 0;
   z-index: 20;
+}
+
+/* ---------- Clientes, Granninha e Auditoria no visual novo ---------- */
+.vaviso.ruim {
+  background: var(--out-bg);
+  color: #8f1f2a;
+}
+.vaviso.bom {
+  background: var(--in-bg);
+  color: #0b5c39;
+}
+.cl-busca {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+.cl-busca:focus-within {
+  border-color: var(--indigo-2);
+}
+.cl-busca input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  outline: 0;
+  background: none;
+  font-family: inherit;
+  font-size: 16px;
+  color: var(--ink);
+}
+.cl-l {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 13px 8px;
+  border-radius: 10px;
+  text-align: left;
+}
+button.cl-l:hover {
+  background: #f7f8fd;
+}
+.cl-id b {
+  display: block;
+  font-size: 15.5px;
+  overflow-wrap: anywhere;
+}
+.cl-id .s {
+  display: block;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+.cl-id .q {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.cl-v {
+  text-align: right;
+}
+.cl-v small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: #8a90b0;
 }
