@@ -92,6 +92,6 @@ export interface Estado {
   fixas: Fixa[]
   prefs: { resumoDia: number; resumoHora: string; lembreteHora: string; antecedencia: number; ocultar: boolean }
   contador: { nome: string; email: string; whats: string; auto: boolean }
-  assinatura: { status: StatusAssinatura; plano: 'mensal' | 'anual'; trialFim: string; proxCobranca: string; faturas: Fatura[] }
+  assinatura: { status: StatusAssinatura; plano: 'mensal' | 'anual'; trialFim: string; proxCobranca: string; faturas: Fatura[]; /** Dia em que a assinatura acaba, quando o cliente pediu para cancelar */ cancelaEm?: string }
   exclusaoEm?: string
 }

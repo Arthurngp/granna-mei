@@ -11,7 +11,7 @@ import { numeroDeAviso } from './alerta.ts'
 
 // Os domínios valem sempre, além do que vier em ADMIN_ORIGENS: trocar o domínio não pode derrubar o admin.
 // O admin em granninha.com.br/admin chama esta API de outra origem; sem ela aqui o navegador bloqueia por CORS.
-const ORIGENS = [
+export const ORIGENS = [
   ...new Set(
     [
       ...(process.env.ADMIN_ORIGENS ?? '').split(','),
@@ -32,7 +32,7 @@ const trocaWhats = criarTroca(
   }),
 )
 
-function cors(req: IncomingMessage, res: ServerResponse) {
+export function cors(req: IncomingMessage, res: ServerResponse) {
   const o = req.headers.origin
   if (o && ORIGENS.includes(o)) {
     res.setHeader('Access-Control-Allow-Origin', o)
