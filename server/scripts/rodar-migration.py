@@ -44,7 +44,7 @@ MIGRATIONS = {
     "cobranca": "20261121120000_cobranca_stripe.sql",
     "perfil": "20261121160000_perfil_publico.sql",
     "origens": "20261116210000_admin_origens.sql",
-    "adminsegunda": "20261121160000_admin_segunda_mensagem.sql",
+    "adminsegunda": "20261121161000_admin_segunda_mensagem.sql",
     "adminvisao": "20261121140000_admin_visao_geral.sql",
     "adminacoes": "20261121150000_admin_acoes_retencao_publico.sql",
 }
