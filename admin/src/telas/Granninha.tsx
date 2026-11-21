@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Mascote } from '../../../src/components/ui'
 import { api } from '../sb'
 import { Carregando, dataHora, Falha } from './comum'
+import { TrocarNumero } from './TrocarNumero'
 import { usePainel } from './Visao'
 
 export function Granninha() {
@@ -102,6 +103,7 @@ export function Granninha() {
             </div>
           )}
         </section>
+        <TrocarNumero conectado={conectado} numeroAtual={s?.whatsapp_numero ?? null} aoMudar={() => void recarregar()} />
         <section className="card g-6">
           <div className="card-cab"><h2>Me avisar se parar</h2></div>
           <p className="suave" style={{ marginBottom: 12 }}>

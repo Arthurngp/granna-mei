@@ -4,7 +4,8 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { falhou, sb } from './banco.ts'
-import { garantirSessao, qrDaSessao } from './gateway.ts'
+import { desvincularSessao, garantirSessao, qrDaSessao, statusSessao } from './gateway.ts'
+import { criarTroca, depsReais, tratarTroca } from './trocar-whatsapp.ts'
 import { ErroExclusao, excluirContaDefinitivo } from './excluir.ts'
 import { numeroDeAviso } from './alerta.ts'
 
@@ -23,6 +24,13 @@ const ORIGENS = [
       .filter(Boolean),
   ),
 ]
+
+// Troca do número do WhatsApp: confirmação em duas etapas exigida aqui no servidor (ver trocar-whatsapp.ts).
+const trocaWhats = criarTroca(
+  depsReais({ status: statusSessao, desvincular: desvincularSessao, qr: qrDaSessao }, async (adminId, acao, detalhes) => {
+    falhou((await sb.from('admin_auditoria').insert({ admin_id: adminId, acao, detalhes })).error, 'auditar a troca de número')
+  }),
+)
 
 function cors(req: IncomingMessage, res: ServerResponse) {
   const o = req.headers.origin
@@ -88,6 +96,11 @@ export async function rotaAdmin(req: IncomingMessage, res: ServerResponse, camin
     falhou(up.error, 'gravar config de alerta')
     await sb.from('admin_auditoria').insert({ admin_id: admin, acao: 'alerta', detalhe: ligado ? `ligado para …${numero.slice(-4)}` : 'desligado' })
     json(res, 200, { ok: true, alerta_whats: numero, alerta_ligado: ligado })
+    return true
+  }
+  const troca = await tratarTroca(trocaWhats, admin, req.method ?? '', caminho, corpo)
+  if (troca) {
+    json(res, troca.status, troca.json)
     return true
   }
   if (req.method === 'GET' && caminho === '/admin/qr') {
