@@ -81,9 +81,12 @@ begin
   return (
     with base as (
       select p.id, p.criado_em, p.whats_verificado,
+        to_char(date_trunc('week', p.criado_em at time zone 'America/Sao_Paulo'), 'YYYY-MM-DD') semana,
         case when p.onboarding_feito then 7 else least(p.onboarding_passo, 7) end passo,
         (select min(m.criado_em) from public.mensagens m where m.user_id = p.id) primeira
       from public.perfis p
+    ), ps as (
+      select semana, passo, count(*) n from base group by 1, 2
     )
     select jsonb_build_object(
       'total', (select count(*) from base),
@@ -92,17 +95,14 @@ begin
       'com_mensagem', (select count(*) from base where primeira is not null),
       'mediana_horas_ate_primeira', (select round((percentile_cont(0.5) within group (order by extract(epoch from (primeira - criado_em)) / 3600))::numeric, 1) from base where primeira is not null and primeira >= criado_em),
       'coortes', (select coalesce(jsonb_agg(x order by x.semana desc), '[]') from (
-          select to_char(date_trunc('week', b.criado_em at time zone 'America/Sao_Paulo'), 'YYYY-MM-DD') semana,
+          select b.semana,
             count(*) cadastros,
             count(*) filter (where b.whats_verificado) confirmaram,
             count(*) filter (where b.primeira is not null) com_mensagem,
-            (select coalesce(jsonb_object_agg(q.passo, q.n), '{}') from (
-               select b2.passo, count(*) n from base b2
-               where date_trunc('week', b2.criado_em at time zone 'America/Sao_Paulo') = date_trunc('week', b.criado_em at time zone 'America/Sao_Paulo')
-               group by 1) q) passos
+            (select coalesce(jsonb_object_agg(ps.passo, ps.n), '{}') from ps where ps.semana = b.semana) passos
           from base b
-          group by date_trunc('week', b.criado_em at time zone 'America/Sao_Paulo')
-          order by 1 desc limit 12) x)
+          group by b.semana
+          order by b.semana desc limit 12) x)
     )
   );
 end $$;

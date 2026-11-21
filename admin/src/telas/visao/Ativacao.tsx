@@ -1,5 +1,9 @@
-import { Carregando, dataBR, Falha } from '../comum'
+import { Falha } from '../comum'
+import { dataBR } from '../comum'
+import { Anel } from './graficos'
+import { Cartao, Pagina, type HeadDef } from './layout'
 import { Ausente, n, NOME_PASSO, pct, useRpc } from './usar'
+import { chegaram, maiorPerda } from './util'
 
 interface Coorte {
   semana: string
@@ -17,24 +21,6 @@ interface Ativ {
   coortes: Coorte[]
 }
 
-/** Quantas pessoas chegaram ao passo k: todas que estão nele ou além. */
-function chegaram(passos: Record<string, number>, k: number) {
-  let s = 0
-  for (let j = k; j <= 7; j++) s += passos[String(j)] ?? 0
-  return s
-}
-
-/** Passo (0 a 6) em que mais gente parou em relação a quem chegou nele. */
-function maiorPerda(passos: Record<string, number>) {
-  let melhor = { k: -1, taxa: 0 }
-  for (let k = 0; k <= 6; k++) {
-    const ch = chegaram(passos, k)
-    const parou = passos[String(k)] ?? 0
-    if (ch > 0 && parou / ch > melhor.taxa) melhor = { k, taxa: parou / ch }
-  }
-  return melhor.k >= 0 && melhor.taxa > 0 ? melhor : null
-}
-
 function tempo(h: number | null) {
   if (h === null) return '–'
   if (h < 1) return `${Math.max(1, Math.round(h * 60))} min`
@@ -42,112 +28,131 @@ function tempo(h: number | null) {
   return `${Math.round(h / 24)} dias`
 }
 
-const calor = (v: number, todo: number) => (todo > 0 ? { background: `rgba(14, 130, 80, ${(0.06 + (v / todo) * 0.3).toFixed(2)})` } : undefined)
+const calor = (v: number, todo: number) => (todo > 0 ? `rgba(14, 130, 80, ${(0.08 + (v / todo) * 0.45).toFixed(2)})` : '#f2f3f9')
 
 export function Ativacao() {
   const { dados, erro, ausente } = useRpc<Ativ>('admin_ativacao', {}, 120_000)
-  if (ausente) return <Ausente nome="admin_ativacao" />
-  if (erro) return <Falha texto={erro} />
-  if (!dados) return <Carregando />
+  if (ausente) return <Pagina titulo="Ativação" quantos={4}><Ausente nome="admin_ativacao" /></Pagina>
+  if (erro) return <Pagina titulo="Ativação" quantos={4}><Falha texto={erro} /></Pagina>
 
-  const total = dados.total
-  const perda = maiorPerda(dados.passos)
-  const terminaram = chegaram(dados.passos, 7)
+  const total = dados?.total ?? 0
+  const terminaram = dados ? chegaram(dados.passos, 7) : 0
+  const perda = dados ? maiorPerda(dados.passos) : null
+
+  const heads: HeadDef[] | undefined = dados
+    ? [
+        { rotulo: 'Cadastros', valor: n(total), nota: 'todas as contas criadas' },
+        { rotulo: 'Terminaram as boas-vindas', valor: pct(terminaram, total), nota: `${n(terminaram)} de ${n(total)}` },
+        { rotulo: 'Confirmaram o WhatsApp', valor: pct(dados.confirmaram, total), nota: `${n(dados.confirmaram)} contas` },
+        { rotulo: 'Mandaram a 1ª mensagem', valor: pct(dados.com_mensagem, total), nota: `mediana de ${tempo(dados.mediana_horas_ate_primeira)} depois do cadastro` },
+      ]
+    : undefined
 
   return (
-    <div className="pagina">
-      <div className="kpis kpis-5">
-        <div className="kpi"><small>Cadastros</small><b className="num">{n(total)}</b><span>todas as contas criadas</span></div>
-        <div className="kpi"><small>Terminaram as boas-vindas</small><b className="num">{pct(terminaram, total)}</b><span>{n(terminaram)} de {n(total)}</span></div>
-        <div className="kpi"><small>Confirmaram o WhatsApp</small><b className="num">{pct(dados.confirmaram, total)}</b><span>{n(dados.confirmaram)} contas</span></div>
-        <div className="kpi"><small>Mandaram a 1ª mensagem</small><b className="num">{pct(dados.com_mensagem, total)}</b><span>{n(dados.com_mensagem)} contas</span></div>
-        <div className="kpi"><small>Tempo até a 1ª mensagem</small><b className="num">{tempo(dados.mediana_horas_ate_primeira)}</b><span>mediana, do cadastro</span></div>
-      </div>
-
-      <div className="grade">
-        <section className="card g-7">
-          <div className="card-cab"><h2>Onde as boas-vindas perdem gente</h2></div>
-          <div className="funil">
-            {NOME_PASSO.map((nome, k) => {
-              const ch = chegaram(dados.passos, k)
-              const parou = k <= 6 ? (dados.passos[String(k)] ?? 0) : 0
-              const maior = perda?.k === k
-              return (
-                <div className={`passo${maior ? ' maior' : ''}`} key={k}>
-                  <div className="topo-passo">
-                    <span><i className="num">{k + 1}</i> {nome}</span>
-                    <span className="num"><b>{n(ch)}</b> <small className="suave">{pct(ch, total)}</small></span>
+    <Pagina titulo="Ativação" subtitulo="Do cadastro até usar a Granninha de verdade" heads={heads}>
+      <Cartao g={8} titulo="Onde as boas-vindas perdem gente" nota="pessoas que chegaram em cada passo">
+        {dados ? (
+          <>
+            <div className="funil-cols">
+              {NOME_PASSO.map((_, k) => {
+                const ch = chegaram(dados.passos, k)
+                return (
+                  <div key={k} className={`fcol ${perda?.k === k ? 'm' : ''}`}>
+                    <div className="v">
+                      {n(ch)}
+                      <small>{pct(ch, total)}</small>
+                    </div>
+                    <div className="b" style={{ height: `${Math.max(4, total ? (ch / total) * 78 : 0)}%` }} />
                   </div>
-                  <div className="prog"><i style={{ width: `${total ? (ch / total) * 100 : 0}%` }} /></div>
-                  {k <= 6 && (
-                    <small className={maior ? 'perda' : 'suave'}>
-                      {parou > 0 ? `${n(parou)} pararam aqui (${pct(parou, ch)} de quem chegou)` : 'ninguém parou aqui'}
-                      {maior ? ' · maior perda' : ''}
-                    </small>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-          <p className="suave pq" style={{ marginTop: 10 }}>
-            “Chegaram” conta quem está neste passo ou já passou dele. Quem terminou as boas-vindas entra como passo 8 mesmo no fluxo antigo de 6 passos (antes de 16/11).
-            Ainda não dá para medir o tempo em cada passo: o banco guarda só o passo mais avançado, sem data de entrada. Falta registrar cada entrada.
-          </p>
-        </section>
+                )
+              })}
+            </div>
+            <div className="funil-nomes">
+              {NOME_PASSO.map((nome, k) => (
+                <span key={k} className={perda?.k === k ? 'm' : ''}>
+                  {nome}
+                </span>
+              ))}
+            </div>
+            <div className="funil-linhas">
+              {NOME_PASSO.map((nome, k) => {
+                const ch = chegaram(dados.passos, k)
+                const parou = k <= 6 ? (dados.passos[String(k)] ?? 0) : 0
+                return (
+                  <div key={k} className={`passo ${perda?.k === k ? 'maior' : ''}`}>
+                    <div className="passo-topo">
+                      <span><i>{k + 1}</i>{nome}</span>
+                      <span><b>{n(ch)}</b> <em>{pct(ch, total)}</em></span>
+                    </div>
+                    <div className="prog"><i style={{ width: `${total ? (ch / total) * 100 : 0}%` }} /></div>
+                    {k <= 6 && <small>{parou > 0 ? `${n(parou)} pararam aqui (${pct(parou, ch)} de quem chegou)` : 'ninguém parou aqui'}{perda?.k === k ? ' · maior perda' : ''}</small>}
+                  </div>
+                )
+              })}
+            </div>
+            {perda && (
+              <div className="caixa-nota">
+                A maior perda é em <b>{NOME_PASSO[perda.k]}</b>: {n(dados.passos[String(perda.k)] ?? 0)} das {n(chegaram(dados.passos, perda.k))} pessoas que chegaram aqui pararam.
+              </div>
+            )}
+            <p className="texto-ajuda">Quem terminou as boas-vindas entra como passo 8 mesmo no fluxo antigo de 6 passos. Ainda não dá para medir o tempo em cada passo: o banco guarda só o passo mais avançado, sem a data de entrada.</p>
+          </>
+        ) : (
+          <span className="skel" style={{ height: 300 }} />
+        )}
+      </Cartao>
 
-        <section className="card g-5">
-          <div className="card-cab"><h2>Depois das boas-vindas</h2></div>
-          <div className="fatos">
-            <div><span>Confirmaram o WhatsApp</span><span className="num">{n(dados.confirmaram)} <small className="suave">{pct(dados.confirmaram, total)}</small></span></div>
-            <div><span>Mandaram a 1ª mensagem</span><span className="num">{n(dados.com_mensagem)} <small className="suave">{pct(dados.com_mensagem, total)}</small></span></div>
-            <div><span>Terminaram mas nunca mandaram</span><span className="num">{n(Math.max(0, terminaram - dados.com_mensagem))}</span></div>
-            <div><span>Tempo até a 1ª mensagem</span><span className="num">{tempo(dados.mediana_horas_ate_primeira)}</span></div>
-          </div>
-          <p className="suave pq" style={{ marginTop: 10 }}>
-            A 1ª mensagem é o sinal de que a pessoa usou a Granninha de verdade. Quem terminou e não mandou nada é o grupo para chamar no WhatsApp.
-          </p>
-        </section>
+      <Cartao g={4} titulo="Depois das boas-vindas">
+        {dados ? (
+          <>
+            <div className="ringbox">
+              <Anel pct={total ? (dados.com_mensagem / total) * 100 : 0} cor="#0e8250" tam={120} esp={12} />
+              <p>
+                <b>{n(dados.com_mensagem)} de {n(total)}</b> mandaram a primeira mensagem. É o sinal de que a pessoa usou a Granninha.
+              </p>
+            </div>
+            <div className="fato"><span>Confirmaram o WhatsApp</span><b>{n(dados.confirmaram)}<small>{pct(dados.confirmaram, total)}</small></b></div>
+            <div className="fato"><span>Terminaram e nunca mandaram</span><b>{n(Math.max(0, terminaram - dados.com_mensagem))}</b></div>
+            <div className="fato"><span>Tempo até a 1ª mensagem</span><b>{tempo(dados.mediana_horas_ate_primeira)}</b></div>
+          </>
+        ) : (
+          <span className="skel" style={{ height: 240 }} />
+        )}
+      </Cartao>
 
-        <section className="card">
-          <div className="card-cab"><h2>Por semana de cadastro</h2></div>
-          {dados.coortes.length ? (
+      <Cartao g={12} titulo="Por semana de cadastro" nota="quanto mais verde, melhor">
+        {dados ? (
+          dados.coortes.length ? (
             <div className="rolagem">
-              <table className="tabela">
-                <thead>
-                  <tr>
-                    <th>Semana de</th>
-                    <th>Cadastros</th>
-                    <th>Terminaram</th>
-                    <th>Confirmaram</th>
-                    <th>1ª mensagem</th>
-                    <th>Param mais em</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dados.coortes.map((c) => {
-                    const term = chegaram(c.passos, 7)
-                    const pequena = c.cadastros < 5
-                    const mp = !pequena ? maiorPerda(c.passos) : null
-                    return (
-                      <tr key={c.semana} className={pequena ? 'pequena' : undefined}>
-                        <td>{dataBR(c.semana)}</td>
-                        <td className="num">{n(c.cadastros)}</td>
-                        <td className="num" style={calor(term, c.cadastros)}>{pct(term, c.cadastros)}</td>
-                        <td className="num" style={calor(c.confirmaram, c.cadastros)}>{pct(c.confirmaram, c.cadastros)}</td>
-                        <td className="num" style={calor(c.com_mensagem, c.cadastros)}>{pct(c.com_mensagem, c.cadastros)}</td>
-                        <td>{mp ? NOME_PASSO[mp.k] : pequena ? 'poucos cadastros' : '–'}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+              <div className="mapa">
+                <div className="mapa-l cab" style={{ gridTemplateColumns: '90px 80px repeat(3, 1fr) minmax(130px, 1.3fr)' }}>
+                  <span>Semana de</span><span>Cadastros</span><span>Terminaram</span><span>Confirmaram</span><span>1ª mensagem</span><span>Param mais em</span>
+                </div>
+                {dados.coortes.map((c) => {
+                  const term = chegaram(c.passos, 7)
+                  const pq = c.cadastros < 5
+                  const mp = pq ? null : maiorPerda(c.passos)
+                  return (
+                    <div key={c.semana} className={`mapa-l ${pq ? 'pq' : ''}`} style={{ gridTemplateColumns: '90px 80px repeat(3, 1fr) minmax(130px, 1.3fr)' }}>
+                      <span className="sem">{dataBR(c.semana).slice(0, 5)}</span>
+                      <div className="cel" style={{ background: '#f2f3f9' }}>{n(c.cadastros)}</div>
+                      <div className="cel" style={{ background: calor(term, c.cadastros) }}>{pct(term, c.cadastros)}</div>
+                      <div className="cel" style={{ background: calor(c.confirmaram, c.cadastros) }}>{pct(c.confirmaram, c.cadastros)}</div>
+                      <div className="cel" style={{ background: calor(c.com_mensagem, c.cadastros) }}>{pct(c.com_mensagem, c.cadastros)}</div>
+                      <span className="n" style={{ fontWeight: 600 }}>{mp ? NOME_PASSO[mp.k] : pq ? 'poucos cadastros' : '–'}</span>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           ) : (
-            <p className="suave">Ainda sem cadastros.</p>
-          )}
-          <p className="suave pq" style={{ marginTop: 10 }}>Semanas começam na segunda-feira, horário de São Paulo. Linhas apagadas têm menos de 5 cadastros: a porcentagem engana.</p>
-        </section>
-      </div>
-    </div>
+            <p className="texto-ajuda">Ainda sem cadastros.</p>
+          )
+        ) : (
+          <span className="skel" style={{ height: 200 }} />
+        )}
+        <p className="texto-ajuda">Semanas começam na segunda-feira, horário de São Paulo. Semanas com menos de 5 cadastros ficam apagadas: a porcentagem engana.</p>
+      </Cartao>
+    </Pagina>
   )
 }

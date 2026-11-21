@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { PRECO_ANUAL, PRECO_MENSAL } from '../../../../src/lib/config'
 import { custoReais, reais, type Consumo } from '../../custo'
-import { Carregando, Falha, NOME_SITUACAO } from '../comum'
+import { Falha, NOME_SITUACAO } from '../comum'
+import { Cartao, Pagina, type HeadDef } from './layout'
 import { Ausente, hojeSP, mesRotulo, n, pct, periodoDe, useRpc } from './usar'
 
 interface Rec {
@@ -16,88 +17,126 @@ interface Uso {
   totais: { mensagens: number; clientes: number }
 }
 
-/** Receita de verdade (faturas pagas), a carteira e quanto a IA custa por cliente contra o preço do plano. */
+const COR: Record<string, string> = { trial: '#454c83', ativa: '#0e8250', cortesia: '#7a4fb5', teste_vencido: '#cc3340', bloqueada: '#8a90b0', atrasada: '#9a6408' }
+
+/** Receita de verdade (faturas pagas), a carteira e quanto a IA pesa em cada plano. */
 export function Receita() {
   const rec = useRpc<Rec>('admin_receita', {}, 120_000)
   const mes = hojeSP().slice(0, 7)
   const per = useMemo(() => periodoDe(mes), [mes])
   const uso = useRpc<Uso>('admin_custo_periodo', { p_inicio: per.inicio, p_fim: per.fim })
 
-  if (rec.ausente) return <Ausente nome="admin_receita" />
-  if (rec.erro) return <Falha texto={rec.erro} />
-  if (!rec.dados) return <Carregando />
-  const d = rec.dados
+  if (rec.ausente) return <Pagina titulo="Receita" quantos={4}><Ausente nome="admin_receita" /></Pagina>
+  if (rec.erro) return <Pagina titulo="Receita" quantos={4}><Falha texto={rec.erro} /></Pagina>
 
+  const d = rec.dados
   const custoMes = uso.dados ? uso.dados.dias.reduce((s, x) => s + custoReais(x), 0) : null
   const usaram = uso.dados?.totais.clientes ?? 0
   const porCliente = custoMes !== null && usaram > 0 ? custoMes / usaram : null
-  const ativas = d.carteira.filter((c) => c.situacao === 'ativa').reduce((s, c) => s + c.n, 0)
+  const ativas = d ? d.carteira.filter((c) => c.situacao === 'ativa').reduce((s, c) => s + c.n, 0) : 0
+  const totalCarteira = d ? d.carteira.reduce((s, c) => s + c.n, 0) : 0
+
+  const heads: HeadDef[] | undefined = d
+    ? [
+        { rotulo: 'Receita paga', valor: reais(d.faturas_pagas.total), nota: d.faturas_pagas.qtd === 0 ? 'nenhuma fatura paga ainda' : `${n(d.faturas_pagas.qtd)} faturas pagas` },
+        { rotulo: 'Contas ativas', valor: n(ativas), nota: d.faturas_pagas.qtd === 0 ? 'liberadas à mão, sem fatura' : 'ativas ou liberadas' },
+        { rotulo: 'Em teste, com acesso', valor: n(d.trial_ate_fim), nota: 'entram em cobrança quando o teste acabar' },
+        { rotulo: 'IA por cliente no mês', valor: porCliente !== null ? reais(porCliente) : '–', nota: porCliente !== null ? `${pct(porCliente, PRECO_MENSAL)} do plano mensal` : 'sem uso no mês' },
+      ]
+    : undefined
 
   return (
-    <div className="pagina">
-      <div className="kpis">
-        <div className="kpi"><small>Receita paga</small><b className="num">{reais(d.faturas_pagas.total)}</b><span>{n(d.faturas_pagas.qtd)} faturas pagas</span></div>
-        <div className="kpi"><small>Faturas em aberto</small><b className="num">{reais(d.faturas_abertas.total)}</b><span>{n(d.faturas_abertas.qtd)} faturas</span></div>
-        <div className="kpi"><small>Contas ativas</small><b className="num">{n(ativas)}</b><span>{d.faturas_pagas.qtd === 0 ? 'nenhuma fatura paga: foram liberadas à mão' : `${n(d.faturas_pagas.qtd)} faturas pagas até hoje`}</span></div>
-        <div className="kpi"><small>Em teste, ainda com acesso</small><b className="num">{n(d.trial_ate_fim)}</b><span>entram em cobrança quando o teste acabar</span></div>
-      </div>
+    <Pagina titulo="Receita" subtitulo="O que entrou de verdade e quanto a IA pesa em cada plano" heads={heads}>
+      <Cartao g={6} titulo={`De cada plano de ${reais(PRECO_MENSAL)}`} nota="só descontando a IA">
+        {porCliente !== null ? (
+          <>
+            <div className="plano-v">
+              <b>{reais(PRECO_MENSAL - porCliente)}</b>
+              <span>sobram por cliente</span>
+            </div>
+            <div className="pilha-sit" style={{ height: 34, borderRadius: 10 }}>
+              <i style={{ width: `${(porCliente / PRECO_MENSAL) * 100}%`, background: '#cc3340', minWidth: 3 }} />
+              <i style={{ flex: 1, background: '#0e8250' }} />
+            </div>
+            <div className="plano-leg">
+              <span><i style={{ background: '#cc3340' }} />IA <b>{reais(porCliente)}</b></span>
+              <span><i style={{ background: '#0e8250' }} />Sobra <b>{reais(PRECO_MENSAL - porCliente)}</b></span>
+            </div>
+          </>
+        ) : uso.ausente ? (
+          <p className="texto-ajuda">Falta aplicar a migration 20261121120000.</p>
+        ) : (
+          <span className="skel" style={{ height: 110 }} />
+        )}
+        <p className="rodape-cartao">{mesRotulo(mes)}, até hoje. Ainda sem descontar taxa do meio de pagamento, servidor, imposto e equipe: é o piso do custo, não o lucro. Plano anual: {reais(PRECO_ANUAL)}.</p>
+      </Cartao>
 
-      <div className="grade">
-        <section className="card g-6">
-          <div className="card-cab"><h2>O que a IA custa por cliente</h2></div>
-          <div className="fatos">
-            <div><span>Preço do plano mensal</span><span className="num">{reais(PRECO_MENSAL)}</span></div>
-            <div><span>Custo de IA no mês por cliente que usou</span><span className="num">{porCliente !== null ? reais(porCliente) : uso.carregando ? '...' : 'sem uso'}</span></div>
-            <div><span>Sobra por cliente, só descontando a IA</span><span className="num">{porCliente !== null ? reais(PRECO_MENSAL - porCliente) : '–'}</span></div>
-            <div><span>IA como parte do plano</span><span className="num">{porCliente !== null ? pct(porCliente, PRECO_MENSAL) : '–'}</span></div>
-          </div>
-          <p className="suave pq" style={{ marginTop: 10 }}>
-            {mesRotulo(mes)}, até hoje. Não desconta taxa do meio de pagamento, servidor, imposto nem a equipe. É o piso do custo, não o lucro. Plano anual: {reais(PRECO_ANUAL)}.
-          </p>
-        </section>
-
-        <section className="card g-6">
-          <div className="card-cab"><h2>Simulação para a virada</h2></div>
-          <p className="suave pq" style={{ marginBottom: 8 }}>Simulação, não previsão: quanto entraria por mês se uma parte dos {n(d.trial_ate_fim)} que estão em teste virasse plano mensal.</p>
-          <div className="fatos">
-            {[0.1, 0.2, 0.3].map((c) => (
-              <div key={c}>
-                <span>{Math.round(c * 100)}% viram assinantes ({n(Math.round(d.trial_ate_fim * c))} contas)</span>
-                <span className="num">{reais(d.trial_ate_fim * c * PRECO_MENSAL)} por mês</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="card g-6">
-          <div className="card-cab"><h2>Carteira por situação</h2></div>
-          {d.carteira.length ? (
-            <div className="lista">
-              {d.carteira.map((c) => (
-                <div className="linha" key={c.situacao + c.plano}>
-                  <div className="meio"><span className={`situacao s-${c.situacao}`}>{NOME_SITUACAO[c.situacao] ?? c.situacao}</span></div>
-                  <div className="val num">{n(c.n)}<small>plano {c.plano}</small></div>
+      <Cartao g={6} titulo="Simulação para a virada" nota="não é previsão">
+        {d ? (
+          <>
+            <div className="sim">
+              {[0.1, 0.2, 0.3].map((c) => (
+                <div key={c}>
+                  <div className="v">{reais(d.trial_ate_fim * c * PRECO_MENSAL)}</div>
+                  <div className="b" style={{ height: `${c * 100 * 2.2}%` }} />
                 </div>
               ))}
             </div>
-          ) : (
-            <p className="suave">Nenhuma conta ainda.</p>
-          )}
-        </section>
-
-        <section className="card g-6">
-          <div className="card-cab"><h2>Faturas pagas por mês</h2></div>
-          {d.por_mes.length ? (
-            <div className="fatos">
-              {d.por_mes.map((m) => (
-                <div key={m.mes}><span>{mesRotulo(m.mes)} · {n(m.qtd)} faturas</span><span className="num">{reais(m.total)}</span></div>
+            <div className="sim-n">
+              {[0.1, 0.2, 0.3].map((c) => (
+                <span key={c}>{Math.round(c * 100)}% dos {n(d.trial_ate_fim)}<br />{n(Math.round(d.trial_ate_fim * c))} contas</span>
               ))}
             </div>
+            <p className="rodape-cartao">Por mês, se essa parte dos que estão em teste virasse plano mensal.</p>
+          </>
+        ) : (
+          <span className="skel" style={{ height: 200 }} />
+        )}
+      </Cartao>
+
+      <Cartao g={6} titulo="Carteira">
+        {d ? (
+          d.carteira.length ? (
+            <>
+              <div className="pilha-sit">
+                {d.carteira.map((c) => (
+                  <i key={c.situacao + c.plano} style={{ width: `${(c.n / Math.max(1, totalCarteira)) * 100}%`, background: COR[c.situacao] ?? '#8a90b0' }} />
+                ))}
+              </div>
+              <div className="linhas">
+                {d.carteira.map((c) => (
+                  <div className="sit" key={c.situacao + c.plano} style={{ padding: '11px 0' }}>
+                    <i style={{ background: COR[c.situacao] ?? '#8a90b0' }} />
+                    {NOME_SITUACAO[c.situacao] ?? c.situacao}
+                    <b>{n(c.n)}</b>
+                  </div>
+                ))}
+              </div>
+            </>
           ) : (
-            <p className="suave">Nenhuma fatura paga ainda. A cobrança começa depois do período grátis.</p>
-          )}
-        </section>
-      </div>
-    </div>
+            <p className="texto-ajuda">Nenhuma conta ainda.</p>
+          )
+        ) : (
+          <span className="skel" style={{ height: 200 }} />
+        )}
+      </Cartao>
+
+      <Cartao g={6} titulo="Faturas pagas por mês">
+        {d ? (
+          d.por_mes.length ? (
+            d.por_mes.map((m) => (
+              <div className="fato" key={m.mes}>
+                <span>{mesRotulo(m.mes)} · {n(m.qtd)} faturas</span>
+                <b>{reais(m.total)}</b>
+              </div>
+            ))
+          ) : (
+            <div className="vvazio">Nenhuma fatura paga ainda.<br />Quando a cobrança começar, cada mês aparece aqui.</div>
+          )
+        ) : (
+          <span className="skel" style={{ height: 160 }} />
+        )}
+      </Cartao>
+    </Pagina>
   )
 }

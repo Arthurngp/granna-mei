@@ -13,6 +13,7 @@ type Aba = 'visao' | 'clientes' | 'granninha' | 'auditoria'
 export default function App() {
   const [etapa, setEtapa] = useState<Etapa>('carregando')
   const [aba, setAba] = useState<Aba>('visao')
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
 
   /** Decide a etapa: sem login → entrar; não é admin → sem acesso; sem 2ª etapa → ativar ou pedir código. */
   const avaliar = useCallback(async () => {
@@ -53,33 +54,36 @@ export default function App() {
 
   return (
     <div>
-      <header className="adm-topo">
-        <div className="linha1">
-          <img src={`${import.meta.env.BASE_URL}logo-96.png`} alt="" />
-          <div className="cresce">
-            <b>Granninha</b> <small>Admin{MOCK ? ' · dados de exemplo' : ''}</small>
-          </div>
-          <button type="button" onClick={sair}>
-            Sair
-          </button>
-        </div>
-        <nav className="adm-abas" aria-label="Seções">
-          {(
-            [
-              ['visao', 'Visão geral'],
-              ['clientes', 'Clientes'],
-              ['granninha', 'Granninha'],
-              ['auditoria', 'Auditoria'],
-            ] as const
-          ).map(([v, r]) => (
-            <button key={v} type="button" aria-pressed={aba === v} onClick={() => setAba(v)}>
-              {r}
+      <div className={`cabeca ${aba === 'visao' ? 'larga' : ''}`}>
+        <header className="adm-topo">
+          <div className="linha1">
+            <img src={`${import.meta.env.BASE_URL}logo-96.png`} alt="" />
+            <div className="cresce">
+              <b>Granninha</b> <small>Admin{MOCK ? ' · dados de exemplo' : ''}</small>
+            </div>
+            <button type="button" onClick={sair}>
+              Sair
             </button>
-          ))}
-        </nav>
-      </header>
-      <main className="adm-conteudo">
-        {aba === 'visao' && <Visao />}
+          </div>
+          <nav className="adm-abas" aria-label="Seções">
+            {(
+              [
+                ['visao', 'Visão geral'],
+                ['clientes', 'Clientes'],
+                ['granninha', 'Granninha'],
+                ['auditoria', 'Auditoria'],
+              ] as const
+            ).map(([v, r]) => (
+              <button key={v} type="button" aria-pressed={aba === v} onClick={() => setAba(v)}>
+                {r}
+              </button>
+            ))}
+          </nav>
+        </header>
+        {aba === 'visao' && <div ref={setSlot} />}
+      </div>
+      <main className={`adm-conteudo ${aba === 'visao' ? 'larga' : ''}`}>
+        {aba === 'visao' && <Visao slot={slot} />}
         {aba === 'clientes' && <Clientes />}
         {aba === 'granninha' && <Granninha />}
         {aba === 'auditoria' && <Auditoria />}
