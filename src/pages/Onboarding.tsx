@@ -6,7 +6,7 @@ import { CampoDinheiro, Chave, Mascote, Seg, type Pose } from '../components/ui'
 import { FAIXAS_FATURAMENTO, FAIXAS_RENDA, linkWhats, OCUPACAO_MIN, RAMOS, UFS } from '../lib/config'
 import { evento } from '../lib/eventos'
 import { salvarPerfilPublico, type PerfilPublico } from '../lib/remoto'
-import { DIAS_SEMANA, documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaMeses } from '../lib/format'
+import { documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaMeses } from '../lib/format'
 import { categoriasPadrao } from '../lib/seed'
 import { novoId, useApp } from '../lib/store'
 import type { Carteira, Conta, Fixa, TipoCarteira } from '../lib/tipos'
@@ -50,8 +50,9 @@ const GUIA: { pose: Pose; titulo: string; texto: string }[] = [
   { pose: 'loja', titulo: 'Qual é o seu ramo?', texto: 'Assim eu já separo seus ganhos e gastos do jeito certo.' },
   { pose: 'moedas', titulo: 'Onde fica o seu dinheiro?', texto: 'Marque as contas que você usa e quanto tem em cada uma hoje. Pode pôr mais de um banco.' },
   { pose: 'calculadora', titulo: 'Você usa cartão de crédito?', texto: 'Me conta seus cartões e os dias da fatura. A compra no cartão entra nos seus gastos quando você paga a fatura.' },
-  { pose: 'calendario', titulo: 'Quais contas chegam todo mês?', texto: 'Eu aviso antes de vencer, para você não pagar multa por esquecimento.' },
-  { pose: 'sino', titulo: 'Quando eu posso te chamar?', texto: 'Escolha o melhor horário para o resumo e os lembretes.' },
+  { pose: 'calendario', titulo: 'Quais contas chegam todo mês?', texto: 'Marque as que você tem. Elas entram na sua lista de contas a pagar, com o dia do vencimento.' },
+  // Só diz o que é verdade hoje: o lembrete de conta vencendo está sendo liberado aos poucos, então a escolha fica guardada e nada mais é prometido.
+  { pose: 'sino', titulo: 'Lembretes de conta', texto: 'Escolha o horário e a antecedência que preferir. Os lembretes estão sendo liberados aos poucos, e a sua escolha já fica guardada.' },
   { pose: 'hero', titulo: 'Último passo: confirme seu WhatsApp', texto: 'É assim que eu sei que o número é seu. Sem isso, eu não consigo anotar o que você me mandar.' },
   // Passo EXTRA, só depois de confirmar o número, e opcional: perguntar antes pioraria o abandono em "confirmar WhatsApp".
   { pose: 'duvida', titulo: 'Quer me contar mais?', texto: 'Se quiser, me conta um pouco sobre você. É opcional, e me ajuda a ser mais útil para quem trabalha como você.' },
@@ -110,8 +111,9 @@ export default function Onboarding() {
     { id: 'luz', nome: 'Luz', categoriaId: 'contas-casa', on: false, valor: 0, dia: 10 },
     { id: 'celular', nome: 'Celular', categoriaId: 'contas-casa', on: false, valor: 0, dia: 5 },
   ])
-  const [resumoDia, setResumoDia] = useState(1)
-  const [resumoHora, setResumoHora] = useState('08:00')
+  // O resumo da semana ainda não existe: a tela não o oferece mais, e o perfil segue gravando o padrão de sempre (segunda, 08:00).
+  const resumoDia = 1
+  const resumoHora = '08:00'
   const [lembreteHora, setLembreteHora] = useState('09:00')
   const [antecedencia, setAntecedencia] = useState('1')
 
@@ -611,27 +613,6 @@ export default function Onboarding() {
 
         {passo === 5 && (
           <div className="pilha">
-            <div className="card pilha">
-              <div>
-                <div className="rotulo">Resumo da semana: em que dia?</div>
-                <div className="dias">
-                  {DIAS_SEMANA.map((d, i) => (
-                    <button type="button" key={d} aria-pressed={resumoDia === i} aria-label={d} onClick={() => setResumoDia(i)}>
-                      {d.slice(0, 3)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <label className="campo">
-                <span>A que horas?</span>
-                <select className="entrada num" value={resumoHora} onChange={(e) => setResumoHora(e.target.value)}>
-                  {HORAS.map((h) => (
-                    <option key={h}>{h}</option>
-                  ))}
-                </select>
-                <small>Toda {DIAS_SEMANA[resumoDia]} eu conto quanto entrou, quanto saiu e o que vem pela frente.</small>
-              </label>
-            </div>
             <div className="card pilha">
               <label className="campo">
                 <span>Lembrete de conta vencendo: a que horas?</span>
