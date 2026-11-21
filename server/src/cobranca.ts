@@ -160,11 +160,13 @@ async function abrir(req: IncomingMessage, userId: string, email: string, plano:
 function resumir(sub: Stripe.Subscription): SubResumo {
   const fins = sub.items.data.map((i) => i.current_period_end).filter((n) => Number.isFinite(n))
   const intervalo = sub.items.data[0]?.price?.recurring?.interval
+  const inicios = sub.items.data.map((i) => i.current_period_start).filter((n) => Number.isFinite(n))
   return {
     status: sub.status,
     intervalo: intervalo === 'year' ? 'year' : intervalo === 'month' ? 'month' : null,
     trial_end: sub.trial_end ?? null,
     periodo_fim: fins.length ? Math.max(...fins) : null,
+    periodo_inicio: inicios.length ? Math.min(...inicios) : null,
     cancela_no_fim: Boolean(sub.cancel_at_period_end || sub.cancel_at),
     cancel_at: sub.cancel_at ?? null,
   }

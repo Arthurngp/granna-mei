@@ -8,6 +8,7 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  cobranca 20261121120000_cobranca_stripe.sql    colunas da Stripe em assinaturas e faturas (só adiciona)
   avisos  20261120100000_avisos.sql              tabela `avisos`: registro de cada aviso de conta vencendo
           enviado, para nunca mandar em dobro. Sem ela o serviço NÃO envia aviso nenhum (de propósito).
   evento  20261119120000_mensagens_evento.sql   coluna `evento` + índice: retomada de mensagem presa
@@ -34,9 +35,16 @@ MIGRATIONS = {
     "oferta": "20261118020000_oferta_ate_31_12.sql",
     "alerta": "20261119200000_alerta_admin.sql",
     "avisos": "20261120100000_avisos.sql",
+    "cobranca": "20261121120000_cobranca_stripe.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
+    # Só adiciona colunas e índices: confere as 5 colunas e o índice único que o upsert de fatura usa.
+    "cobranca": """select
+        (select count(*) from information_schema.columns where table_schema='public' and
+          ((table_name='assinaturas' and column_name in ('stripe_customer_id','stripe_subscription_id','atrasada_desde','cancela_em'))
+           or (table_name='faturas' and column_name='stripe_invoice_id'))) as colunas_de_5,
+        (select count(*) from pg_indexes where schemaname='public' and indexname='faturas_stripe_invoice') as indice_fatura""",
     # A tabela existir não basta: sem RLS ligada e com permissão para o cliente, qualquer um leria os números
     # de WhatsApp de quem foi avisado. Confere os três efeitos.
     "avisos": """select

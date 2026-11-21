@@ -17,6 +17,8 @@ export interface SubResumo {
   trial_end: number | null
   /** Fim do período atual (Unix, segundos). Nas versões novas da API fica no item, não na assinatura. */
   periodo_fim: number | null
+  /** Início do período atual: no atraso, é o dia em que a cobrança que falhou venceu. */
+  periodo_inicio?: number | null
   cancela_no_fim: boolean
   cancel_at: number | null
 }
@@ -76,7 +78,8 @@ export function mapear(sub: SubResumo, atual: AssinaturaAtual, agora: Date): Mud
       return { status: 'ativa', plano, prox_cobranca: sub.periodo_fim ? dataSP(sub.periodo_fim) : undefined, cancela_em, atrasada_desde: null }
     case 'past_due': {
       if (atual.status === 'bloqueada' && atual.atrasada_desde) return { status: 'bloqueada', plano, cancela_em, atrasada_desde: atual.atrasada_desde }
-      return { status: 'atrasada', plano, cancela_em, atrasada_desde: atual.atrasada_desde ?? agora.toISOString() }
+      // O aviso de renovação adianta o período antes do de falha; o dia que venceu é o início do período atual.
+      return { status: 'atrasada', plano, prox_cobranca: sub.periodo_inicio ? dataSP(sub.periodo_inicio) : undefined, cancela_em, atrasada_desde: atual.atrasada_desde ?? agora.toISOString() }
     }
     case 'unpaid':
     case 'canceled':

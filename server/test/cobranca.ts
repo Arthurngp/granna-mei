@@ -77,6 +77,11 @@ await caso('past_due: atrasada e começa a contar a carência; aviso repetido N�
   assert.equal(b.atrasada_desde, antes)
 })
 
+await caso('past_due: "venceu em" é o início do período que falhou, não o próximo (aviso de renovação chega antes)', () => {
+  const m = mapear(sub({ status: 'past_due', periodo_inicio: ts('2027-02-01T03:00:00Z'), periodo_fim: ts('2027-03-01T03:00:00Z') }), { ...base, status: 'ativa' }, AGORA)!
+  assert.equal(m.prox_cobranca, '2027-02-01')
+})
+
 await caso('past_due depois de a carência já ter bloqueado: continua bloqueada (não pisca o acesso)', () => {
   const m = mapear(sub({ status: 'past_due' }), { ...base, status: 'bloqueada', atrasada_desde: '2026-11-19T10:00:00.000Z' }, AGORA)!
   assert.equal(m.status, 'bloqueada')
