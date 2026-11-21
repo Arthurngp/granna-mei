@@ -21,7 +21,7 @@
  * Função pura mais executor com dependências injetadas (como avisos.ts): o teste roda a seco, com relógio e gateway falsos.
  */
 import { dataSP, horaSP } from './avisos.ts'
-import { limparSaida } from './seguranca.ts'
+import { erroSeguro, limparSaida } from './seguranca.ts'
 
 export type RegraRetencao = 'nunca_mandou' | 'parou_de_usar'
 export type ModoRetencao = 'desligado' | 'ensaio' | 'piloto' | 'todos'
@@ -235,7 +235,7 @@ export async function rodarRetencao(d: DepsRetencao, agora = new Date()): Promis
           await d.concluir(c.user_id, cfg.regra, false).catch((e2) => log.push(`não consegui soltar a reserva: ${(e2 as Error).message}`))
           estado.falhas++
           estado.falhasSeguidas++
-          estado.ultimoErro = (e as Error).message.slice(0, 200)
+          estado.ultimoErro = erroSeguro((e as Error).message)
           erro = estado.ultimoErro
           const antes = estado.falhasPorPessoa.get(c.user_id)
           estado.falhasPorPessoa.set(c.user_id, { dia: hoje, n: antes && antes.dia === hoje ? antes.n + 1 : 1 })
@@ -249,7 +249,7 @@ export async function rodarRetencao(d: DepsRetencao, agora = new Date()): Promis
       }
     }
   } catch (e) {
-    erro = (e as Error).message.slice(0, 200)
+    erro = erroSeguro((e as Error).message)
     estado.ultimoErro = erro
     log.push(`erro no ciclo, nada enviado depois dele: ${erro}`)
   } finally {

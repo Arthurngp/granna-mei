@@ -126,6 +126,8 @@ CONFERE = {
             and has_function_privilege('anon', p.oid, 'execute')) as funcoes_admin_abertas_ao_anon,
         (select count(*) from pg_constraint where conrelid = 'public.avisos'::regclass and contype = 'c' and pg_get_constraintdef(oid) ilike '%retencao_nunca%') as avisos_aceita_tipo_novo,
         (select count(*) from information_schema.columns where table_schema='public' and table_name='perfis' and column_name='avisos_off') as coluna_sair,
+        -- Pré-requisito: a função de elegíveis lê estas duas tabelas (migration `limite`, já aplicada). Tem que ser 2.
+        (select count(*) from information_schema.tables where table_schema='public' and table_name in ('config_limite','limite_cliente')) as tabelas_do_limite_de_2,
         -- to_jsonb em vez de citar a coluna: antes da migration ela não existe, e citá-la faria o ANTES inteiro falhar.
         (select to_jsonb(s) ->> 'numero_desde' from public.granninha_saude s where s.id = 1) as numero_desde""",
     # Limite mensal de lançamentos configurável. Cria 2 tabelas (padrão de todos e limite próprio por cliente) e 3 funções do admin.

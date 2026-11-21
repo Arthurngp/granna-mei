@@ -249,6 +249,18 @@ await caso('falhou o envio: solta a reserva (pode tentar de novo), conta a falha
   assert.equal(f.chamadas.ciclos[0].erro, 'gateway recusou')
 })
 
+await caso('o erro do gateway NUNCA leva número nem JID do cliente para o /saude, o log ou a tela do admin', async () => {
+  const f = fake({ configs: TODOS, lista: { nunca_mandou: [pessoa(1)] } })
+  f.deps.enviar = async () => {
+    throw new Error('gateway envio 400: number 5581999990001 is not registered (5581999990001@s.whatsapp.net)')
+  }
+  const log = await R.rodarRetencao(f.deps, em('10:00'))
+  const tudo = [R.estado.ultimoErro ?? '', log.join('\n'), f.chamadas.ciclos[0]?.erro ?? ''].join('\n')
+  assert.match(tudo, /gateway envio 400/, 'o erro continua útil para quem investiga')
+  assert.doesNotMatch(tudo, /\d{8,}/, `sem número de telefone: ${tudo}`)
+  assert.doesNotMatch(tudo, /@/, `sem JID: ${tudo}`)
+})
+
 await caso('3 falhas seguidas param os lembretes por 30 minutos, e depois voltam', async () => {
   const f = fake({ configs: TODOS, lista: { nunca_mandou: [pessoa(1), pessoa(2), pessoa(3), pessoa(4)] }, falharEnvio: true })
   await R.rodarRetencao(f.deps, em('10:00'))

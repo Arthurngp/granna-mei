@@ -15,6 +15,9 @@
 --   - admin_retencao_config / _previa / _definir: o admin lê, vê a prévia e muda (com motivo e auditoria).
 --   - avisos.tipo passa a aceitar os dois tipos novos.
 --
+-- Depende de 20261121200000_limite_lancamentos.sql (já aplicada em produção): retencao_elegiveis lê config_limite e limite_cliente para
+-- não chamar quem já estourou o limite do mês. Sem elas a função falha ao rodar e o servidor, por isso, não envia nada.
+--
 -- Idempotente: pode rodar de novo sem efeito.
 
 -- ---------- avisos: tipos novos ----------
@@ -84,18 +87,27 @@ grant select on public.config_retencao to service_role;
 
 -- ---------- Quem é elegível ----------
 -- Mesma definição da lista "Precisa de você hoje" do admin (20261121161000_admin_segunda_mensagem.sql, admin_acoes): mensagens em
--- `mensagens`, e a PRIMEIRA é só o código que confirma o número (qtd <= 1 = nunca usou). Duas diferenças de propósito: o atraso é o
--- configurado aqui (24 h e 48 h; a lista manual usa 7 dias para "sumiu"), e só entra quem escreveu para o número ATUAL.
---   nunca_mandou:  confirmou o WhatsApp (qtd <= 1), a primeira mensagem tem pelo menos p_atraso horas e no máximo 30 dias.
---   parou_de_usar: já usou (qtd >= 2), a última mensagem tem pelo menos p_atraso horas e no máximo 30 dias.
+-- `mensagens`, e a PRIMEIRA é só o código que confirma o número (qtd <= 1 = nunca usou pelo WhatsApp). Diferenças de propósito: o
+-- atraso é o configurado aqui (24 h e 48 h; a lista manual usa 7 dias para "sumiu"), e só entra quem escreveu para o número ATUAL.
+--   nunca_mandou:  confirmou o WhatsApp (qtd <= 1), NÃO lançou nada nem pelo painel, e a primeira mensagem tem pelo menos p_atraso
+--                  horas e no máximo 30 dias.
+--   parou_de_usar: já usou (qtd >= 2) e a ÚLTIMA atividade, mensagem ou lançamento (pelo painel também), tem pelo menos p_atraso horas
+--                  e no máximo 30 dias.
+-- "Usou" inclui o painel: quem lança todo dia pelo painel e não escreve no WhatsApp não pode ouvir "faz uns dias que você não me manda
+-- nada". Para isso vale o `criado_em` do lançamento (o carimbo real), não a `data`, que o cliente escolhe e pode ser retroativa.
 -- Em qualquer caso: cliente (não admin), WhatsApp verificado, sem exclusão pedida, sem SAIR, com acesso liberado (quem está com teste
--- vencido bateria no "acesso pausado") e que ainda não recebeu esta regra (uma vez por pessoa por regra).
+-- vencido bateria no "acesso pausado"), que ainda não recebeu esta regra (uma vez por pessoa por regra) e que NÃO estourou o limite do
+-- mês (quem chegou no limite ouviria "me conta que eu anoto" e, ao responder, "você chegou ao limite"). O limite é o de
+-- admin_limite_cliente: o próprio do cliente, senão o padrão, senão 300 (depende da migration 20261121200000_limite_lancamentos.sql).
 -- p_ignorar_marco existe só para a prévia contar quem ficaria de fora por ter escrito apenas para o número antigo.
 create or replace function public.retencao_elegiveis(p_regra text, p_atraso integer, p_ignorar_marco boolean default false)
 returns table (user_id uuid, nome text, negocio text, whats text, whats_chave text, telefone text, qtd bigint, primeira timestamptz, ultima timestamptz, horas integer)
 language plpgsql stable security definer set search_path = ''
 as $$
-declare marco timestamptz; hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+declare
+  marco timestamptz;
+  hoje date := (now() at time zone 'America/Sao_Paulo')::date;
+  inicio_mes timestamptz := date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo';
 begin
   if p_regra not in ('nunca_mandou', 'parou_de_usar') or p_atraso is null or p_atraso < 1 or p_atraso > 720 then return; end if;
   select s.numero_desde into marco from public.granninha_saude s where s.id = 1;
@@ -104,7 +116,7 @@ begin
   return query
   with u as (
     select p.id, p.nome, p.negocio, p.whats, p.whats_chave,
-           count(m.id) as qtd, min(m.criado_em) as primeira, max(m.criado_em) as ultima,
+           count(m.id) as qtd, min(m.criado_em) as primeira, max(m.criado_em) as ultima_msg,
            count(m.id) filter (where m.criado_em >= marco) as desde_marco,
            (array_agg(m.telefone order by m.criado_em desc))[1] as telefone
       from public.perfis p
@@ -113,15 +125,23 @@ begin
      where p.papel = 'cliente' and p.whats_verificado and p.exclusao_em is null and not p.avisos_off
        and (a.status in ('ativa', 'atrasada', 'cortesia') or (a.status = 'trial' and a.trial_fim >= hoje))
      group by p.id, p.nome, p.negocio, p.whats, p.whats_chave
+  ), v as (
+    select u.*,
+           (select count(*) from public.lancamentos l where l.user_id = u.id) as lancs,
+           greatest(u.ultima_msg, (select max(l.criado_em) from public.lancamentos l where l.user_id = u.id)) as ultima,
+           (select count(*) from public.mensagens mm where mm.user_id = u.id and mm.status = 'ok' and mm.criado_em >= inicio_mes) as uso_mes,
+           coalesce((select lc.lancamentos from public.limite_cliente lc where lc.user_id = u.id), (select cl.lancamentos from public.config_limite cl where cl.id), 300) as limite
+      from u
   )
-  select u.id, u.nome, u.negocio, u.whats, u.whats_chave, u.telefone, u.qtd, u.primeira, u.ultima,
-         floor(extract(epoch from (now() - case p_regra when 'nunca_mandou' then u.primeira else u.ultima end)) / 3600)::integer
-    from u
-   where (p_ignorar_marco or u.desde_marco >= 1)
-     and not exists (select 1 from public.avisos av where av.user_id = u.id and av.chave = 'ret:' || p_regra || ':' || u.id::text)
-     and (   (p_regra = 'nunca_mandou' and u.qtd <= 1 and u.primeira <= now() - make_interval(hours => p_atraso) and u.primeira >= now() - interval '30 days')
-          or (p_regra = 'parou_de_usar' and u.qtd >= 2 and u.ultima <= now() - make_interval(hours => p_atraso) and u.ultima >= now() - interval '30 days'))
-   order by case p_regra when 'nunca_mandou' then u.primeira else u.ultima end asc, u.id;
+  select v.id, v.nome, v.negocio, v.whats, v.whats_chave, v.telefone, v.qtd, v.primeira, v.ultima,
+         floor(extract(epoch from (now() - case p_regra when 'nunca_mandou' then v.primeira else v.ultima end)) / 3600)::integer
+    from v
+   where (p_ignorar_marco or v.desde_marco >= 1)
+     and v.uso_mes < v.limite
+     and not exists (select 1 from public.avisos av where av.user_id = v.id and av.chave = 'ret:' || p_regra || ':' || v.id::text)
+     and (   (p_regra = 'nunca_mandou' and v.qtd <= 1 and v.lancs = 0 and v.primeira <= now() - make_interval(hours => p_atraso) and v.primeira >= now() - interval '30 days')
+          or (p_regra = 'parou_de_usar' and v.qtd >= 2 and v.ultima <= now() - make_interval(hours => p_atraso) and v.ultima >= now() - interval '30 days'))
+   order by case p_regra when 'nunca_mandou' then v.primeira else v.ultima end asc, v.id;
 end $$;
 -- Só o servidor (service_role) executa: devolve nome e telefone de clientes.
 revoke all on function public.retencao_elegiveis(text, integer, boolean) from public, anon, authenticated;

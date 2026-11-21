@@ -12,6 +12,7 @@ import tempfile
 
 R = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MIG = R + "/supabase/migrations/20261121210000_retencao.sql"
+MIG_LIMITE = R + "/supabase/migrations/20261121200000_limite_lancamentos.sql"  # pré-requisito: já está em produção
 D = tempfile.mkdtemp(prefix="pg-retencao-")
 PORTA = "55434"
 PG = "/opt/homebrew/bin/"
@@ -57,18 +58,20 @@ create table public.avisos (chave text primary key, user_id uuid not null refere
   tipo text not null default 'vencimento' check (tipo in ('vencimento')), referencia date not null default current_date, para text not null default 'x',
   status text not null default 'enviando' check (status in ('enviando', 'enviado')), criado_em timestamptz not null default now(), enviado_em timestamptz);
 create table public.granninha_saude (id integer primary key, whatsapp_estado text, whatsapp_numero text, fila integer, atualizado_em timestamptz default now());
+create table public.lancamentos (user_id uuid not null, id text not null, criado_em timestamptz not null default now(), origem text not null default 'painel', primary key (user_id, id));
 create table public.admin_auditoria (id bigint generated always as identity primary key, admin_id uuid not null references auth.users (id), acao text not null,
   alvo_user_id uuid references auth.users (id) on delete set null, detalhes jsonb not null default '{}'::jsonb, criado_em timestamptz not null default now());
 insert into public.granninha_saude (id, whatsapp_estado, whatsapp_numero) values (1, 'CONNECTED', '5511936192452');
 """
 
 H = lambda h: "now() - interval '%d hours'" % h
+INICIO_MES = "(date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo')"
 
 
 def monta():
     """Zera os dados do teste. 1 a 40 são clientes possíveis, 99 é o admin. O número atual está no ar há 45 dias (as datas de mensagem
     do teste ficam todas depois disso, salvo nos casos do número antigo)."""
-    ok("truncate public.mensagens, public.avisos, public.admin_auditoria; delete from public.assinaturas; delete from public.perfis; delete from auth.users;")
+    ok("truncate public.mensagens, public.avisos, public.admin_auditoria, public.lancamentos; delete from public.limite_cliente; update public.config_limite set lancamentos = 300; delete from public.assinaturas; delete from public.perfis; delete from auth.users;")
     ok("update public.config_retencao set modo = 'desligado', atraso_horas = case regra when 'nunca_mandou' then 24 else 48 end")
     ok("update public.granninha_saude set numero_desde = now() - interval '45 days', ultimo_numero = whatsapp_numero where id = 1")
 
@@ -83,6 +86,16 @@ def cliente(n, status="ativa", verificado=True, papel="cliente", exclusao=False,
 
 def msg(n, quando_sql, tel=None):
     ok("insert into public.mensagens (user_id, telefone, criado_em) values ('%s', %s, %s)" % (uuid(n), "null" if tel is None else "'%s'" % tel, quando_sql))
+
+
+def lanc(n, quando_sql, origem="painel"):
+    ok("insert into public.lancamentos (user_id, id, criado_em, origem) values ('%s', 'l' || floor(random() * 1000000)::text, %s, '%s')" % (uuid(n), quando_sql, origem))
+
+
+def msg_no_mes(n, quantas, minutos0=1):
+    """Mensagens ok DENTRO do mês atual (para contar no limite), sem ficarem a mais de 25 dias (a regra só olha até 30)."""
+    for i in range(quantas):
+        msg(n, "greatest(%s + interval '%d minutes', now() - interval '25 days')" % (INICIO_MES, minutos0 + i))
 
 
 def elegiveis(regra, atraso, ignorar=False):
@@ -162,6 +175,33 @@ def suite():
     confere("regra ou atraso inválidos não devolvem ninguém", elegiveis("qualquer", 24) == [] and elegiveis("nunca_mandou", 0) == [] and elegiveis("nunca_mandou", 721) == [])
     ordem = ok("select string_agg(replace(user_id::text, '00000000-0000-0000-0000-', '')::int::text, ',') from public.retencao_elegiveis('parou_de_usar', 48)")
     confere("sai primeiro quem está parado há mais tempo (20, parado há 60 h, antes do 3, há 50 h)", ordem == "20,3", ordem)
+
+    # ---------- uso fora do WhatsApp: o painel conta ----------
+    cliente(50); msg(50, H(30)); lanc(50, H(10))                                           # confirmou o número e lança pelo painel
+    cliente(51); msg(51, H(100)); msg(51, H(90)); msg(51, H(60)); lanc(51, H(5))           # usou o WhatsApp, parou, mas lançou pelo painel há 5 h
+    cliente(52); msg(52, H(100)); msg(52, H(90)); msg(52, H(60)); lanc(52, H(80))          # o lançamento do painel é antigo: segue parado
+    rn = elegiveis("nunca_mandou", 24)
+    confere("quem confirmou o número mas lança pelo painel NÃO recebe 'nunca mandou' (50)", 50 not in rn, rn)
+    rp = elegiveis("parou_de_usar", 48)
+    confere("quem lançou pelo painel há 5 h NÃO recebe 'parou de usar' (51), mesmo com a última mensagem parada há 60 h", 51 not in rp, rp)
+    confere("lançamento do painel antigo (80 h) não segura: quem parou de verdade (52) segue elegível", 52 in rp, rp)
+    ok("update public.lancamentos set criado_em = %s where user_id = '%s'" % (H(70), uuid(52)))
+    ok("insert into public.lancamentos (user_id, id, criado_em, origem) values ('%s', 'data-futura', %s, 'painel')" % (uuid(52), H(80)))
+    confere("o que vale é o carimbo de criação do lançamento, não a data que o cliente escolheu", 52 in elegiveis("parou_de_usar", 48))
+
+    # ---------- limite do mês: quem estourou não recebe "me conta que eu anoto" ----------
+    cliente(60); msg_no_mes(60, 3); ok("insert into public.limite_cliente (user_id, lancamentos, motivo) values ('%s', 2, 'plano reduzido')" % uuid(60))
+    cliente(61); msg_no_mes(61, 3)
+    cliente(62); msg_no_mes(62, 3); ok("insert into public.limite_cliente (user_id, lancamentos, motivo) values ('%s', 100, 'plano maior')" % uuid(62))
+    r = elegiveis("parou_de_usar", 1)
+    confere("limite próprio estourado (3 de 2): não recebe (60)", 60 not in r, r)
+    confere("sem limite próprio o padrão (300) está longe: recebe (61)", 61 in r, r)
+    ok("update public.config_limite set lancamentos = 2")
+    r = elegiveis("parou_de_usar", 1)
+    confere("padrão baixado para 2: quem segue o padrão e já usou 3 deixa de receber (61)", 61 not in r, r)
+    confere("o limite próprio MAIOR vale sobre o padrão: segue elegível (62)", 62 in r, r)
+    ok("update public.config_limite set lancamentos = 300")
+    ok("delete from public.limite_cliente")
 
     # ---------- o número novo ----------
     # Hoje o número foi trocado: quem só escreveu para o número ANTIGO nunca recebeu contato do novo e não pode receber lembrete.
@@ -274,6 +314,7 @@ sh(PG + "pg_ctl", "-D", D, "-o", "-p %s -c listen_addresses=127.0.0.1 -c unix_so
 try:
     psql("create database teste", db="postgres")
     ok(ESQUELETO)
+    ok(open(MIG_LIMITE, encoding="utf-8").read())  # a retenção depende das tabelas do limite
     sql_orig = open(MIG, encoding="utf-8").read()
     ok(sql_orig)
     EM_TESTE[0] = sql_orig
@@ -282,13 +323,17 @@ try:
 
     print("\n== provas por mutação (quebra a migration de propósito e o teste tem que cair) ==")
     muts = [
-        ("o marco do número novo deixa de valer (contato frio passa)", [("where (p_ignorar_marco or u.desde_marco >= 1)", "where true")]),
+        ("o marco do número novo deixa de valer (contato frio passa)", [("where (p_ignorar_marco or v.desde_marco >= 1)", "where true")]),
         ("quem respondeu SAIR continua elegível", [("and p.exclusao_em is null and not p.avisos_off", "and p.exclusao_em is null")]),
         ("quem está sem acesso passa", [("       and (a.status in ('ativa', 'atrasada', 'cortesia') or (a.status = 'trial' and a.trial_fim >= hoje))\n", "")]),
-        ("a mesma pessoa pode receber a regra de novo", [("     and not exists (select 1 from public.avisos av where av.user_id = u.id and av.chave = 'ret:' || p_regra || ':' || u.id::text)\n", "")]),
-        ("nunca_mandou aceita quem já usou (qtd <= 2)", [("p_regra = 'nunca_mandou' and u.qtd <= 1", "p_regra = 'nunca_mandou' and u.qtd <= 2")]),
-        ("conta abandonada há mais de 30 dias passa (parou_de_usar)", [(" and u.ultima >= now() - interval '30 days'", "")]),
-        ("o atraso configurado é ignorado (fixo em 1 hora)", [("u.primeira <= now() - make_interval(hours => p_atraso)", "u.primeira <= now() - make_interval(hours => 1)")]),
+        ("a mesma pessoa pode receber a regra de novo", [("     and not exists (select 1 from public.avisos av where av.user_id = v.id and av.chave = 'ret:' || p_regra || ':' || v.id::text)\n", "")]),
+        ("nunca_mandou aceita quem já usou (qtd <= 2)", [("p_regra = 'nunca_mandou' and v.qtd <= 1", "p_regra = 'nunca_mandou' and v.qtd <= 2")]),
+        ("conta abandonada há mais de 30 dias passa (parou_de_usar)", [(" and v.ultima >= now() - interval '30 days'", "")]),
+        ("o atraso configurado é ignorado (fixo em 1 hora)", [("v.primeira <= now() - make_interval(hours => p_atraso)", "v.primeira <= now() - make_interval(hours => 1)")]),
+        ("quem lança pelo painel recebe 'nunca mandou'", [("v.qtd <= 1 and v.lancs = 0 and v.primeira", "v.qtd <= 1 and v.primeira")]),
+        ("o lançamento recente do painel não segura o 'parou de usar'", [("greatest(u.ultima_msg, (select max(l.criado_em) from public.lancamentos l where l.user_id = u.id)) as ultima", "u.ultima_msg as ultima")]),
+        ("quem estourou o limite do mês recebe", [("     and v.uso_mes < v.limite\n", "")]),
+        ("o limite próprio do cliente é ignorado (só vale o padrão)", [("coalesce((select lc.lancamentos from public.limite_cliente lc where lc.user_id = u.id), (select cl.lancamentos", "coalesce(null::integer, (select cl.lancamentos")]),
         ("o telefone vem da mensagem mais antiga", [("(array_agg(m.telefone order by m.criado_em desc))[1]", "(array_agg(m.telefone order by m.criado_em asc))[1]")]),
         ("o trigger não percebe a troca de número", [("if old.ultimo_numero is not null and old.ultimo_numero <> new.whatsapp_numero then", "if false then")]),
         ("as regras nascem LIGADAS", [("('nunca_mandou', 'desligado', 24,", "('nunca_mandou', 'todos', 24,")]),
