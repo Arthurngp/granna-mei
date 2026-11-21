@@ -101,7 +101,7 @@ export async function rotaAdmin(req: IncomingMessage, res: ServerResponse, camin
     if (!user_id) return json(res, 400, { erro: 'user_id obrigatório' }), true
     const u = await sb.auth.admin.getUserById(user_id)
     if (u.error || !u.data.user?.email) return json(res, 404, { erro: 'Cliente não encontrado.' }), true
-    const painel = (process.env.PAINEL_URL ?? 'https://grannamei.amplasoft.me/painel').replace(/\/+$/, '')
+    const painel = (process.env.PAINEL_URL ?? 'https://granninha.com.br/painel').replace(/\/+$/, '')
     const senha = tipo === 'senha'
     const l = await sb.auth.admin.generateLink({
       type: senha ? 'recovery' : 'magiclink',

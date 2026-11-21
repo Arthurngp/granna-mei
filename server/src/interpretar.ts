@@ -281,7 +281,7 @@ export function perguntaDeOpcoes(movimento: 'entrada' | 'saida', descricao: stri
   return `${titulo} Responda com o número:\n${lista}\n\nSe foi por uma conta que não está aí, cadastre em ${PAINEL()}/ajustes e me mande de novo.`
 }
 
-const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.amplasoft.me/painel').replace(/\/+$/, '')
+const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.com.br/painel').replace(/\/+$/, '')
 
 /** Confere cada ação. Devolve a pergunta a fazer, se algo não fecha. */
 export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes = {}): Conferencia {

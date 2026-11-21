@@ -16,4 +16,4 @@ Allow: /
 Disallow: /painel/
 Disallow: /admin/
 
-Sitemap: https://granninha.amplasoft.me/sitemap.xml
+Sitemap: https://granninha.com.br/sitemap.xml
