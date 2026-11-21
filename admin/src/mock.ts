@@ -4,6 +4,10 @@
  */
 
 const hojeSP = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+
+/** Uso do mês de cada cliente do exemplo (igual às mensagens do mês da lista) e o limite configurável, para olhar as telas do limite. */
+const USO_EXEMPLO: Record<string, number> = { c1: 41, c2: 33, c3: 27, c4: 12, c5: 9, c6: 0 }
+const limites = { padrao: 300, proprio: { c5: 80 } as Record<string, number> }
 const ruido = (i: number) => Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1
 
 function somaDias(iso: string, d: number) {
@@ -245,6 +249,32 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
         ],
         trial_ate_fim: 14,
       }
+    case 'admin_cliente':
+      return { carteiras: [{ nome: 'Pessoal', tipo: 'pessoal' }, { nome: 'Negócio', tipo: 'mei' }], lancamentos_por_origem: { whatsapp: 9, painel: 2 }, contas_abertas: 1, fixas: 2, ultimas_mensagens: [], auditoria: [] }
+    // Limite mensal de lançamentos (só para olhar as telas; a regra de verdade é do banco). Uso do mês: o das mensagens do exemplo.
+    case 'admin_limite_cliente': {
+      const uso = args.p_user ? (USO_EXEMPLO[String(args.p_user)] ?? 0) : 0
+      const proprio = args.p_user ? (limites.proprio[String(args.p_user)] ?? null) : null
+      return { padrao: limites.padrao, proprio, efetivo: proprio ?? limites.padrao, uso_mes: uso }
+    }
+    case 'admin_limite_definir': {
+      const v = args.p_valor as number | null
+      if (String(args.p_motivo ?? '').trim().length < 3) throw new Error('motivo obrigatório')
+      if (args.p_user) {
+        if (v === null) delete limites.proprio[String(args.p_user)]
+        else limites.proprio[String(args.p_user)] = v
+      } else {
+        if (v === null || v < 1 || v > 100000) throw new Error('o limite vai de 1 a 100000')
+        limites.padrao = v
+      }
+      const proprio = args.p_user ? (limites.proprio[String(args.p_user)] ?? null) : null
+      return { ok: true, padrao: limites.padrao, proprio, efetivo: proprio ?? limites.padrao }
+    }
+    case 'admin_limite_previa': {
+      const v = Number(args.p_valor)
+      const seguem = Object.keys(USO_EXEMPLO).filter((id) => limites.proprio[id] === undefined)
+      return { passam: seguem.filter((id) => USO_EXEMPLO[id] >= v).length, total: seguem.length }
+    }
     default:
       throw new Error(`mock sem ${nome}`)
   }

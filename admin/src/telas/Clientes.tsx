@@ -1,4 +1,4 @@
-import { CircleCheck, Copy, Search } from 'lucide-react'
+import { CircleCheck, Copy, Search, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useAviso } from '../../../src/components/ui'
 import { api, rpc } from '../sb'
@@ -26,6 +26,17 @@ interface Cliente {
   onboarding_feito: boolean
   papel: string
 }
+/** `.item-ob` é um grid de coluna `auto`: texto comprido (como o aviso do limite) alarga a gaveta e come a margem direita no celular. */
+const CAIXA = { gridTemplateColumns: 'minmax(0, 1fr)' } as const
+
+/** Limite mensal de lançamentos pelo WhatsApp: o próprio do cliente (se houver), o padrão de todos e quanto ele já usou no mês. */
+interface LimiteCliente {
+  padrao: number
+  proprio: number | null
+  efetivo: number
+  uso_mes: number
+}
+
 interface Ficha {
   carteiras: { nome: string; tipo: string }[]
   lancamentos_por_origem: Record<string, number>
@@ -144,6 +155,8 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
   const [erro, setErro] = useState('')
   const [link, setLink] = useState('')
   const [emailConf, setEmailConf] = useState('')
+  const [limite, setLimite] = useState<LimiteCliente | null>(null)
+  const [valorLimite, setValorLimite] = useState('')
 
   useEffect(() => {
     setFicha(null)
@@ -152,7 +165,11 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
     setErro('')
     setLink('')
     setEmailConf('')
+    setLimite(null)
+    setValorLimite('')
     if (c) rpc<Ficha>('admin_cliente', { p_id: c.id }).then(setFicha).catch((e: Error) => setErro(e.message))
+    // Sem a migration do limite a função não existe: a ficha segue sem o bloco, em vez de dar erro.
+    if (c) rpc<LimiteCliente>('admin_limite_cliente', { p_user: c.id }).then(setLimite).catch(() => setLimite(null))
   }, [c])
 
   if (!c) return null
@@ -185,6 +202,22 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
     }
   }
 
+  /** Muda o limite SÓ deste cliente, ou (remover) tira o limite próprio e ele volta a seguir o padrão. */
+  const salvarLimite = async (remover = false) => {
+    setErro('')
+    setOcupado(true)
+    try {
+      const r = await rpc<{ efetivo: number }>('admin_limite_definir', { p_user: c.id, p_valor: remover ? null : Number(valorLimite), p_motivo: motivo.trim() })
+      avisar(remover ? `Limite próprio removido. Agora vale o padrão: ${n(r.efetivo)} por mês.` : `Limite deste cliente: ${n(r.efetivo)} lançamentos por mês. Vale já na próxima mensagem dele.`)
+      mudou()
+      fechar()
+    } catch (e) {
+      setErro((e as Error).message.includes('motivo') ? 'Escreva o motivo (pelo menos 3 letras).' : (e as Error).message)
+    } finally {
+      setOcupado(false)
+    }
+  }
+
   const excluirDefinitivo = async () => {
     setErro('')
     setOcupado(true)
@@ -201,6 +234,10 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
   }
 
   const def = acao ? ACOES[acao] : null
+  const limiteNovo = Number(valorLimite)
+  const limiteValorOk = /^\d{1,6}$/.test(valorLimite) && limiteNovo >= 1 && limiteNovo <= 100_000
+  /** Quem já usou o novo limite para de anotar na hora: o botão avisa e muda de cor. */
+  const limiteBloqueiaAgora = !!limite && limiteValorOk && limite.uso_mes >= limiteNovo
   return (
     <Gaveta aberta={!!c} onFechar={fechar} rotulo="Ficha do cliente">
       <span className="k">Cliente</span>
@@ -216,6 +253,14 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
           <div><span>Cadastro</span><span>{dataHora(c.criado_em)}</span></div>
           <div><span>Boas-vindas</span><span>{c.onboarding_feito ? 'terminou' : `parou no passo ${c.onboarding_passo + 1} de 7`}</span></div>
           <div><span>Lançamentos</span><span className="num">{c.lancamentos}</span></div>
+          {limite && (
+            <div>
+              <span>Limite do mês</span>
+              <span className="num">
+                {n(limite.uso_mes)} de {n(limite.efetivo)} <small className="suave">({limite.proprio !== null ? 'só dele' : 'padrão'})</small>
+              </span>
+            </div>
+          )}
         </div>
 
         {ficha && (
@@ -235,6 +280,11 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
                 {v.rotulo}
               </button>
             ))}
+            {limite && c.papel !== 'admin' && (
+              <button type="button" className="btn btn-sec btn-bloco" onClick={() => { setValorLimite(String(limite.efetivo)); setAcao('limite') }}>
+                Mudar o limite de lançamentos
+              </button>
+            )}
             <button type="button" className="btn btn-sec btn-bloco" disabled={ocupado} onClick={() => executar(c.verificado ? 'desverificar_numero' : 'verificar_numero')}>
               {c.verificado ? 'Desfazer confirmação do número' : 'Marcar número como confirmado'}
             </button>
@@ -264,6 +314,51 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
                   Copiar link
                 </button>
               </div>
+            )}
+          </div>
+        ) : acao === 'limite' && limite ? (
+          <div className="item-ob ligado" style={CAIXA}>
+            <b>Limite de lançamentos por mês</b>
+            <small className="suave">
+              Só de {c.nome || c.email}. Hoje vale {n(limite.efetivo)} ({limite.proprio !== null ? 'definido só para ele' : 'o padrão de todos'}) e ele já usou {n(limite.uso_mes)} neste mês. O cliente não vê este número.
+            </small>
+            <label className="campo">
+              <span>Novo limite por mês</span>
+              <input
+                className="entrada num"
+                inputMode="numeric"
+                value={valorLimite}
+                onChange={(e) => setValorLimite(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                aria-label="Novo limite de lançamentos por mês"
+              />
+            </label>
+            {limiteBloqueiaAgora && (
+              <div className="vaviso ruim" role="alert">
+                <TriangleAlert size={20} style={{ flex: 'none' }} />
+                <span>Ele já usou {n(limite.uso_mes)}. Com {n(limiteNovo)}, ele para de anotar agora e só volta no dia 1, ou se você subir o limite.</span>
+              </div>
+            )}
+            <label className="campo">
+              <span>Motivo (fica na auditoria)</span>
+              <input className="entrada" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ex.: plano de teste, uso abusivo, parceiro" />
+            </label>
+            <div className="dupla">
+              <button type="button" className="btn btn-sec" onClick={() => setAcao(null)}>
+                Voltar
+              </button>
+              <button
+                type="button"
+                className={`btn ${limiteBloqueiaAgora ? 'btn-perigo' : 'btn-pri'}`}
+                disabled={ocupado || !limiteValorOk || motivo.trim().length < 3 || limite.proprio === limiteNovo}
+                onClick={() => salvarLimite()}
+              >
+                {limiteBloqueiaAgora ? 'Salvar e parar as anotações dele' : 'Salvar'}
+              </button>
+            </div>
+            {limite.proprio !== null && (
+              <button type="button" className="btn btn-sec btn-bloco" disabled={ocupado || motivo.trim().length < 3} onClick={() => salvarLimite(true)}>
+                Voltar ao padrão ({n(limite.padrao)})
+              </button>
             )}
           </div>
         ) : acao === 'excluir_definitivo' ? (
