@@ -12,6 +12,12 @@ interface Linha {
   detalhes: { motivo?: string; antes?: string; depois?: string; dias?: number }
 }
 
+/** Nomes legíveis das ações que não se leem bem só trocando o "_" por espaço. */
+const ROTULO_ACAO: Record<string, string> = {
+  limite_global: 'padrão do limite de lançamentos',
+  limite_cliente: 'limite de lançamentos',
+}
+
 export function Auditoria() {
   const [l, setL] = useState<Linha[] | null>(null)
   const [erro, setErro] = useState('')
@@ -47,7 +53,7 @@ export function Auditoria() {
               <div className="cl-l" key={i} style={{ cursor: 'default' }}>
                 <div className="cl-id">
                   <b>
-                    {a.acao.replace(/_/g, ' ')} · {a.cliente}
+                    {ROTULO_ACAO[a.acao] ?? a.acao.replace(/_/g, ' ')} · {a.acao === 'limite_global' ? 'todos os clientes' : a.cliente}
                   </b>
                   <span className="s">
                     {dataHora(a.criado_em)} · por {a.admin}

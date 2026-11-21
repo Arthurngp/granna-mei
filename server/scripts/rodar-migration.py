@@ -8,6 +8,9 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  limite  20261121200000_limite_lancamentos.sql  limite mensal de lançamentos configurável no admin: 2 tabelas fechadas ao cliente
+          (padrão de todos = 300, e limite próprio por cliente) e 3 funções do admin. Não muda o comportamento de hoje.
+          Sem ela, a Granninha segue com o limite de fábrica (300) e as telas de limite do admin avisam que falta a migration.
   adminvisao 20261121140000_admin_visao_geral.sql   funções de leitura do admin: custo por período, ativação, receita
   adminacoes 20261121150000_admin_acoes_retencao_publico.sql   funções de leitura: ações, retenção, público
           (+ 6 colunas novas e vazias em perfis). Rodar adminvisao primeiro.
@@ -47,6 +50,7 @@ MIGRATIONS = {
     "adminsegunda": "20261121161000_admin_segunda_mensagem.sql",
     "adminvisao": "20261121140000_admin_visao_geral.sql",
     "adminacoes": "20261121150000_admin_acoes_retencao_publico.sql",
+    "limite": "20261121200000_limite_lancamentos.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
@@ -68,6 +72,23 @@ CONFERE = {
           and grantee='authenticated' and privilege_type='UPDATE'
           and column_name in ('nascimento','cidade','uf','faturamento_faixa','ocupacao','perfil_em','renda_faixa')) as grant_de_7,
         (select count(*) from pg_constraint where conname='perfis_publico_tamanho' and conrelid='public.perfis'::regclass) as trava""",
+    # Limite mensal de lançamentos configurável. Cria 2 tabelas (padrão de todos e limite próprio por cliente) e 3 funções do admin.
+    # Confere o que importa: as tabelas existem, estão FECHADAS ao cliente (RLS ligada e sem permissão para anon/authenticated),
+    # as 3 funções existem e o anon não executa nenhuma, e qual é o padrão (tem que ser 300, o de fábrica de hoje: nada muda no comportamento).
+    "limite": """select
+        (select count(*) from information_schema.tables where table_schema='public' and table_name in ('config_limite','limite_cliente')) as tabelas_de_2,
+        (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace
+          where n.nspname='public' and c.relname in ('config_limite','limite_cliente') and c.relrowsecurity) as rls_ligada_em,
+        (select count(*) from information_schema.role_table_grants
+          where table_schema='public' and table_name in ('config_limite','limite_cliente') and grantee in ('anon','authenticated')) as permissoes_para_cliente,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname in ('admin_limite_cliente','admin_limite_definir','admin_limite_previa')) as funcoes_de_3,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname in ('admin_limite_cliente','admin_limite_definir','admin_limite_previa')
+            and has_function_privilege('anon', p.oid, 'execute')) as funcoes_abertas_ao_anon,
+        -- Consulta dinâmica: a tabela ainda não existe antes da migration, e citá-la direto faria o ANTES inteiro falhar.
+        (case when to_regclass('public.config_limite') is null then null
+              else (xpath('/row/c/text()', query_to_xml('select lancamentos as c from public.config_limite where id', false, true, '')))[1]::text end) as padrao_hoje""",
     # Só funções de leitura do admin (custo por período, ativação, receita): confere as 3.
     "adminvisao": """select (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
         where n.nspname='public' and p.proname in ('admin_custo_periodo','admin_ativacao','admin_receita')) as funcoes_de_3""",

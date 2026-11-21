@@ -5,6 +5,7 @@ import { api } from '../sb'
 import { dataHora, Falha } from './comum'
 import { Pagina, type HeadDef } from './visao/layout'
 import { n } from './visao/usar'
+import { LimitePadrao } from './LimitePadrao'
 import { TrocarNumero } from './TrocarNumero'
 import { usePainel } from './Visao'
 
@@ -136,6 +137,8 @@ export function Granninha() {
             para isso existe o monitoramento de fora.
           </p>
         </section>
+
+        <LimitePadrao />
 
         <section className="cartao g6">
           <div className="cartao-cab">
