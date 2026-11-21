@@ -80,6 +80,27 @@ async function tudo(tabela: string, ordem?: string): Promise<Linha[]> {
   }
 }
 
+function deAssinatura(a: Linha, faturas: Linha[]): Estado['assinatura'] {
+  const h = hoje()
+  let status = ((a.status as StatusAssinatura) ?? 'trial') as StatusAssinatura
+  // Teste grátis vencido sem pagamento vale como bloqueio (o banco aplica a mesma regra).
+  if (status === 'trial' && typeof a.trial_fim === 'string' && a.trial_fim < h) status = 'bloqueada'
+  return {
+    status, plano: ((a.plano as 'mensal' | 'anual') ?? 'mensal'), trialFim: (a.trial_fim as string) ?? h, proxCobranca: (a.prox_cobranca as string) ?? h,
+    cancelaEm: (a.cancela_em as string) ?? undefined,
+    faturas: faturas.map((f) => ({ id: f.id as string, data: f.data as string, valor: Number(f.valor), status: f.status as 'paga' | 'aberta' })),
+  }
+}
+
+/** Só a assinatura e os pagamentos: é o que muda quando a Stripe avisa, e custa duas consultas pequenas. */
+export async function carregarAssinatura(): Promise<Estado['assinatura']> {
+  const sb = supabase!
+  const [assin, faturas] = await Promise.all([sb.from('assinaturas').select('*').maybeSingle(), sb.from('faturas').select('*').order('data', { ascending: false })])
+  erro(assin.error)
+  erro(faturas.error)
+  return deAssinatura((assin.data ?? {}) as Linha, (faturas.data as Linha[]) ?? [])
+}
+
 export async function carregar(email: string): Promise<Estado> {
   const sb = supabase!
   const [perfil, assin, faturas, carteiras, categorias, lancs, fixas, contas] = await Promise.all([
@@ -96,11 +117,6 @@ export async function carregar(email: string): Promise<Estado> {
   erro(assin.error)
   erro(faturas.error)
   const p = (perfil.data ?? {}) as Linha
-  const a = (assin.data ?? {}) as Linha
-  const h = hoje()
-  let status = ((a.status as StatusAssinatura) ?? 'trial') as StatusAssinatura
-  // Teste grátis vencido sem pagamento vale como bloqueio (o banco aplica a mesma regra).
-  if (status === 'trial' && typeof a.trial_fim === 'string' && a.trial_fim < h) status = 'bloqueada'
   const ramo = (p.ramo as string) ?? ''
   return {
     versao: VERSAO,
@@ -116,10 +132,7 @@ export async function carregar(email: string): Promise<Estado> {
       antecedencia: Number(p.antecedencia ?? 1), ocultar: !!p.ocultar,
     },
     contador: { nome: (p.contador_nome as string) ?? '', email: (p.contador_email as string) ?? '', whats: (p.contador_whats as string) ?? '', auto: !!p.contador_auto },
-    assinatura: {
-      status, plano: ((a.plano as 'mensal' | 'anual') ?? 'mensal'), trialFim: (a.trial_fim as string) ?? h, proxCobranca: (a.prox_cobranca as string) ?? h,
-      faturas: ((faturas.data as Linha[]) ?? []).map((f) => ({ id: f.id as string, data: f.data as string, valor: Number(f.valor), status: f.status as 'paga' | 'aberta' })),
-    },
+    assinatura: deAssinatura((assin.data ?? {}) as Linha, (faturas.data as Linha[]) ?? []),
     exclusaoEm: (p.exclusao_em as string) ?? undefined,
   }
 }

@@ -9,6 +9,7 @@ import { createServer, type IncomingMessage } from 'node:http'
 import './env.ts'
 import { sb } from './banco.ts'
 import { rotaAdmin } from './admin.ts'
+import { bloquearAtrasadas, rotaCobranca } from './cobranca.ts'
 import { assinaturaValida, enviarTexto, statusSessao } from './gateway.ts'
 import { excluirVencidas, soltarNumerosDeExcluidas } from './excluir.ts'
 import { hojeSP, marcarColunaEventoFaltando, processar, registrarChegada, semColunaEvento, type EventoGateway } from './granninha.ts'
@@ -158,6 +159,7 @@ export function iniciar(porta = PORTA) {
     const url = new URL(req.url ?? '/', 'http://x')
     try {
       if (await rotaAdmin(req, res, url.pathname, () => corpo(req))) return
+      if (await rotaCobranca(req, res, url.pathname)) return
       if (req.method === 'POST' && url.pathname === '/webhook') {
         const bruto = await corpo(req)
         if (!assinaturaValida(bruto, req.headers['x-webhook-signature'] as string | undefined)) {
@@ -260,6 +262,13 @@ export function iniciar(porta = PORTA) {
       for (const linha of await varrerRetomarIA({ ...varredura, buscar: varredura.buscarRetomarIA })) console.log('[ia]', linha)
     } catch (e) {
       console.error('[ia] retomar:', (e as Error).message)
+    }
+    // Pagamento que falhou e passou da carência perde o acesso (a Stripe segue tentando; se cair, o webhook reabre).
+    try {
+      const n = await bloquearAtrasadas()
+      if (n) console.log('[cobranca] contas bloqueadas por atraso além da carência:', n)
+    } catch (e) {
+      console.error('[cobranca] bloquear atrasadas:', (e as Error).message)
     }
     await varrerVencidas()
     void avisar()

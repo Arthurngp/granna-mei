@@ -6,6 +6,9 @@ export const LIMITE_MEI = 81000
 export const PRECO_MENSAL = 29.9
 export const PRECO_ANUAL = 299.9
 
+/** Servidor da Granninha (cobrança). No build vem de VITE_GRANNINHA_API; sem ela usa o endereço de produção. */
+export const API_GRANNINHA = ((import.meta.env.VITE_GRANNINHA_API as string | undefined) || 'https://api-grannamei.amplasoft.me').replace(/\/+$/, '')
+
 /** Uso justo por mês (a confirmar com o Arthur antes do lançamento). */
 export const LIMITE_LANCAMENTOS = 300
 export const LIMITE_MIDIAS = 100
