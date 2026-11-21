@@ -1,7 +1,7 @@
 import { LoaderCircle, ShieldCheck } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Mascote } from '../../src/components/ui'
-import { sb, rpc } from './sb'
+import { MOCK, sb, rpc } from './sb'
 import { Auditoria } from './telas/Auditoria'
 import { Clientes } from './telas/Clientes'
 import { Granninha } from './telas/Granninha'
@@ -16,6 +16,7 @@ export default function App() {
 
   /** Decide a etapa: sem login → entrar; não é admin → sem acesso; sem 2ª etapa → ativar ou pedir código. */
   const avaliar = useCallback(async () => {
+    if (MOCK) return setEtapa('dentro')
     const { data } = await sb.auth.getSession()
     if (!data.session) return setEtapa('entrar')
     const admin = await rpc<boolean>('admin_papel').catch(() => false)
@@ -56,7 +57,7 @@ export default function App() {
         <div className="linha1">
           <img src={`${import.meta.env.BASE_URL}logo-96.png`} alt="" />
           <div className="cresce">
-            <b>Granninha</b> <small>Admin</small>
+            <b>Granninha</b> <small>Admin{MOCK ? ' · dados de exemplo' : ''}</small>
           </div>
           <button type="button" onClick={sair}>
             Sair
