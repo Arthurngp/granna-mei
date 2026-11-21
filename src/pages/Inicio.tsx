@@ -75,21 +75,31 @@ export default function Inicio() {
 
       <div className="grade">
         <section className="heroi g-5 estica" aria-label="Resumo do mês">
+          {/* O caixa (dinheiro nas contas hoje) é o número principal e não depende do mês. O mês é o RESULTADO: entrou menos saiu da empresa. */}
           <div className="heroi-cab">
-            <MesNav ym={ym} onChange={setYm} />
+            <div className="rot rot-topo">
+              <Wallet size={15} strokeWidth={2.2} />
+              Em caixa agora
+            </div>
             <button type="button" className="icone-btn" aria-label={oculto ? 'Mostrar valores' : 'Esconder valores'} onClick={() => mut((a) => ({ ...a, prefs: { ...a.prefs, ocultar: !a.prefs.ocultar } }))}>
               {oculto ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
           </div>
-          <div className="rot">Saldo de {nomeMes(ym, false)}</div>
-          <div className={`grande ${t.sobrou < 0 ? 'neg' : ''}`}>
-            <Valor n={t.sobrou} oculto={oculto} animado />
+          <div className={`grande ${emCarteiras < 0 ? 'neg' : ''}`}>
+            <Valor n={emCarteiras} oculto={oculto} animado />
           </div>
-          {/* O que tem agora fica junto do saldo do mês: no rodapé passava despercebido. */}
-          <div className="heroi-caixa">
-            <Wallet size={15} strokeWidth={2.2} />
-            <span>Em caixa agora</span>
-            <b>{oculto ? 'R$ ••••' : brl(emCarteiras)}</b>
+          <div className="heroi-nota">Nas suas contas hoje, somando todos os meses.</div>
+          <div className="heroi-mes">
+            <MesNav ym={ym} onChange={setYm} />
+            <div className="heroi-res">
+              <div>
+                <div className="rot">Resultado de {nomeMes(ym, false)}</div>
+                <div className="heroi-res-nota">entrou menos saiu</div>
+              </div>
+              <div className={`res-valor ${t.sobrou < 0 ? 'neg' : ''}`}>
+                <Valor n={t.sobrou} oculto={oculto} animado />
+              </div>
+            </div>
           </div>
           <div className="heroi-duo">
             <div>
@@ -117,7 +127,7 @@ export default function Inicio() {
           </div>
           {t.retirada > 0 && (
             <div className="rodape">
-              Suas retiradas: <b>{oculto ? 'R$ ••••' : brl(t.retirada)}</b>
+              Você tirou para você: <b>{oculto ? 'R$ ••••' : brl(t.retirada)}</b> (fora do resultado)
             </div>
           )}
         </section>
