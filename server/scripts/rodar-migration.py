@@ -8,6 +8,8 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  desfazercortesia 20261121173700_admin_desfazer_cortesia.sql   admin_acao ganha a ação "Desfazer cortesia" (devolve a conta ao
+          estado de antes, lido da auditoria; recusa se não souber). Sem ela o botão do admin dá erro. Não cria tabela nem coluna.
   adminvisao 20261121140000_admin_visao_geral.sql   funções de leitura do admin: custo por período, ativação, receita
   adminacoes 20261121150000_admin_acoes_retencao_publico.sql   funções de leitura: ações, retenção, público
           (+ 6 colunas novas e vazias em perfis). Rodar adminvisao primeiro.
@@ -47,6 +49,7 @@ MIGRATIONS = {
     "adminsegunda": "20261121160000_admin_segunda_mensagem.sql",
     "adminvisao": "20261121140000_admin_visao_geral.sql",
     "adminacoes": "20261121150000_admin_acoes_retencao_publico.sql",
+    "desfazercortesia": "20261121173700_admin_desfazer_cortesia.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
@@ -68,6 +71,15 @@ CONFERE = {
           and grantee='authenticated' and privilege_type='UPDATE'
           and column_name in ('nascimento','cidade','uf','faturamento_faixa','ocupacao','perfil_em','renda_faixa')) as grant_de_7,
         (select count(*) from pg_constraint where conname='perfis_publico_tamanho' and conrelid='public.perfis'::regclass) as trava""",
+    # Recria a função admin_acao (ações do admin sobre a conta) com a ação nova "desfazer_cortesia". Não cria tabela nem coluna.
+    # Confere: a função existe uma vez só (assinatura única), já traz a ação nova, e as permissões seguem as de sempre:
+    # anon NÃO executa, authenticated executa (a função confere eh_admin() lá dentro).
+    "desfazercortesia": """select
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_acao') as admin_acao_definicoes,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname='admin_acao' and pg_get_functiondef(p.oid) like '%desfazer_cortesia%') as ja_tem_desfazer_cortesia,
+        has_function_privilege('anon', 'public.admin_acao(uuid,text,text,integer)', 'execute') as anon_executa,
+        has_function_privilege('authenticated', 'public.admin_acao(uuid,text,text,integer)', 'execute') as authenticated_executa""",
     # Só funções de leitura do admin (custo por período, ativação, receita): confere as 3.
     "adminvisao": """select (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
         where n.nspname='public' and p.proname in ('admin_custo_periodo','admin_ativacao','admin_receita')) as funcoes_de_3""",

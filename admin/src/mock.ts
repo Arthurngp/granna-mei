@@ -245,6 +245,13 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
         ],
         trial_ate_fim: 14,
       }
+    case 'admin_cliente':
+      return { carteiras: [{ nome: 'Pessoal', tipo: 'pessoal' }, { nome: 'Negócio', tipo: 'mei' }], lancamentos_por_origem: { whatsapp: 9, painel: 2 }, contas_abertas: 1, fixas: 2, ultimas_mensagens: [], auditoria: [] }
+    case 'admin_acao':
+      // Só para olhar a tela: desfazer cortesia devolve um teste que ainda vale, ou um vencido se o motivo pedir ("vencido").
+      return args.p_acao === 'desfazer_cortesia'
+        ? { ok: true, situacao: 'trial', trial_fim: String(args.p_motivo).includes('vencido') ? '2026-11-10' : '2026-12-05' }
+        : { ok: true, situacao: 'ativa', trial_fim: null }
     default:
       throw new Error(`mock sem ${nome}`)
   }
