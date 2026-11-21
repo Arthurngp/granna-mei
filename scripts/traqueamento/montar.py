@@ -43,6 +43,10 @@ EVENTOS = {
     "cadastro_concluido": ("conta criada", "CadastroConcluido", []),
     "onboarding_passo": ("passo do onboarding alcançado", "OnboardingPasso", ["passo"]),
     "onboarding_concluido": ("onboarding terminado", "OnboardingConcluido", []),
+    # passo opcional "Quer me contar mais?" (depois de confirmar o WhatsApp). Só diz se abriu, salvou ou pulou: nada do que foi digitado.
+    "perfil_aberto": ("passo opcional Quer me contar mais aberto", "PerfilAberto", []),
+    "perfil_salvo": ("passo opcional Quer me contar mais salvo", "PerfilSalvo", ["gravou"]),
+    "perfil_pulado": ("passo opcional Quer me contar mais pulado", "PerfilPulado", []),
 }
 
 # ---------- variáveis (dataLayer) ----------

@@ -28,6 +28,32 @@ export const RAMOS = [
   { id: 'outro', nome: 'Outro ramo', ex: 'A Granninha se adapta' },
 ] as const
 
+/**
+ * Faturamento mensal do negócio, por faixa. Os códigos são os MESMOS da coluna `perfis.faturamento_faixa` (a página Público do
+ * admin lê por eles); mudar um código aqui exige mudar a coluna e o admin. A faixa de cima do MEI acompanha o teto mensal (R$ 6.750).
+ */
+export const FAIXAS_FATURAMENTO = [
+  { v: 'ate_2', r: 'Até R$ 2 mil' },
+  { v: '2_4', r: 'De R$ 2 mil a R$ 4 mil' },
+  { v: '4_6750', r: 'De R$ 4 mil a R$ 6.750 (teto do MEI)' },
+  { v: 'acima', r: 'Acima de R$ 6.750' },
+  { v: 'prefiro_nao', r: 'Prefiro não dizer' },
+] as const
+
+/** Renda pessoal por mês, por faixa (coluna `perfis.renda_faixa`). */
+export const FAIXAS_RENDA = [
+  { v: 'ate_2', r: 'Até R$ 2 mil' },
+  { v: '2_4', r: 'De R$ 2 mil a R$ 4 mil' },
+  { v: '4_8', r: 'De R$ 4 mil a R$ 8 mil' },
+  { v: 'acima', r: 'Acima de R$ 8 mil' },
+  { v: 'prefiro_nao', r: 'Prefiro não dizer' },
+] as const
+
+export const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'] as const
+
+/** Quem escolhe "Outro ramo" precisa dizer a ocupação: sem ela o ramo não diz nada sobre a pessoa. */
+export const OCUPACAO_MIN = 3
+
 /** Nome que a categoria de material ganha em cada ramo. */
 export const MATERIAL_POR_RAMO: Record<string, string> = {
   beleza: 'Produtos e material',

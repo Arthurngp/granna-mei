@@ -1,10 +1,11 @@
 import { ArrowLeft, ArrowRight, LoaderCircle, Brush, Car, Check, HardHat, MessageCircle, Plus, Shirt, ShoppingBag, Sparkles, Trash2, Utensils, Wrench } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Conversa } from '../components/Conversa'
 import { IconeCarteira } from '../components/Shell'
 import { CampoDinheiro, Chave, Mascote, Seg, type Pose } from '../components/ui'
-import { linkWhats, RAMOS } from '../lib/config'
+import { FAIXAS_FATURAMENTO, FAIXAS_RENDA, linkWhats, OCUPACAO_MIN, RAMOS, UFS } from '../lib/config'
 import { evento } from '../lib/eventos'
+import { salvarPerfilPublico, type PerfilPublico } from '../lib/remoto'
 import { DIAS_SEMANA, documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaMeses } from '../lib/format'
 import { categoriasPadrao } from '../lib/seed'
 import { novoId, useApp } from '../lib/store'
@@ -52,7 +53,22 @@ const GUIA: { pose: Pose; titulo: string; texto: string }[] = [
   { pose: 'calendario', titulo: 'Quais contas chegam todo mês?', texto: 'Eu aviso antes de vencer, para você não pagar multa por esquecimento.' },
   { pose: 'sino', titulo: 'Quando eu posso te chamar?', texto: 'Escolha o melhor horário para o resumo e os lembretes.' },
   { pose: 'hero', titulo: 'Último passo: confirme seu WhatsApp', texto: 'É assim que eu sei que o número é seu. Sem isso, eu não consigo anotar o que você me mandar.' },
+  // Passo EXTRA, só depois de confirmar o número, e opcional: perguntar antes pioraria o abandono em "confirmar WhatsApp".
+  { pose: 'duvida', titulo: 'Quer me contar mais?', texto: 'Se quiser, me conta um pouco sobre você. É opcional, e me ajuda a ser mais útil para quem trabalha como você.' },
 ]
+/** Passos do cadastro de verdade (o extra "Quer me contar mais?" não conta na barra nem em "x de 7"). */
+const PASSOS = GUIA.length - 1
+const PASSO_PERFIL = PASSOS
+
+/** Data AAAA-MM-DD que existe e é plausível: de 1920 até 14 anos atrás. (O campo é opcional: vazio nem chega aqui.) */
+function nascimentoValido(v: string): boolean {
+  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return false
+  const [a, mes, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const dt = new Date(a, mes - 1, d)
+  if (dt.getFullYear() !== a || dt.getMonth() !== mes - 1 || dt.getDate() !== d) return false
+  return a >= 1920 && a <= new Date().getFullYear() - 14
+}
 
 export default function Onboarding() {
   const { s, mut, sair, gerarCodigo, checarConfirmado } = useApp()
@@ -67,6 +83,16 @@ export default function Onboarding() {
   const [cnpj, setCnpj] = useState(s.usuario.cnpj)
   const [fone, setFone] = useState(s.usuario.whats)
   const [ramo, setRamo] = useState(s.usuario.ramo)
+  // "Outro ramo" só vale com a ocupação dita pela pessoa (obrigatória); guardada à parte, como o resto do perfil do público.
+  const [ocupacao, setOcupacao] = useState('')
+  const ocupacaoGravada = useRef(false)
+  // Passo extra "Quer me contar mais?" (tudo opcional).
+  const [nasc, setNasc] = useState('')
+  const [cidade, setCidade] = useState('')
+  const [uf, setUf] = useState('')
+  const [fatur, setFatur] = useState('')
+  const [renda, setRenda] = useState('')
+  const [salvandoPerfil, setSalvandoPerfil] = useState(false)
   const [carteiras, setCarteiras] = useState<CarteiraOb[]>([
     { id: 'banco', tipo: 'banco', nome: 'Conta do banco', dica: 'Pix, transferência e cartão de débito', on: true, saldo: 0 },
     { id: 'dinheiro', tipo: 'dinheiro', nome: 'Dinheiro', dica: 'O que fica na gaveta ou na carteira', on: false, saldo: 0 },
@@ -100,6 +126,8 @@ export default function Onboarding() {
       if (!foneOk) return 'Digite seu WhatsApp com DDD.'
     }
     if (passo === 1 && !ramo) return 'Escolha o ramo mais parecido com o seu.'
+    if (passo === 1 && ramo === 'outro' && ocupacao.trim().length < OCUPACAO_MIN) return 'Me conta qual é a sua ocupação.'
+    if (passo === PASSO_PERFIL && nasc && !nascimentoValido(nasc)) return 'Confira a data de nascimento.'
     if (passo === 2) {
       if (!carteiras.some((c) => c.on && c.tipo !== 'investimento')) return 'Marque pelo menos uma conta ou o dinheiro.'
       if (carteiras.some((c) => c.on && !c.nome.trim())) return 'Dê um nome para cada conta (ex.: Nubank).'
@@ -121,7 +149,50 @@ export default function Onboarding() {
       if (semValor) return `Falta o valor de ${semValor.nome}.`
     }
     return ''
-  }, [passo, negocio, cnpjOk, foneOk, ramo, carteiras, padrao, fixas, usaCartao, cartoes])
+  }, [passo, negocio, cnpjOk, foneOk, ramo, ocupacao, nasc, carteiras, padrao, fixas, usaCartao, cartoes])
+
+  /**
+   * Grava o contato assim que a pessoa sai do passo 1. Antes só gravava no fim do passo 6 (`salvarDados`), então quem abandonava
+   * no meio não deixava número nenhum e não dava para saber quem era nem onde parou. O número continua NÃO confirmado.
+   */
+  const salvarContato = () => mut((a) => ({ ...a, usuario: { ...a.usuario, negocio: negocio.trim(), cnpj, whats: fone } }))
+
+  /** Ocupação de quem é de "Outro ramo". Gravação à parte: se falhar, o cadastro segue (ver salvarPerfilPublico). */
+  const salvarOcupacao = () => {
+    if (s.sessao.demo) return
+    if (ramo === 'outro') {
+      ocupacaoGravada.current = true
+      void salvarPerfilPublico({ ocupacao: ocupacao.trim() })
+    } else if (ocupacaoGravada.current) {
+      // Escolheu "Outro", gravou, e depois voltou e mudou de ramo: não deixa a ocupação antiga para trás.
+      ocupacaoGravada.current = false
+      void salvarPerfilPublico({ ocupacao: '' })
+    }
+  }
+
+  const temPerfil = !!(nasc || cidade.trim() || uf || fatur || renda)
+  const abrirPerfil = () => {
+    evento('perfil_aberto')
+    setPassoLocal(PASSO_PERFIL)
+  }
+  const pularPerfil = () => {
+    evento('perfil_pulado')
+    concluir()
+  }
+  const salvarPerfil = async () => {
+    setSalvandoPerfil(true)
+    const dados: PerfilPublico = { perfil_em: new Date().toISOString() }
+    if (nasc) dados.nascimento = nasc
+    if (cidade.trim()) dados.cidade = cidade.trim()
+    if (uf) dados.uf = uf
+    if (fatur) dados.faturamento_faixa = fatur
+    if (renda) dados.renda_faixa = renda
+    const gravou = s.sessao.demo ? false : await salvarPerfilPublico(dados)
+    evento('perfil_salvo', { gravou: gravou ? 'sim' : 'nao' })
+    setSalvandoPerfil(false)
+    // Gravar é um favor da pessoa, não uma exigência: se não gravar, ela entra no painel do mesmo jeito.
+    concluir()
+  }
 
   const salvarDados = () =>
     mut((a) => {
@@ -207,12 +278,12 @@ export default function Onboarding() {
           <button type="button" className="icone-btn" aria-label={passo === 0 ? 'Sair' : 'Voltar'} onClick={() => (passo === 0 ? sair() : setPasso(passo - 1))}>
             <ArrowLeft size={22} />
           </button>
-          <div className="ob-passos" role="progressbar" aria-valuemin={1} aria-valuemax={GUIA.length} aria-valuenow={passo + 1} aria-label="Progresso do cadastro">
-            {GUIA.map((_, i) => (
+          <div className="ob-passos" role="progressbar" aria-valuemin={1} aria-valuemax={PASSOS} aria-valuenow={Math.min(passo + 1, PASSOS)} aria-label="Progresso do cadastro">
+            {GUIA.slice(0, PASSOS).map((_, i) => (
               <i key={i} className={i < passo ? 'feito' : i === passo ? 'atual' : ''} />
             ))}
           </div>
-          <span className="ob-cont num">{passo + 1} de {GUIA.length}</span>
+          <span className="ob-cont num">{passo < PASSOS ? `${passo + 1} de ${PASSOS}` : 'Opcional'}</span>
         </div>
       </div>
 
@@ -252,24 +323,92 @@ export default function Onboarding() {
         )}
 
         {passo === 1 && (
-          <div className="opcoes">
-            {RAMOS.map((r) => {
-              const I = ICONE_RAMO[r.id]
-              return (
-                <button type="button" key={r.id} className="opcao" aria-pressed={ramo === r.id} onClick={() => setRamo(r.id)}>
-                  {ramo === r.id && (
-                    <span className="visto">
-                      <Check size={14} strokeWidth={3} />
+          <>
+            <div className="opcoes">
+              {RAMOS.map((r) => {
+                const I = ICONE_RAMO[r.id]
+                return (
+                  <button type="button" key={r.id} className="opcao" aria-pressed={ramo === r.id} onClick={() => setRamo(r.id)}>
+                    {ramo === r.id && (
+                      <span className="visto">
+                        <Check size={14} strokeWidth={3} />
+                      </span>
+                    )}
+                    <span className="ic">
+                      <I size={19} />
                     </span>
-                  )}
-                  <span className="ic">
-                    <I size={19} />
-                  </span>
-                  <b>{r.nome}</b>
-                  <small>{r.ex}</small>
-                </button>
-              )
-            })}
+                    <b>{r.nome}</b>
+                    <small>{r.id === 'outro' ? 'Me conta qual é o seu' : r.ex}</small>
+                  </button>
+                )
+              })}
+            </div>
+            {ramo === 'outro' && (
+              <label className="campo" style={{ marginTop: 14 }}>
+                <span>Qual é a sua ocupação?</span>
+                <input
+                  className="entrada"
+                  value={ocupacao}
+                  onChange={(e) => setOcupacao(e.target.value.slice(0, 60))}
+                  placeholder="Ex.: fotógrafa, tatuador, mecânico"
+                  autoComplete="off"
+                  maxLength={60}
+                  aria-required="true"
+                />
+                <small>Preciso saber para organizar seus ganhos e gastos do jeito certo.</small>
+              </label>
+            )}
+          </>
+        )}
+
+        {passo === PASSO_PERFIL && (
+          <div className="pilha">
+            <div className="card pilha">
+              <label className="campo">
+                <span>Data de nascimento</span>
+                <input className="entrada num" type="date" value={nasc} min="1920-01-01" max={`${new Date().getFullYear() - 14}-12-31`} onChange={(e) => setNasc(e.target.value)} />
+              </label>
+              <div className="dupla" style={{ gridTemplateColumns: 'minmax(0, 1fr) 92px' }}>
+                <label className="campo">
+                  <span>Cidade</span>
+                  <input className="entrada" value={cidade} onChange={(e) => setCidade(e.target.value.slice(0, 60))} placeholder="Ex.: Recife" autoComplete="address-level2" maxLength={60} />
+                </label>
+                <label className="campo">
+                  <span>UF</span>
+                  <select className="entrada" value={uf} onChange={(e) => setUf(e.target.value)} aria-label="Estado (UF)">
+                    <option value="">UF</option>
+                    {UFS.map((x) => (
+                      <option key={x} value={x}>
+                        {x}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <label className="campo">
+                <span>Quanto o seu negócio fatura por mês?</span>
+                <select className="entrada" value={fatur} onChange={(e) => setFatur(e.target.value)}>
+                  <option value="">Escolha uma faixa</option>
+                  {FAIXAS_FATURAMENTO.map((f) => (
+                    <option key={f.v} value={f.v}>
+                      {f.r}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="campo">
+                <span>E a sua renda pessoal por mês?</span>
+                <select className="entrada" value={renda} onChange={(e) => setRenda(e.target.value)}>
+                  <option value="">Escolha uma faixa</option>
+                  {FAIXAS_RENDA.map((f) => (
+                    <option key={f.v} value={f.v}>
+                      {f.r}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="suave pq">Tudo aqui é opcional e só a equipe da Granninha vê. Se você apagar sua conta, isso some junto.</p>
           </div>
         )}
 
@@ -562,6 +701,9 @@ export default function Onboarding() {
                 className="btn btn-pri btn-bloco"
                 disabled={!!falta}
                 onClick={() => {
+                  // Sai do passo 1: o contato já fica gravado (quem abandonar depois deixa nome e número, ainda não confirmado).
+                  if (passo === 0) salvarContato()
+                  if (passo === 1) salvarOcupacao()
                   // Ao concluir o último passo de dados, grava tudo antes de mandar a pessoa ao WhatsApp.
                   if (passo === 5) salvarDados()
                   setPasso(passo + 1)
@@ -569,6 +711,19 @@ export default function Onboarding() {
               >
                 {passo === 5 ? 'Concluir' : 'Continuar'}
                 <ArrowRight size={18} />
+              </button>
+            </>
+          ) : passo === PASSO_PERFIL ? (
+            <>
+              <div className="falta" aria-live="polite">
+                {falta}
+              </div>
+              <button type="button" className="btn btn-pri btn-bloco" disabled={!temPerfil || !!falta || salvandoPerfil} onClick={() => void salvarPerfil()}>
+                {salvandoPerfil ? 'Salvando…' : 'Salvar e ver meu painel'}
+                <ArrowRight size={18} />
+              </button>
+              <button type="button" className="btn btn-txt" disabled={salvandoPerfil} onClick={pularPerfil}>
+                Pular por agora
               </button>
             </>
           ) : (
@@ -593,8 +748,8 @@ export default function Onboarding() {
                   </button>
                 </>
               ) : (
-                <button type="button" className="btn btn-pri btn-bloco" onClick={concluir}>
-                  Ver meu painel
+                <button type="button" className="btn btn-pri btn-bloco" onClick={abrirPerfil}>
+                  Continuar
                   <ArrowRight size={18} />
                 </button>
               )}
