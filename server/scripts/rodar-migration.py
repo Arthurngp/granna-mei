@@ -8,6 +8,9 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  adminvisao 20261121140000_admin_visao_geral.sql   funções de leitura do admin: custo por período, ativação, receita
+  adminacoes 20261121150000_admin_acoes_retencao_publico.sql   funções de leitura: ações, retenção, público
+          (+ 6 colunas novas e vazias em perfis). Rodar adminvisao primeiro.
   cobranca 20261121120000_cobranca_stripe.sql    colunas da Stripe em assinaturas e faturas (só adiciona)
   avisos  20261120100000_avisos.sql              tabela `avisos`: registro de cada aviso de conta vencendo
           enviado, para nunca mandar em dobro. Sem ela o serviço NÃO envia aviso nenhum (de propósito).
@@ -36,9 +39,20 @@ MIGRATIONS = {
     "alerta": "20261119200000_alerta_admin.sql",
     "avisos": "20261120100000_avisos.sql",
     "cobranca": "20261121120000_cobranca_stripe.sql",
+    "adminvisao": "20261121140000_admin_visao_geral.sql",
+    "adminacoes": "20261121150000_admin_acoes_retencao_publico.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
+    # Só funções de leitura do admin (custo por período, ativação, receita): confere as 3.
+    "adminvisao": """select (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+        where n.nspname='public' and p.proname in ('admin_custo_periodo','admin_ativacao','admin_receita')) as funcoes_de_3""",
+    # Funções de leitura (ações, retenção, público) e 6 colunas novas e vazias em perfis (só adiciona).
+    "adminacoes": """select
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname in ('admin_acoes','admin_retencao','admin_publico')) as funcoes_de_3,
+        (select count(*) from information_schema.columns where table_schema='public' and table_name='perfis'
+          and column_name in ('nascimento','cidade','uf','faturamento_faixa','ocupacao','perfil_em')) as colunas_de_6""",
     # Só adiciona colunas e índices: confere as 5 colunas e o índice único que o upsert de fatura usa.
     "cobranca": """select
         (select count(*) from information_schema.columns where table_schema='public' and

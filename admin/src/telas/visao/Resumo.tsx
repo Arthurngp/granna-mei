@@ -169,7 +169,7 @@ export function Resumo() {
     <Pagina titulo="Visão geral" subtitulo={dataExtensa()} controles={controles} heads={heads}>
       <Cartao g={8} titulo="Precisa de você hoje" nota={acoes.dados ? `${n(total)} contas` : undefined}>
         {acoes.ausente ? (
-          <p className="texto-ajuda">Esta lista usa a função admin_acoes, que ainda não foi aplicada no banco. Falta rodar a migration 20261121130000.</p>
+          <p className="texto-ajuda">Esta lista usa a função admin_acoes, que ainda não foi aplicada no banco. Falta rodar a migration 20261121150000.</p>
         ) : !acoes.dados ? (
           <div style={{ display: 'grid', gap: 12 }} aria-hidden="true">
             {[0, 1, 2, 3].map((k) => (
@@ -232,7 +232,7 @@ export function Resumo() {
             </p>
           </>
         ) : ret.ausente ? (
-          <p className="texto-ajuda">Falta aplicar a migration 20261121130000.</p>
+          <p className="texto-ajuda">Falta aplicar a migration 20261121150000.</p>
         ) : (
           <span className="skel" style={{ height: 150 }} />
         )}
@@ -240,7 +240,7 @@ export function Resumo() {
 
       <Cartao g={8} titulo="Mensagens por dia" lado={<div className="leg"><span><i />Últimos 30 dias</span><span><i className="p" />30 dias anteriores</span></div>}>
         {per.ausente ? (
-          <p className="texto-ajuda">Falta aplicar a migration 20261121120000.</p>
+          <p className="texto-ajuda">Falta aplicar a migration 20261121140000.</p>
         ) : ult30.length > 1 ? (
           <AreaDia
             nome="Mensagens por dia: últimos 30 dias contra os 30 anteriores"

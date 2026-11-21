@@ -40,7 +40,7 @@ export function Ausente({ nome }: { nome: string }) {
     <div className="alerta aviso" role="alert">
       <TriangleAlert size={20} style={{ flex: 'none' }} />
       <span>
-        Esta página usa a função <b>{nome}</b>, que ainda não foi aplicada no banco. Falta rodar a migration <b>20261121120000_admin_visao_geral.sql</b>.
+        Esta página usa a função <b>{nome}</b>, que ainda não foi aplicada no banco. Falta rodar a migration <b>{['admin_acoes', 'admin_retencao', 'admin_publico'].includes(nome) ? '20261121150000_admin_acoes_retencao_publico.sql' : '20261121140000_admin_visao_geral.sql'}</b>.
       </span>
     </div>
   )

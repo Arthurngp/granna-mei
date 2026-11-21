@@ -64,7 +64,7 @@ export function Receita() {
             </div>
           </>
         ) : uso.ausente ? (
-          <p className="texto-ajuda">Falta aplicar a migration 20261121120000.</p>
+          <p className="texto-ajuda">Falta aplicar a migration 20261121140000.</p>
         ) : (
           <span className="skel" style={{ height: 110 }} />
         )}
