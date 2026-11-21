@@ -68,7 +68,7 @@ if existentes:
     w = existentes[0]
     faltam = sorted(set(EVENTOS) - set(w['enabled_events']))
     print(f'  ok   webhook já existe ({w["id"]})' + (f' · FALTAM eventos: {faltam}' if faltam else ''))
-elif aplicar:
+elif aplicar and live:
     args = ['webhook_endpoints', 'create', '--url', URL_WEBHOOK, '-d', 'description=Granninha: cobrança']
     for e in EVENTOS:
         args += ['-d', f'enabled_events[]={e}']
@@ -80,6 +80,8 @@ elif aplicar:
     with os.fdopen(fd, 'w') as f:
         f.write(w['secret'])
     print(f'  criado webhook {w["id"]}. Segredo gravado em {arq} (não impresso).')
+elif not live:
+    print('  (sandbox: sem webhook de verdade; para testar use `stripe listen --forward-to localhost:3000/cobranca/webhook`)')
 else:
     print(f'  FALTA webhook para {URL_WEBHOOK}')
 
