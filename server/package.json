@@ -22,7 +22,8 @@
     "test:cobranca": "tsx test/cobranca.ts",
     "test:dominio": "tsx test/seguranca.ts && tsx test/dominio.ts",
     "test:trocar-whatsapp": "tsx test/trocar-whatsapp.ts",
-    "test:sem-ia": "tsx test/cartao.ts && tsx test/conferir.ts && tsx test/confirmar.ts && tsx test/externos.ts && tsx test/excluir.ts && tsx test/saude.ts && tsx test/saldo.ts && tsx test/saldo-fluxo.ts && tsx test/correcao-fluxo.ts && tsx test/contexto-fluxo.ts && tsx test/presas.ts && tsx test/reenvio.ts && tsx test/desfazer.ts && tsx test/pendente.ts && tsx test/ruido.ts && tsx test/numeros.ts && tsx test/ia-fora.ts && tsx test/alerta.ts && tsx test/retirada.ts && tsx test/avisos.ts && tsx test/avisos-teste.ts && tsx test/cobranca.ts && tsx test/seguranca.ts && tsx test/dominio.ts && tsx test/trocar-whatsapp.ts"
+    "test:limite": "tsx test/limite-sem-numero.ts && tsx test/limite-configuravel.ts",
+    "test:sem-ia": "tsx test/cartao.ts && tsx test/conferir.ts && tsx test/confirmar.ts && tsx test/externos.ts && tsx test/excluir.ts && tsx test/saude.ts && tsx test/saldo.ts && tsx test/saldo-fluxo.ts && tsx test/correcao-fluxo.ts && tsx test/contexto-fluxo.ts && tsx test/presas.ts && tsx test/reenvio.ts && tsx test/desfazer.ts && tsx test/pendente.ts && tsx test/ruido.ts && tsx test/numeros.ts && tsx test/ia-fora.ts && tsx test/alerta.ts && tsx test/retirada.ts && tsx test/avisos.ts && tsx test/avisos-teste.ts && tsx test/cobranca.ts && tsx test/seguranca.ts && tsx test/dominio.ts && tsx test/trocar-whatsapp.ts && tsx test/limite-sem-numero.ts && tsx test/limite-configuravel.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

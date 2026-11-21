@@ -5,6 +5,7 @@
  */
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, usoDoMes } from './banco.ts'
 import { despedidaDe, RESPOSTA_DESPEDIDA } from './despedida.ts'
+import { AVISO_PERTO_DO_LIMITE, limiteDeMidias, limiteDoCliente, TEXTO_LIMITE_LANCAMENTOS, TEXTO_LIMITE_MIDIAS } from './limite.ts'
 import { ErroIA, MARCA_RETOMAR, recadoDaFalhaIA, valeRetomarIA } from './ia-estado.ts'
 import { avisoDeRetirada, categoriaDeNegocio, ehDoNegocio } from './retirada.ts'
 import { faturaDe } from './cartao.ts'
@@ -19,8 +20,6 @@ import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, pareceRe
 import { ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta } from './consultas.ts'
 import { foraDoDisponivel } from './cartao.ts'
 
-export const LIMITE_LANCAMENTOS = Number(process.env.LIMITE_LANCAMENTOS ?? 300)
-export const LIMITE_MIDIAS = Number(process.env.LIMITE_MIDIAS ?? 100)
 const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.com.br/painel').replace(/\/+$/, '')
 
 export interface EventoGateway {
@@ -214,16 +213,14 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
     } else {
       userId = cliente.id
       const hoje = hojeSP()
-      const acesso = await acessoDe(cliente.id, hoje)
-      const uso = await usoDoMes(cliente.id, hoje.slice(0, 8) + '01T00:00:00-03:00')
+      // O limite de lançamentos é por cliente (próprio, ou o padrão de todos, definidos no admin): ver limite.ts.
+      const [acesso, uso, { limite }] = await Promise.all([acessoDe(cliente.id, hoje), usoDoMes(cliente.id, hoje.slice(0, 8) + '01T00:00:00-03:00'), limiteDoCliente(cliente.id)])
       if (acesso.acesso === 'bloqueado') {
         status = 'bloqueada'
         resposta = `Seu acesso está pausado e por isso não consigo anotar agora. Seus dados estão guardados. Para voltar, é só regularizar em ${PAINEL()}/ajustes/assinatura`
-      } else if (uso.lancamentos >= LIMITE_LANCAMENTOS || (tipo !== 'texto' && tipo !== 'outro' && uso.midias >= LIMITE_MIDIAS)) {
+      } else if (uso.lancamentos >= limite || (tipo !== 'texto' && tipo !== 'outro' && uso.midias >= limiteDeMidias())) {
         status = 'limite'
-        resposta = uso.lancamentos >= LIMITE_LANCAMENTOS
-          ? `Você chegou ao limite de ${LIMITE_LANCAMENTOS} lançamentos deste mês. No dia 1 o contador zera. Se precisar de mais, fala com a gente pelo painel.`
-          : `Você chegou ao limite de ${LIMITE_MIDIAS} áudios, fotos e PDFs deste mês. Texto continua funcionando normal, e no dia 1 o contador zera.`
+        resposta = uso.lancamentos >= limite ? TEXTO_LIMITE_LANCAMENTOS : TEXTO_LIMITE_MIDIAS
       } else if (tipo === 'outro' && ehRuido(d)) {
         status = 'ignorada'
       } else if (tipo === 'outro') {
@@ -240,8 +237,8 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
         textoFinal = r.texto
         tokens = r.tokens
         // Aviso de 80% do limite, uma vez, junto da resposta.
-        if (status === 'ok' && uso.lancamentos + 1 === Math.floor(LIMITE_LANCAMENTOS * 0.8)) {
-          resposta += `\n\nAviso: você já usou 80% dos ${LIMITE_LANCAMENTOS} lançamentos do mês.`
+        if (status === 'ok' && uso.lancamentos + 1 === Math.floor(limite * 0.8)) {
+          resposta += `\n\n${AVISO_PERTO_DO_LIMITE}`
         }
       }
     }

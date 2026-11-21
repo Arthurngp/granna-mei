@@ -119,15 +119,3 @@ export function faturamentoAno(s: Estado, ano: string) {
   }
   return { total, servico, comercio, porMes }
 }
-
-/** Quantos lançamentos e mídias (áudio, foto, PDF) o cliente mandou no mês: base do uso justo. */
-export function usoDoMes(s: Estado, ym: string) {
-  let lancamentos = 0
-  let midias = 0
-  for (const l of s.lancamentos) {
-    if (mesDe(l.data) !== ym || l.origem === 'painel') continue
-    lancamentos++
-    if (l.origem !== 'texto') midias++
-  }
-  return { lancamentos, midias }
-}
