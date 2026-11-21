@@ -14,6 +14,7 @@
  * responder no WhatsApp e ficar livre para outra conta.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { cancelarAssinaturaDe } from './cobranca-stripe.ts'
 
 export class ErroExclusao extends Error {
   constructor(
@@ -57,6 +58,9 @@ async function arquivosDe(sb: SupabaseClient, bucket: string, pasta: string): Pr
 
 /** O trabalho sujo, igual para o admin e para o prazo: arquivos, mensagens soltas, login, conferência. */
 async function apagarTudo(sb: SupabaseClient, alvoId: string, whats: string): Promise<ResultadoExclusao> {
+  // Primeiro cancela a assinatura na Stripe: se não der, a exclusão para aqui e ninguém fica pagando por conta apagada.
+  await cancelarAssinaturaDe(sb, alvoId)
+
   // Arquivos primeiro: depois que a conta some, ninguém mais sabe de quem eram.
   let arquivos = 0
   for (const b of BUCKETS) {

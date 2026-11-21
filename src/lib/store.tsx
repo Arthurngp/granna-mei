@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAviso } from '../components/ui'
 import { hoje, somaDias, somaMeses } from './format'
 import { evento as rastrear, motivoServidor } from './eventos'
-import { carregar, enviar } from './remoto'
+import { carregar, carregarAssinatura, enviar } from './remoto'
 import { categoriasPadrao, estadoDemo, estadoVazio, VERSAO } from './seed'
 import { lerOrigem } from './origem'
 import { supabase, temBanco } from './supabase'
@@ -66,6 +66,8 @@ interface Ctx {
   excluirLancamento: (id: string) => void
   simularStatus: (st: StatusAssinatura) => void
   carregarExemplo: () => void
+  /** Relê só a assinatura e os pagamentos (a Stripe avisa o servidor, e o painel precisa enxergar). */
+  recarregarAssinatura: () => Promise<void>
 }
 
 const AppCtx = createContext<Ctx | null>(null)
@@ -326,6 +328,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const d = estadoDemo()
           return { ...d, usuario: { ...d.usuario, ...a.usuario, ramo: 'beleza' }, prefs: a.prefs, assinatura: a.assinatura, categorias: categoriasPadrao('beleza') }
         }),
+      recarregarAssinatura: async () => {
+        if (!userId.current || !supabase || s.sessao.demo) return
+        try {
+          const assinatura = await carregarAssinatura()
+          setS((a) => ({ ...a, assinatura }))
+          if (gravado.current) gravado.current = { ...gravado.current, assinatura }
+        } catch {
+          /* sem conexão: a próxima tentativa resolve */
+        }
+      },
     }
   }, [s, carregando, mut, abrirConta])
 

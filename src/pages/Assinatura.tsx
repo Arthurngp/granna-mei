@@ -1,19 +1,61 @@
-import { ArrowLeft, Check } from 'lucide-react'
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { ArrowLeft, Check, LoaderCircle } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { FaixaAssinatura } from '../components/Shell'
 import { Folha, useAviso } from '../components/ui'
 import { usoDoMes } from '../lib/calc'
+import { abrirPagamento } from '../lib/cobranca'
 import { LIMITE_LANCAMENTOS, LIMITE_MIDIAS, PRECO_ANUAL, PRECO_MENSAL } from '../lib/config'
-import { brl, diaCurto, difDias, hoje, mesAtual, nomeMes } from '../lib/format'
+import { brl, diaCurto, difDias, hoje, mesAtual, nomeMes, somaDias } from '../lib/format'
 import { useApp } from '../lib/store'
 
 export default function Assinatura() {
-  const { s, mut, simularStatus } = useApp()
+  const { s, mut, simularStatus, recarregarAssinatura } = useApp()
   const avisar = useAviso()
   const a = s.assinatura
   const [plano, setPlano] = useState(a.plano)
   const [cancelar, setCancelar] = useState(false)
+  const [ocupado, setOcupado] = useState(false)
+  const [params, setParams] = useSearchParams()
+  const [confirmando, setConfirmando] = useState(params.get('pagamento') === 'ok' && !s.sessao.demo)
+
+  /** Leva para a página certa da Stripe (Checkout, fatura em aberto ou portal). Erro vira aviso; nunca desloga. */
+  const irParaStripe = async () => {
+    setOcupado(true)
+    try {
+      const p = await abrirPagamento(plano)
+      window.location.assign(p.url)
+    } catch (e) {
+      avisar((e as Error).message)
+      setOcupado(false)
+    }
+  }
+
+  // Voltou do pagamento: a Stripe avisa o servidor em segundos, então relê a assinatura até aparecer (no máximo ~30 s).
+  useEffect(() => {
+    if (!confirmando) return
+    let tentativas = 0
+    void recarregarAssinatura()
+    const t = window.setInterval(() => {
+      tentativas++
+      void recarregarAssinatura()
+      if (tentativas >= 15) {
+        window.clearInterval(t)
+        setConfirmando(false)
+        avisar('Recebemos o seu pedido. A confirmação pode levar alguns minutos e aparece aqui.')
+      }
+    }, 2000)
+    return () => window.clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmando])
+  useEffect(() => {
+    if (confirmando && a.status === 'ativa') {
+      setConfirmando(false)
+      setParams({}, { replace: true })
+      avisar('Assinatura confirmada. Obrigada!')
+    }
+  }, [a.status, confirmando, avisar, setParams])
+  const primeiraCobranca = somaDias(a.trialFim, 1)
   const uso = usoDoMes(s, mesAtual())
   const economia = PRECO_MENSAL * 12 - PRECO_ANUAL
   // Quantas mensalidades a economia paga, sem prometer mais que o real: 1,97 vira "quase 2", nunca "2".
@@ -31,7 +73,7 @@ export default function Assinatura() {
   const cortesia = a.status === 'cortesia'
 
   const pagar = () => {
-    if (!s.sessao.demo) return avisar('A cobrança ainda não está ligada. Seu acesso segue liberado no teste.')
+    if (!s.sessao.demo) return void irParaStripe()
     mut((x) => ({ ...x, assinatura: { ...x.assinatura, plano, faturas: [{ id: `f-${Date.now()}`, data: hoje(), valor: plano === 'anual' ? PRECO_ANUAL : PRECO_MENSAL, status: 'paga' as const }, ...x.assinatura.faturas] } }))
     simularStatus('ativa')
     avisar('Pagamento confirmado. Obrigada!')
@@ -87,19 +129,39 @@ export default function Assinatura() {
             ) : (
               <>
                 <div>
-                  <span>{a.status === 'trial' ? 'Primeira cobrança' : a.status === 'ativa' ? 'Próxima cobrança' : 'Venceu em'}</span>
-                  <span>{diaCurto(a.proxCobranca)}</span>
+                  <span>{a.cancelaEm ? 'Assinatura termina em' : a.status === 'trial' ? 'Primeira cobrança' : a.status === 'ativa' ? 'Próxima cobrança' : 'Venceu em'}</span>
+                  <span>{diaCurto(a.cancelaEm ?? (a.status === 'trial' ? primeiraCobranca : a.proxCobranca))}</span>
                 </div>
                 <div style={{ borderBottom: 0 }}>
-                  <span>Forma de pagamento</span>
-                  <span>Pix automático</span>
+                  <span>Pagamento</span>
+                  <span>Seguro, pela Stripe</span>
                 </div>
               </>
             )}
           </div>
-          {(a.status === 'atrasada' || a.status === 'trial') && (
-            <button type="button" className="btn btn-pri btn-bloco" style={{ marginTop: 10 }} onClick={pagar}>
-              {a.status === 'trial' ? `Assinar agora por ${brl(plano === 'anual' ? PRECO_ANUAL : PRECO_MENSAL)}` : `Pagar ${brl(a.plano === 'anual' ? PRECO_ANUAL : PRECO_MENSAL)} agora`}
+          {confirmando && (
+            <p className="suave pq" role="status" style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <LoaderCircle size={16} className="gira" />
+              Confirmando o seu pagamento…
+            </p>
+          )}
+          {(a.status === 'atrasada' || a.status === 'trial') && !confirmando && (
+            <>
+              <button type="button" className="btn btn-pri btn-bloco" style={{ marginTop: 10 }} onClick={pagar} disabled={ocupado}>
+                {ocupado && <LoaderCircle size={18} className="gira" />}
+                {a.status === 'trial' ? `Assinar por ${brl(plano === 'anual' ? PRECO_ANUAL : PRECO_MENSAL)}` : `Pagar ${brl(a.plano === 'anual' ? PRECO_ANUAL : PRECO_MENSAL)} agora`}
+              </button>
+              {a.status === 'trial' && (
+                <p className="suave pq" style={{ marginTop: 8 }}>
+                  Nada é cobrado hoje. A cobrança só começa depois do teste grátis, e você cancela quando quiser.
+                </p>
+              )}
+            </>
+          )}
+          {a.status === 'ativa' && !cortesia && !s.sessao.demo && (
+            <button type="button" className="btn btn-sec btn-bloco" style={{ marginTop: 10 }} onClick={() => void irParaStripe()} disabled={ocupado}>
+              {ocupado && <LoaderCircle size={18} className="gira" />}
+              Trocar cartão ou plano
             </button>
           )}
         </section>
@@ -135,7 +197,7 @@ export default function Assinatura() {
               type="button"
               className="btn btn-pri btn-bloco"
               onClick={() => {
-                if (!s.sessao.demo) return avisar('A troca de plano entra junto com a cobrança.')
+                if (!s.sessao.demo) return void irParaStripe()
                 mut((x) => ({ ...x, assinatura: { ...x.assinatura, plano } }))
                 avisar(plano === 'anual' ? 'Plano anual ativado na próxima cobrança' : 'Plano mensal ativado na próxima cobrança')
               }}
@@ -181,7 +243,7 @@ export default function Assinatura() {
         </section>
       </div>
 
-      {a.status !== 'trial' && !cortesia && (
+      {a.status !== 'trial' && !cortesia && !a.cancelaEm && (
         <button type="button" className="btn btn-txt" style={{ color: 'var(--muted)', justifySelf: 'center' }} onClick={() => setCancelar(true)}>
           Cancelar assinatura
         </button>
@@ -202,7 +264,8 @@ export default function Assinatura() {
               style={{ color: 'var(--out)' }}
               onClick={() => {
                 setCancelar(false)
-                if (!s.sessao.demo) return avisar('O cancelamento entra junto com a cobrança.')
+                // Na conta de verdade o cancelamento é feito no portal da Stripe, que pede a confirmação lá.
+                if (!s.sessao.demo) return void irParaStripe()
                 avisar(`Assinatura cancelada. Você usa até ${diaCurto(a.proxCobranca)}.`)
               }}
             >
