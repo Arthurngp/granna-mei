@@ -96,6 +96,17 @@ export async function neutralizarRobo(): Promise<void> {
   if (!r.ok) throw new Error(`gateway robô ${r.status}`)
 }
 
+/**
+ * Desvincula o aparelho da sessão (logout do WhatsApp). É o primeiro passo para trocar o número: depois dele a sessão fica
+ * LOGGED_OUT e um novo `start` gera um QR para o chip novo. O WA-AKG não tem rota para apagar sessão (só start, stop, restart,
+ * logout e pair), conferido no código do commit 936b26b: sem instância rodando, ele só marca LOGGED_OUT no banco.
+ * Quem chama TEM que ter passado pela confirmação em duas etapas (trocar-whatsapp.ts): isto derruba o atendimento de todos.
+ */
+export async function desvincularSessao(): Promise<void> {
+  const r = await fetch(`${base()}/api/sessions/${sessao()}/logout`, { method: 'POST', headers: cabecalhos(), body: '{}', signal: AbortSignal.timeout(20_000) })
+  if (!r.ok) throw new Error(`gateway logout ${r.status}: ${(await r.text()).slice(0, 200)}`)
+}
+
 /** QR para parear o chip. Sem QR quando já está conectado. */
 export async function qrDaSessao(): Promise<{ conectado: boolean; imagem: string | null; estado: string; numero: string | null }> {
   const st = await statusSessao()
