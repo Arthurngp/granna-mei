@@ -3,10 +3,9 @@ import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { FaixaAssinatura } from '../components/Shell'
 import { Folha, useAviso } from '../components/ui'
-import { usoDoMes } from '../lib/calc'
 import { abrirPagamento } from '../lib/cobranca'
-import { LIMITE_LANCAMENTOS, LIMITE_MIDIAS, PRECO_ANUAL, PRECO_MENSAL } from '../lib/config'
-import { brl, diaCurto, difDias, hoje, mesAtual, nomeMes, somaDias } from '../lib/format'
+import { PRECO_ANUAL, PRECO_MENSAL } from '../lib/config'
+import { brl, diaCurto, difDias, hoje, somaDias } from '../lib/format'
 import { useApp } from '../lib/store'
 
 export default function Assinatura() {
@@ -56,7 +55,6 @@ export default function Assinatura() {
     }
   }, [a.status, confirmando, avisar, setParams])
   const primeiraCobranca = somaDias(a.trialFim, 1)
-  const uso = usoDoMes(s, mesAtual())
   const economia = PRECO_MENSAL * 12 - PRECO_ANUAL
   // Quantas mensalidades a economia paga, sem prometer mais que o real: 1,97 vira "quase 2", nunca "2".
   const mesesExato = economia / PRECO_MENSAL
@@ -77,23 +75,6 @@ export default function Assinatura() {
     mut((x) => ({ ...x, assinatura: { ...x.assinatura, plano, faturas: [{ id: `f-${Date.now()}`, data: hoje(), valor: plano === 'anual' ? PRECO_ANUAL : PRECO_MENSAL, status: 'paga' as const }, ...x.assinatura.faturas] } }))
     simularStatus('ativa')
     avisar('Pagamento confirmado. Obrigada!')
-  }
-
-  const Barra = ({ rotulo, n, max }: { rotulo: string; n: number; max: number }) => {
-    const f = Math.min(1, n / max)
-    return (
-      <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
-          <span style={{ fontWeight: 620 }}>{rotulo}</span>
-          <span className="num suave">
-            <b style={{ color: 'var(--text)' }}>{n}</b> de {max}
-          </span>
-        </div>
-        <div className="prog">
-          <i style={{ width: `${Math.max(2, f * 100)}%`, background: f >= 1 ? 'var(--out)' : f >= 0.8 ? '#D8921C' : 'var(--indigo-2)' }} />
-        </div>
-      </div>
-    )
   }
 
   return (
@@ -210,15 +191,6 @@ export default function Assinatura() {
           )}
         </section>
         )}
-
-        <section className="card g-6 pilha">
-          <div className="card-cab" style={{ marginBottom: 0 }}>
-            <h2>Uso em {nomeMes(mesAtual(), false)}</h2>
-          </div>
-          <Barra rotulo="Lançamentos pelo WhatsApp" n={uso.lancamentos} max={LIMITE_LANCAMENTOS} />
-          <Barra rotulo="Áudios, fotos e PDFs" n={uso.midias} max={LIMITE_MIDIAS} />
-          <p className="suave pq">O uso zera todo dia 1. Perto do limite, a Granninha avisa antes de parar de anotar.</p>
-        </section>
 
         <section className="card g-6" style={{ paddingBottom: 6 }}>
           <div className="card-cab" style={{ marginBottom: 2 }}>

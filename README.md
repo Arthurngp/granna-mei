@@ -31,7 +31,7 @@ a assinatura só é gravada pelo servidor e conta bloqueada lê mas não grava.
 
 - Código pelo WhatsApp, cobrança, envio ao contador e a exclusão definitiva da conta.
 - E-mail (confirmação e troca de senha) depende do Resend; por enquanto a conta entra sem confirmar e-mail.
-- `src/lib/config.ts`: `WHATS_GRANNINHA` é provisório; preços, limite do MEI e uso justo ficam aqui.
+- `src/lib/config.ts`: `WHATS_GRANNINHA` é provisório; preços e limite do MEI ficam aqui. O uso justo mensal vive só no servidor (`LIMITE_LANCAMENTOS` e `LIMITE_MIDIAS` em `server/src/granninha.ts`) e o cliente não vê o número, nem na tela nem no WhatsApp (`server/src/limite.ts`).
 
 ## Marca
 

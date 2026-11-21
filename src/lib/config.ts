@@ -9,10 +9,6 @@ export const PRECO_ANUAL = 299.9
 /** Servidor da Granninha (cobrança). No build vem de VITE_GRANNINHA_API; sem ela usa o endereço de produção. */
 export const API_GRANNINHA = ((import.meta.env.VITE_GRANNINHA_API as string | undefined) || 'https://api-grannamei.amplasoft.me').replace(/\/+$/, '')
 
-/** Uso justo por mês (a confirmar com o Arthur antes do lançamento). */
-export const LIMITE_LANCAMENTOS = 300
-export const LIMITE_MIDIAS = 100
-
 /** Número do WhatsApp da Granninha, definido no build (VITE_WHATS_GRANNINHA). Sem ele, usa um número provisório. */
 export const WHATS_GRANNINHA = (import.meta.env.VITE_WHATS_GRANNINHA as string | undefined) || '5581900000000'
 export const linkWhats = (texto = 'Oi, Granninha!') => `https://wa.me/${WHATS_GRANNINHA}?text=${encodeURIComponent(texto)}`
