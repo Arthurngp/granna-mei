@@ -23,6 +23,7 @@
  * com relógio e gateway falsos.
  */
 import { brl, somaDias } from './consultas.ts'
+import { erroSeguro } from './seguranca.ts'
 
 export type Modo = 'off' | 'ensaio' | 'piloto' | 'todos'
 
@@ -257,14 +258,14 @@ export async function rodarAvisos(d: DepsAvisos, cfg: ConfigAvisos, agora = new 
       } catch (e) {
         await d.concluir(p.id, meus.map((x) => x.chave), false).catch((e2) => log.push(`não consegui soltar a reserva: ${(e2 as Error).message}`))
         estado.falhas++
-        estado.ultimoErro = (e as Error).message.slice(0, 200)
+        estado.ultimoErro = erroSeguro((e as Error).message)
         const antes = estado.falhasPorPessoa.get(p.id)
         estado.falhasPorPessoa.set(p.id, { dia: hoje, n: antes && antes.dia === hoje ? antes.n + 1 : 1 })
         log.push(`falha ao enviar a ${mascarar(tel)}: ${estado.ultimoErro}`)
       }
     }
   } catch (e) {
-    estado.ultimoErro = (e as Error).message.slice(0, 200)
+    estado.ultimoErro = erroSeguro((e as Error).message)
     log.push(`erro no ciclo, nada enviado depois dele: ${estado.ultimoErro}`)
   } finally {
     estado.rodando = false
@@ -395,14 +396,14 @@ export async function rodarAvisosTeste(d: DepsAvisos, cfg: ConfigTeste, agora = 
       } catch (e) {
         await d.concluir(p.id, [chave], false).catch((e2) => log.push(`não consegui soltar a reserva: ${(e2 as Error).message}`))
         estadoTeste.falhas++
-        estadoTeste.ultimoErro = (e as Error).message.slice(0, 200)
+        estadoTeste.ultimoErro = erroSeguro((e as Error).message)
         const antes = estadoTeste.falhasPorPessoa.get(p.id)
         estadoTeste.falhasPorPessoa.set(p.id, { dia: hoje, n: antes && antes.dia === hoje ? antes.n + 1 : 1 })
         log.push(`falha ao avisar o fim do teste a ${mascarar(tel)}: ${estadoTeste.ultimoErro}`)
       }
     }
   } catch (e) {
-    estadoTeste.ultimoErro = (e as Error).message.slice(0, 200)
+    estadoTeste.ultimoErro = erroSeguro((e as Error).message)
     log.push(`erro no ciclo do fim do teste: ${estadoTeste.ultimoErro}`)
   } finally {
     estadoTeste.rodando = false

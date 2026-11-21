@@ -248,6 +248,19 @@ await caso('falha de envio: solta a reserva, conta a falha, e o ciclo seguinte t
   assert.equal(A.estado.enviados, 0)
 })
 
+await caso('o erro do envio NUNCA leva número nem JID do cliente para o /saude (que é público) nem para o log', async () => {
+  novo()
+  const f = fake([{}], { u1: [conta('c1', 'Aluguel', 900, HOJE)] })
+  f.deps.enviar = async () => {
+    throw new Error('gateway envio 400: number 5581988887777 is not registered (5581988887777@s.whatsapp.net)')
+  }
+  const log = await A.rodarAvisos(f.deps, CFG(), em('09:00'))
+  const tudo = `${A.estado.ultimoErro}\n${log.join('\n')}`
+  assert.match(tudo, /gateway envio 400/, 'o erro continua útil para quem investiga')
+  assert.doesNotMatch(tudo, /\d{8,}/, `sem número de telefone: ${tudo}`)
+  assert.doesNotMatch(tudo, /@/, `sem JID: ${tudo}`)
+})
+
 await caso('depois de 3 falhas no mesmo dia para a mesma pessoa, para até amanhã (não martela o gateway a cada minuto)', async () => {
   novo()
   const f = fake([{}], { u1: [conta('c1', 'Aluguel', 900, HOJE)] }, { falharEnvio: true })

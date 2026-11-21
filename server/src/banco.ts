@@ -145,6 +145,12 @@ export function paraMov(l: { id: string; tipo: string; valor: number | string; d
   }
 }
 
+/** SAIR: a pessoa não quer mais lembretes de uso. Só a Granninha grava (o cliente não tem permissão nessa coluna). */
+export async function silenciarLembretes(userId: string) {
+  const { error } = await sb.from('perfis').update({ avisos_off: true }).eq('id', userId)
+  falhou(error, 'silenciar lembretes')
+}
+
 /** Uso do mês: mensagens que viraram lançamento e mídias (áudio, foto, PDF) recebidas. */
 export async function usoDoMes(userId: string, inicioMes: string) {
   const base = () => sb.from('mensagens').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('criado_em', inicioMes)

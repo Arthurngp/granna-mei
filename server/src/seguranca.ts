@@ -36,6 +36,12 @@ export function proibidos(texto: string): string[] {
  * Texto livre da IA antes de ir para o WhatsApp: tira link de fora, e-mail, telefone e chave Pix, e limita o tamanho.
  * Devolve o texto limpo e se precisou limpar (para registrar).
  */
+/**
+ * O erro do gateway traz até 200 letras da RESPOSTA dele, que pode repetir o número ou o JID do cliente. Esse texto vai para o /saude
+ * (público), para o log e para a tela do admin: nenhum número de telefone nem JID pode sair por ali.
+ */
+export const erroSeguro = (m: string) => m.replace(/\S*@\S*/g, '[jid]').replace(/\d{8,}/g, '[número]').slice(0, 200)
+
 export function limparSaida(texto: string, max = 700): { texto: string; limpou: boolean } {
   let t = texto
   const antes = t

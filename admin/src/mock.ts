@@ -8,6 +8,14 @@ const hojeSP = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America
 /** Uso do mês de cada cliente do exemplo (igual às mensagens do mês da lista) e o limite configurável, para olhar as telas do limite. */
 const USO_EXEMPLO: Record<string, number> = { c1: 41, c2: 33, c3: 27, c4: 12, c5: 9, c6: 0 }
 const limites = { padrao: 300, proprio: { c5: 80 } as Record<string, number> }
+
+/** Lembretes de retenção (só para olhar a tela; a regra de verdade é do banco). Os textos e as faixas são os que a migration semeia. */
+const lembretes = {
+  regras: [
+    { regra: 'nunca_mandou', modo: 'desligado', atraso_horas: 24, atualizado_em: new Date().toISOString(), enviados_7d: 0, texto: 'Oi, {nome}! Aqui é a Granninha. Vi que você ainda não me mandou nenhum lançamento. É só escrever do seu jeito, por exemplo "recebi 300 de um serviço" ou "gasolina 60 pro negócio", que eu anoto pra você.' },
+    { regra: 'parou_de_usar', modo: 'desligado', atraso_horas: 48, atualizado_em: new Date().toISOString(), enviados_7d: 0, texto: 'Oi, {nome}! Faz uns dias que você não me manda nada. Se teve venda ou gasto nesse tempo, me conta por aqui que eu anoto, e você não perde o controle do mês.' },
+  ] as { regra: string; modo: string; atraso_horas: number; atualizado_em: string; enviados_7d: number; texto: string }[],
+}
 const ruido = (i: number) => Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1
 
 function somaDias(iso: string, d: number) {
@@ -274,6 +282,24 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
       }
       const proprio = args.p_user ? (limites.proprio[String(args.p_user)] ?? null) : null
       return { ok: true, padrao: limites.padrao, proprio, efetivo: proprio ?? limites.padrao }
+    }
+    case 'admin_retencao_config':
+      return { regras: lembretes.regras, enviados_hoje: 0, ultimo_envio: null, numero_desde: '2026-11-21T04:04:14+00:00', ciclo_em: lembretes.regras.some((r) => r.modo !== 'desligado') ? new Date().toISOString() : null, erro: null }
+    case 'admin_retencao_previa': {
+      const h = Number(args.p_atraso)
+      const nomes = args.p_regra === 'nunca_mandou' ? [['Juan Pinheiro', 'Juan', 30], ['Walmir Silva', 'Growthcode', 95], ['Alvaro Melo', 'Alvaro Melo', 120]] : [['Marina Costa', 'Studio Marina', 60], ['João Pedro', 'JP Reformas', 52]]
+      const itens = (nomes as [string, string, number][]).filter((x) => x[2] >= h).map(([nome, negocio, horas]) => ({ nome, negocio, horas }))
+      return { total: itens.length, fora_por_numero_antigo: args.p_regra === 'nunca_mandou' ? 3 : 1, itens }
+    }
+    case 'admin_retencao_definir': {
+      if (String(args.p_motivo ?? '').trim().length < 3) throw new Error('motivo obrigatório')
+      const r = lembretes.regras.find((x) => x.regra === args.p_regra)
+      if (!r) throw new Error('regra desconhecida')
+      r.modo = String(args.p_modo)
+      r.atraso_horas = Number(args.p_atraso)
+      r.texto = String(args.p_texto)
+      r.atualizado_em = new Date().toISOString()
+      return { ok: true, regra: r.regra, modo: r.modo, atraso_horas: r.atraso_horas }
     }
     case 'admin_limite_previa': {
       const v = Number(args.p_valor)

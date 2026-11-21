@@ -16,7 +16,10 @@ interface Linha {
 const ROTULO_ACAO: Record<string, string> = {
   limite_global: 'padrão do limite de lançamentos',
   limite_cliente: 'limite de lançamentos',
+  retencao_regra: 'regra de lembrete automático',
 }
+/** Ações que não têm um cliente alvo: o nome do alvo no lugar do "(removido)" que a listagem devolve. */
+const ALVO_GERAL: Record<string, string> = { limite_global: 'todos os clientes', retencao_regra: 'lembretes automáticos' }
 
 export function Auditoria() {
   const [l, setL] = useState<Linha[] | null>(null)
@@ -53,7 +56,7 @@ export function Auditoria() {
               <div className="cl-l" key={i} style={{ cursor: 'default' }}>
                 <div className="cl-id">
                   <b>
-                    {ROTULO_ACAO[a.acao] ?? a.acao.replace(/_/g, ' ')} · {a.acao === 'limite_global' ? 'todos os clientes' : a.cliente}
+                    {ROTULO_ACAO[a.acao] ?? a.acao.replace(/_/g, ' ')} · {ALVO_GERAL[a.acao] ?? a.cliente}
                   </b>
                   <span className="s">
                     {dataHora(a.criado_em)} · por {a.admin}
