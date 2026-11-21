@@ -21,7 +21,7 @@ import { foraDoDisponivel } from './cartao.ts'
 
 export const LIMITE_LANCAMENTOS = Number(process.env.LIMITE_LANCAMENTOS ?? 300)
 export const LIMITE_MIDIAS = Number(process.env.LIMITE_MIDIAS ?? 100)
-const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.amplasoft.me/painel').replace(/\/+$/, '')
+const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.com.br/painel').replace(/\/+$/, '')
 
 export interface EventoGateway {
   event: string

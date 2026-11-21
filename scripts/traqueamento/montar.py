@@ -1,4 +1,4 @@
-"""Monta variáveis, acionadores e tags do container CT-8YN6KS7Z (granninha.amplasoft.me).
+"""Monta variáveis, acionadores e tags do container CT-8YN6KS7Z (granninha.com.br e o domínio antigo granninha.amplasoft.me).
 
 Funil medido: visita -> clicou em criar conta -> abriu o cadastro -> começou a digitar ->
 tentou enviar (com o motivo da recusa) -> conta criada, e depois cada passo do onboarding.
@@ -69,7 +69,7 @@ for ev, (desc, _, _) in EVENTOS.items():
 nome_cta = "Clique: link para criar conta"
 r = call("salvar_acionador", {"dados": {"name": nome_cta, "type": "link_click",
                                          "conditions": [{"variable": "Click URL", "operator": "contains", "value": "/painel/criar-conta"},
-                                                        {"variable": "Page Hostname", "operator": "equals", "value": "granninha.amplasoft.me"}]},
+                                                        {"variable": "Page Hostname", "operator": "contains", "value": "granninha."}]},
                               **({"id": existentes_t[nome_cta]} if nome_cta in existentes_t else {})})
 trig_cta = r["id"] if isinstance(r, dict) else existentes_t.get(nome_cta)
 print("trig", nome_cta, "->", trig_cta)

@@ -107,5 +107,5 @@ export async function responderComResumo(resumo: object, pergunta: string): Prom
   )
   // Resposta livre da IA: nunca sai com link de fora, telefone, e-mail ou chave Pix.
   const limpo = limparSaida(dados.resposta.trim())
-  return { texto: limpo.texto || 'Não consegui responder isso por aqui. Veja seus números no painel: https://granninha.amplasoft.me/painel', uso }
+  return { texto: limpo.texto || 'Não consegui responder isso por aqui. Veja seus números no painel: https://granninha.com.br/painel', uso }
 }
