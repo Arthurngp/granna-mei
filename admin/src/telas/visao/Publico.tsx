@@ -48,8 +48,8 @@ export function Publico() {
   const [dim, setDim] = useState<Dim>('ramo')
   const [fil, setFil] = useState<'todas' | 'ativas' | 'sem'>('todas')
 
-  if (ausente) return <Pagina titulo="Público" quantos={4}><Ausente nome="admin_publico" /></Pagina>
-  if (erro) return <Pagina titulo="Público" quantos={4}><Falha texto={erro} /></Pagina>
+  if (ausente) return <Pagina titulo="Público" heads={[]}><Ausente nome="admin_publico" /></Pagina>
+  if (erro) return <Pagina titulo="Público" heads={[]}><Falha texto={erro} /></Pagina>
 
   const seg = (d: string) => (dados?.segmentos ?? []).filter((s) => s.dim === d)
   const ramos = seg('ramo')

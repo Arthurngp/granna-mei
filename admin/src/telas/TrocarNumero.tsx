@@ -122,8 +122,8 @@ export function TrocarNumero({ conectado, numeroAtual, aoMudar }: { conectado: b
   const fraseCerta = frase.trim().toUpperCase() === 'TROCAR'
 
   return (
-    <section className="card g-6">
-      <div className="card-cab"><h2>Trocar o número</h2></div>
+    <section className="cartao g6">
+      <div className="cartao-cab"><h2>Trocar o número</h2></div>
 
       {etapa === 'repouso' && (
         <>

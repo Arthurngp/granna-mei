@@ -153,7 +153,16 @@ export function AreaDia({ valores, anterior, rotulos, titulos, formato, formatoC
         ) : null,
       )}
       {ativo !== null && (
-        <div className="dica num" style={{ left: Math.max(84, Math.min(w - 84, esq + x(ativo))), top: Math.max(4, y(valores[ativo]) - 14) }}>
+        // O balão fica no alto do gráfico e ao lado da linha vertical (para a esquerda se o dedo está na metade
+        // direita), nunca em cima do ponto: assim ele não cobre a curva que a pessoa está olhando.
+        <div
+          className="dica num"
+          style={{
+            top: 6,
+            left: esq + x(ativo) > w / 2 ? esq + x(ativo) - 14 : esq + x(ativo) + 14,
+            transform: esq + x(ativo) > w / 2 ? 'translateX(-100%)' : 'none',
+          }}
+        >
           <b>{titulos[ativo]}</b>
           {formato(valores[ativo])}
           {extra?.(ativo).map((l, k) => (

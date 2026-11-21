@@ -45,7 +45,7 @@ interface Ativ {
 }
 
 const GRUPOS: { id: Item['grupo']; nome: string }[] = [
-  { id: 'nunca', nome: 'Nunca mandaram' },
+  { id: 'nunca', nome: 'Nunca usaram' },
   { id: 'whats', nome: 'Pararam no WhatsApp' },
   { id: 'sumiu', nome: 'Sumiram' },
   { id: 'bloq', nome: 'Sem acesso' },
@@ -58,7 +58,7 @@ function motivo(i: Item) {
     case 'sumiu':
       return { m: 'Usava e parou', q: `última mensagem há ${i.dias} dias` }
     case 'nunca':
-      return { m: 'Confirmou o WhatsApp e nunca mandou mensagem', q: `cadastro há ${i.dias} dias` }
+      return { m: 'Confirmou o WhatsApp e nunca usou', q: `cadastro há ${i.dias} dias` }
     default:
       return { m: 'Parou em Confirmar WhatsApp', q: `cadastro há ${i.dias} dias` }
   }
@@ -118,7 +118,7 @@ export function Resumo() {
   const msgsMes = dias.filter((d) => d.dia.startsWith(mesAtual)).reduce((s, d) => s + d.mensagens, 0)
   const custoHoje = dias.length ? custoReais(dias[dias.length - 1]) : 0
 
-  if (erro) return <Pagina titulo="Visão geral" subtitulo={dataExtensa()}><Falha texto={erro} /></Pagina>
+  if (erro) return <Pagina titulo="Visão geral" subtitulo={dataExtensa()} heads={[]}><Falha texto={erro} /></Pagina>
 
   const s = p?.saude
   const minutos = s ? (Date.now() - new Date(s.atualizado_em).getTime()) / 60_000 : Infinity
@@ -161,7 +161,7 @@ export function Resumo() {
     ? [
         { nome: 'Terminaram as boas-vindas', v: (chegaram(ativ.dados.passos, 7) / Math.max(1, ativ.dados.total)) * 100, cor: '#454c83' },
         { nome: 'Confirmaram o WhatsApp', v: (ativ.dados.confirmaram / Math.max(1, ativ.dados.total)) * 100, cor: '#0e8250' },
-        { nome: 'Mandaram a 1ª mensagem', v: (ativ.dados.com_mensagem / Math.max(1, ativ.dados.total)) * 100, cor: '#747ead' },
+        { nome: 'Usaram a Granninha', v: (ativ.dados.com_mensagem / Math.max(1, ativ.dados.total)) * 100, cor: '#747ead' },
       ]
     : []
 

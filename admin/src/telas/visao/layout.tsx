@@ -14,13 +14,16 @@ export const SUBS: [SubAba, string][] = [
   ['publico', 'Público'],
 ]
 
+/** Lugar da faixa escura, que mora no cabeçalho do app para se emendar com ele. Vale para todas as abas. */
+export const SlotCtx = createContext<HTMLElement | null>(null)
+
 interface Ctx {
-  /** Lugar da faixa escura, que mora no cabeçalho do app para se emendar com ele. */
-  slot: HTMLElement | null
+  /** Só a Visão geral tem navegação por páginas dentro da faixa. */
+  ativo: boolean
   sub: SubAba
   ir: (s: SubAba) => void
 }
-export const VisaoCtx = createContext<Ctx>({ slot: null, sub: 'resumo', ir: () => undefined })
+export const VisaoCtx = createContext<Ctx>({ ativo: false, sub: 'resumo', ir: () => undefined })
 
 export interface HeadDef {
   rotulo: string
@@ -78,16 +81,19 @@ interface PaginaProps {
 
 /** Moldura de toda página da visão geral: faixa escura no topo (título, números, navegação) e cartões por cima. */
 export function Pagina({ titulo, subtitulo, controles, heads, quantos = 4, children }: PaginaProps) {
-  const { slot, sub, ir } = useContext(VisaoCtx)
+  const slot = useContext(SlotCtx)
+  const { ativo, sub, ir } = useContext(VisaoCtx)
   const faixa = (
     <div className="vfaixa">
-      <nav className="sub-nav" aria-label="Páginas da visão geral">
-        {SUBS.map(([v, r]) => (
-          <button key={v} type="button" aria-current={sub === v ? 'page' : undefined} className={sub === v ? 'on' : ''} onClick={() => ir(v)}>
-            {r}
-          </button>
-        ))}
-      </nav>
+      {ativo && (
+        <nav className="sub-nav" aria-label="Páginas da visão geral">
+          {SUBS.map(([v, r]) => (
+            <button key={v} type="button" aria-current={sub === v ? 'page' : undefined} className={sub === v ? 'on' : ''} onClick={() => ir(v)}>
+              {r}
+            </button>
+          ))}
+        </nav>
+      )}
       <div className="faixa-tit">
         <div>
           <h1>{titulo}</h1>
@@ -95,9 +101,12 @@ export function Pagina({ titulo, subtitulo, controles, heads, quantos = 4, child
         </div>
         {controles && <div className="faixa-ctl">{controles}</div>}
       </div>
-      <div className="heads" data-n={heads?.length ?? quantos}>
-        {heads ? heads.map((d) => <Head key={d.rotulo} d={d} />) : Array.from({ length: quantos }, (_, i) => <HeadEsqueleto key={i} />)}
-      </div>
+      {/* heads vazio = a página não tem número para mostrar (erro ou função ausente): sem faixa de números nem esqueleto eterno */}
+      {!(heads && heads.length === 0) && (
+        <div className="heads" data-n={heads?.length ?? quantos}>
+          {heads ? heads.map((d) => <Head key={d.rotulo} d={d} />) : Array.from({ length: quantos }, (_, i) => <HeadEsqueleto key={i} />)}
+        </div>
+      )}
     </div>
   )
   return (

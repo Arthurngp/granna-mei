@@ -121,8 +121,8 @@ export function CustoIA() {
     </>
   )
 
-  if (atual.ausente) return <Pagina titulo="Custo de IA" subtitulo="Quanto a IA custa, por dia e por cliente" quantos={4}><Ausente nome="admin_custo_periodo" /></Pagina>
-  if (atual.erro) return <Pagina titulo="Custo de IA" quantos={4}><Falha texto={atual.erro} /></Pagina>
+  if (atual.ausente) return <Pagina titulo="Custo de IA" subtitulo="Quanto a IA custa, por dia e por cliente" heads={[]}><Ausente nome="admin_custo_periodo" /></Pagina>
+  if (atual.erro) return <Pagina titulo="Custo de IA" heads={[]}><Falha texto={atual.erro} /></Pagina>
 
   const vazio = !!a && a.msgs === 0
   const heads: HeadDef[] | undefined = a
@@ -206,9 +206,11 @@ export function CustoIA() {
                       <circle cx="70" cy="70" r="52" fill="none" stroke="#eceef7" strokeWidth="18" />
                       {partes.map((p) => {
                         const f = a.total > 0 ? p.v / a.total : 0
-                        const el = <circle key={p.nome} cx="70" cy="70" r="52" fill="none" stroke={p.cor} strokeWidth="18" strokeDasharray={`${Math.max(0, C * f - 3)} ${C}`} strokeDashoffset={-acc} transform="rotate(-90 70 70)" />
+                        const ini = acc
                         acc += C * f
-                        return el
+                        // Fatia abaixo de 0,4% some (um ponto solto parece defeito); as demais têm pelo menos 4 px e vão de ponta a ponta com um vão fino.
+                        if (f < 0.004) return null
+                        return <circle key={p.nome} cx="70" cy="70" r="52" fill="none" stroke={p.cor} strokeWidth="18" strokeDasharray={`${Math.max(4, C * f - 2.5)} ${C}`} strokeDashoffset={-ini} transform="rotate(-90 70 70)" />
                       })}
                     </svg>
                     <span style={{ fontSize: 16 }}>{reais(a.total)}</span>

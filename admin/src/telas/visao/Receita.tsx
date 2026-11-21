@@ -26,8 +26,8 @@ export function Receita() {
   const per = useMemo(() => periodoDe(mes), [mes])
   const uso = useRpc<Uso>('admin_custo_periodo', { p_inicio: per.inicio, p_fim: per.fim })
 
-  if (rec.ausente) return <Pagina titulo="Receita" quantos={4}><Ausente nome="admin_receita" /></Pagina>
-  if (rec.erro) return <Pagina titulo="Receita" quantos={4}><Falha texto={rec.erro} /></Pagina>
+  if (rec.ausente) return <Pagina titulo="Receita" heads={[]}><Ausente nome="admin_receita" /></Pagina>
+  if (rec.erro) return <Pagina titulo="Receita" heads={[]}><Falha texto={rec.erro} /></Pagina>
 
   const d = rec.dados
   const custoMes = uso.dados ? uso.dados.dias.reduce((s, x) => s + custoReais(x), 0) : null

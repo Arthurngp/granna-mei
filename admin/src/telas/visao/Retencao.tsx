@@ -18,8 +18,8 @@ const calor = (p: number) => `rgba(14, 130, 80, ${(0.08 + (p / 100) * 0.5).toFix
 
 export function Retencao() {
   const { dados, erro, ausente } = useRpc<Ret>('admin_retencao', {}, 120_000)
-  if (ausente) return <Pagina titulo="Retenção" quantos={4}><Ausente nome="admin_retencao" /></Pagina>
-  if (erro) return <Pagina titulo="Retenção" quantos={4}><Falha texto={erro} /></Pagina>
+  if (ausente) return <Pagina titulo="Retenção" heads={[]}><Ausente nome="admin_retencao" /></Pagina>
+  if (erro) return <Pagina titulo="Retenção" heads={[]}><Falha texto={erro} /></Pagina>
 
   const heads: HeadDef[] | undefined = dados
     ? [
@@ -88,7 +88,7 @@ export function Retencao() {
         )}
       </Cartao>
 
-      <Cartao g={12} titulo="Por semana de cadastro" nota="% dos que mandaram a 1ª mensagem e ainda usaram em cada semana depois">
+      <Cartao g={12} titulo="Por semana de cadastro" nota="% dos que usaram e voltaram a usar em cada semana depois">
         {dados ? (
           dados.coortes.length ? (
             <div className="rolagem">

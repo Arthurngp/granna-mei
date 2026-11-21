@@ -5,6 +5,7 @@ import { MOCK, sb, rpc } from './sb'
 import { Auditoria } from './telas/Auditoria'
 import { Clientes } from './telas/Clientes'
 import { Granninha } from './telas/Granninha'
+import { SlotCtx } from './telas/visao/layout'
 import { Visao } from './telas/Visao'
 
 type Etapa = 'carregando' | 'entrar' | 'sem-acesso' | 'ativar-2fa' | 'codigo-2fa' | 'dentro'
@@ -54,7 +55,7 @@ export default function App() {
 
   return (
     <div>
-      <div className={`cabeca ${aba === 'visao' ? 'larga' : ''}`}>
+      <div className="cabeca larga">
         <header className="adm-topo">
           <div className="linha1">
             <img src={`${import.meta.env.BASE_URL}logo-96.png`} alt="" />
@@ -80,14 +81,16 @@ export default function App() {
             ))}
           </nav>
         </header>
-        {aba === 'visao' && <div ref={setSlot} />}
+        <div ref={setSlot} />
       </div>
-      <main className={`adm-conteudo ${aba === 'visao' ? 'larga' : ''}`}>
-        {aba === 'visao' && <Visao slot={slot} />}
+      <SlotCtx.Provider value={slot}>
+      <main className="adm-conteudo larga">
+        {aba === 'visao' && <Visao />}
         {aba === 'clientes' && <Clientes />}
         {aba === 'granninha' && <Granninha />}
         {aba === 'auditoria' && <Auditoria />}
       </main>
+      </SlotCtx.Provider>
     </div>
   )
 }

@@ -14,9 +14,9 @@ const CHAVE = 'granna-admin-sub'
 
 /**
  * Visão geral do negócio em páginas. A faixa escura de cada página (título, números, navegação) é desenhada
- * dentro do cabeçalho do app, por isso recebe `slot`: o lugar onde ela entra.
+ * dentro do cabeçalho do app, no lugar que o App oferece a todas as abas.
  */
-export function Visao({ slot }: { slot: HTMLElement | null }) {
+export function Visao() {
   const [sub, setSub] = useState<SubAba>(() => {
     try {
       const salvo = localStorage.getItem(CHAVE) as SubAba | null
@@ -34,7 +34,7 @@ export function Visao({ slot }: { slot: HTMLElement | null }) {
       // lembrar a página é só conveniência
     }
   }, [])
-  const valor = useMemo(() => ({ slot, sub, ir }), [slot, sub, ir])
+  const valor = useMemo(() => ({ ativo: true, sub, ir }), [sub, ir])
   return (
     <VisaoCtx.Provider value={valor}>
       {sub === 'resumo' && <Resumo />}

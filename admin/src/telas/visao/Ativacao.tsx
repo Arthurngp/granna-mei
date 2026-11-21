@@ -32,8 +32,8 @@ const calor = (v: number, todo: number) => (todo > 0 ? `rgba(14, 130, 80, ${(0.0
 
 export function Ativacao() {
   const { dados, erro, ausente } = useRpc<Ativ>('admin_ativacao', {}, 120_000)
-  if (ausente) return <Pagina titulo="Ativação" quantos={4}><Ausente nome="admin_ativacao" /></Pagina>
-  if (erro) return <Pagina titulo="Ativação" quantos={4}><Falha texto={erro} /></Pagina>
+  if (ausente) return <Pagina titulo="Ativação" heads={[]}><Ausente nome="admin_ativacao" /></Pagina>
+  if (erro) return <Pagina titulo="Ativação" heads={[]}><Falha texto={erro} /></Pagina>
 
   const total = dados?.total ?? 0
   const terminaram = dados ? chegaram(dados.passos, 7) : 0
@@ -44,7 +44,7 @@ export function Ativacao() {
         { rotulo: 'Cadastros', valor: n(total), nota: 'todas as contas criadas' },
         { rotulo: 'Terminaram as boas-vindas', valor: pct(terminaram, total), nota: `${n(terminaram)} de ${n(total)}` },
         { rotulo: 'Confirmaram o WhatsApp', valor: pct(dados.confirmaram, total), nota: `${n(dados.confirmaram)} contas` },
-        { rotulo: 'Mandaram a 1ª mensagem', valor: pct(dados.com_mensagem, total), nota: `mediana de ${tempo(dados.mediana_horas_ate_primeira)} depois do cadastro` },
+        { rotulo: 'Usaram a Granninha', valor: pct(dados.com_mensagem, total), nota: `${n(dados.com_mensagem)} contas · mediana de ${tempo(dados.mediana_horas_ate_primeira)}, sem contar a confirmação do número` },
       ]
     : undefined
 
@@ -108,12 +108,12 @@ export function Ativacao() {
             <div className="ringbox">
               <Anel pct={total ? (dados.com_mensagem / total) * 100 : 0} cor="#0e8250" tam={120} esp={12} />
               <p>
-                <b>{n(dados.com_mensagem)} de {n(total)}</b> mandaram a primeira mensagem. É o sinal de que a pessoa usou a Granninha.
+                <b>{n(dados.com_mensagem)} de {n(total)}</b> usaram a Granninha depois de confirmar o número. A mensagem do código não conta.
               </p>
             </div>
             <div className="fato"><span>Confirmaram o WhatsApp</span><b>{n(dados.confirmaram)}<small>{pct(dados.confirmaram, total)}</small></b></div>
-            <div className="fato"><span>Terminaram e nunca mandaram</span><b>{n(Math.max(0, terminaram - dados.com_mensagem))}</b></div>
-            <div className="fato"><span>Tempo até a 1ª mensagem</span><b>{tempo(dados.mediana_horas_ate_primeira)}</b></div>
+            <div className="fato"><span>Terminaram e nunca usaram</span><b>{n(Math.max(0, terminaram - dados.com_mensagem))}</b></div>
+            <div className="fato"><span>Tempo até o 1º uso</span><b>{tempo(dados.mediana_horas_ate_primeira)}</b></div>
           </>
         ) : (
           <span className="skel" style={{ height: 240 }} />
@@ -126,7 +126,7 @@ export function Ativacao() {
             <div className="rolagem">
               <div className="mapa">
                 <div className="mapa-l cab" style={{ gridTemplateColumns: '90px 80px repeat(3, 1fr) minmax(130px, 1.3fr)' }}>
-                  <span>Semana de</span><span>Cadastros</span><span>Terminaram</span><span>Confirmaram</span><span>1ª mensagem</span><span>Param mais em</span>
+                  <span>Semana de</span><span>Cadastros</span><span>Terminaram</span><span>Confirmaram</span><span>Usaram</span><span>Param mais em</span>
                 </div>
                 {dados.coortes.map((c) => {
                   const term = chegaram(c.passos, 7)

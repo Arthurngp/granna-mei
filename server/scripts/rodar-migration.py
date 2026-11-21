@@ -43,11 +43,22 @@ MIGRATIONS = {
     "avisos": "20261120100000_avisos.sql",
     "cobranca": "20261121120000_cobranca_stripe.sql",
     "perfil": "20261121160000_perfil_publico.sql",
+    "origens": "20261116210000_admin_origens.sql",
+    "adminsegunda": "20261121160000_admin_segunda_mensagem.sql",
     "adminvisao": "20261121140000_admin_visao_geral.sql",
     "adminacoes": "20261121150000_admin_acoes_retencao_publico.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
+    # Lista as funções admin_* que existem hoje (só leitura) e se admin_origens já está lá.
+    "origens": """select
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_origens') as admin_origens,
+        (select string_agg(p.proname, ',' order by p.proname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'admin\\_%') as funcoes_admin""",
+    # Recria as 4 funções do admin para contar uso a partir da 2ª mensagem. Só leitura. Conferir que ainda são 4.
+    "adminsegunda": """select (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+        where n.nspname='public' and p.proname in ('admin_ativacao','admin_acoes','admin_retencao','admin_publico')) as funcoes_de_4,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname='admin_ativacao' and pg_get_functiondef(p.oid) like '%offset 1%') as ativacao_ja_na_2a_mensagem""",
     # Só adiciona colunas: confere as 7 colunas, o grant de UPDATE para o cliente nelas e a trava de tamanho. Sem o grant o
     # PATCH do cliente é recusado; sem a trava o cliente poderia gravar texto sem fim.
     "perfil": """select
