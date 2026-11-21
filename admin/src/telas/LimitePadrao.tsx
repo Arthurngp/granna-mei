@@ -70,7 +70,7 @@ export function LimitePadrao() {
       setPadrao(r.padrao)
       setValor(String(r.padrao))
       setMotivo('')
-      avisar(`Pronto. O padrão agora é ${n(r.padrao)} lançamentos por mês para quem não tem limite próprio.`)
+      avisar(`Pronto. O padrão agora é ${n(r.padrao)} lançamentos por mês para quem não tem limite próprio. Vale em até 1 minuto.`)
     } catch (e) {
       setErro((e as Error).message.includes('motivo') ? 'Escreva o motivo (pelo menos 3 letras).' : (e as Error).message)
     } finally {

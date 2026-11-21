@@ -208,7 +208,7 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
     setOcupado(true)
     try {
       const r = await rpc<{ efetivo: number }>('admin_limite_definir', { p_user: c.id, p_valor: remover ? null : Number(valorLimite), p_motivo: motivo.trim() })
-      avisar(remover ? `Limite próprio removido. Agora vale o padrão: ${n(r.efetivo)} por mês.` : `Limite deste cliente: ${n(r.efetivo)} lançamentos por mês.`)
+      avisar(remover ? `Limite próprio removido. Agora vale o padrão: ${n(r.efetivo)} por mês.` : `Limite deste cliente: ${n(r.efetivo)} lançamentos por mês. Vale já na próxima mensagem dele.`)
       mudou()
       fechar()
     } catch (e) {

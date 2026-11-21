@@ -86,6 +86,10 @@ CONFERE = {
         (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
           where n.nspname='public' and p.proname in ('admin_limite_cliente','admin_limite_definir','admin_limite_previa')
             and has_function_privilege('anon', p.oid, 'execute')) as funcoes_abertas_ao_anon,
+        -- O servidor lê estas tabelas com a service_role. Se ela não puder ler, o admin grava o limite mas a regra NÃO vale (o servidor
+        -- cai calado no 300). Por isso a conferência: tem que dar true nas duas depois da migration (antes dela, null).
+        (case when to_regclass('public.config_limite') is null then null else has_table_privilege('service_role', 'public.config_limite', 'select') end) as service_role_le_padrao,
+        (case when to_regclass('public.limite_cliente') is null then null else has_table_privilege('service_role', 'public.limite_cliente', 'select') end) as service_role_le_limite_cliente,
         -- Consulta dinâmica: a tabela ainda não existe antes da migration, e citá-la direto faria o ANTES inteiro falhar.
         (case when to_regclass('public.config_limite') is null then null
               else (xpath('/row/c/text()', query_to_xml('select lancamentos as c from public.config_limite where id', false, true, '')))[1]::text end) as padrao_hoje""",
