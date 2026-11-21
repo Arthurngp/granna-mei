@@ -46,6 +46,9 @@ const MIGRATION_DA_FUNCAO: Record<string, string> = {
   admin_origens: '20261116210000_admin_origens.sql',
   admin_midias_mes: '20261116200000_admin_midias.sql',
   admin_custo_ia: '20261116093000_admin_custo.sql',
+  admin_retencao_config: '20261121210000_retencao.sql',
+  admin_retencao_previa: '20261121210000_retencao.sql',
+  admin_retencao_definir: '20261121210000_retencao.sql',
 }
 
 export function Ausente({ nome }: { nome: string }) {

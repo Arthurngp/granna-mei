@@ -109,6 +109,17 @@ await caso('as travas de proteção do número são as que o Arthur aprovou: 15 
   assert.equal(R.JANELA_ATE, '19:00')
 })
 
+await caso('os números que a tela do admin mostra são os mesmos do código (15, 3 minutos, 9h às 19h): um não muda sem o outro', async () => {
+  const { readFileSync } = await import('node:fs')
+  const tela = readFileSync(new URL('../../admin/src/telas/Avisos.tsx', import.meta.url), 'utf8')
+  assert.equal(Number(/const TETO_DIA = (\d+)/.exec(tela)?.[1]), R.TETO_POR_DIA, 'teto do dia na tela')
+  assert.equal(Number(/const ESPERA_MIN = (\d+)/.exec(tela)?.[1]), R.ESPERA_MINUTOS, 'espera na tela')
+  assert.ok(tela.includes('das 9h às 19h'), 'a janela da tela')
+  assert.equal(R.JANELA_DE, '09:00')
+  assert.equal(R.JANELA_ATE, '19:00')
+  assert.ok(tela.includes(R.RODAPE_SAIR), 'a linha do SAIR que a tela mostra é a que o servidor envia')
+})
+
 await caso('tudo desligado: não envia e nem consulta quem seria elegível', async () => {
   const f = fake({ configs: [cfg('nunca_mandou', 'desligado'), cfg('parou_de_usar', 'desligado')], lista: { nunca_mandou: [pessoa(1)] } })
   const log = await R.rodarRetencao(f.deps, em('10:00'))
