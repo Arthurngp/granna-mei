@@ -5,8 +5,12 @@
  * - texto escrito pelo cliente (ou lido de um comprovante) entra no banco e nos próximos prompts limpo e curto.
  */
 
-/** Únicos endereços que a Granninha pode mandar (o antigo segue valendo durante a troca de domínio). */
-const DOMINIOS_NOSSOS = ['granninha.amplasoft.me', 'grannamei.amplasoft.me']
+/**
+ * Únicos endereços que a Granninha pode mandar. O domínio próprio entrou em 2026-11-21; os antigos seguem valendo
+ * (as peças já publicadas no Instagram mostram granninha.amplasoft.me, então ele não pode deixar de funcionar nem de
+ * ser aceito aqui). Domínio que falta nesta lista tem o link apagado da resposta, sem erro nenhum.
+ */
+const DOMINIOS_NOSSOS = ['granninha.com.br', 'granninha.amplasoft.me', 'grannamei.amplasoft.me']
 
 const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"')]+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|xyz|me|br|app|link|site|online|info|biz|co|ly|gl|to|club|shop|store|top|live)(?:\.br)?\b(?:\/[^\s<>"')]*)?/gi
 const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+/gi

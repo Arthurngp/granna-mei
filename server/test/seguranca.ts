@@ -17,6 +17,18 @@ caso('tira link de fora e mantém o nosso', () => {
   assert.ok(n.texto.includes('https://granninha.amplasoft.me/painel'), 'domínio novo não pode ser apagado')
   assert.equal(r.limpou, true)
 })
+caso('o domínio próprio (granninha.com.br) passa, com e sem https, e os parecidos continuam apagados', () => {
+  const ok = limparSaida('Seu painel: https://granninha.com.br/painel e, no site, granninha.com.br ou www.granninha.com.br/painel')
+  assert.ok(ok.texto.includes('https://granninha.com.br/painel'), ok.texto)
+  assert.ok(ok.texto.includes('www.granninha.com.br/painel'), ok.texto)
+  assert.equal(ok.limpou, false, 'link nosso não pode contar como texto limpo')
+  // Os que parecem o nosso mas não são: sufixo colado, domínio dentro de outro, host de outro dono.
+  for (const falso of ['https://meugranninha.com.br/painel', 'https://granninha.com.br.golpe.com/painel', 'https://granninha.com.br-pix.com/x', 'granninha.com.co/painel']) {
+    const r = limparSaida('Entre em ' + falso + ' agora')
+    assert.deepEqual(proibidos(r.texto), [], 'sobrou: ' + r.texto)
+    assert.ok(!r.texto.includes('golpe') && !r.texto.includes('meugranninha') && !r.texto.includes('-pix') && !r.texto.includes('.co/'), r.texto)
+  }
+})
 caso('tira link sem https (golpe.com.br/x, www.x.com)', () => {
   const r = limparSaida('acesse golpe.com.br/pix ou www.fraude.com')
   assert.deepEqual(proibidos(r.texto), [])
