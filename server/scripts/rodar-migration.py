@@ -8,6 +8,8 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  desfazercortesia 20261121173700_admin_desfazer_cortesia.sql   admin_acao ganha a ação "Desfazer cortesia" (devolve a conta ao
+          estado de antes, lido da auditoria; recusa se não souber). Sem ela o botão do admin dá erro. Não cria tabela nem coluna.
   limite  20261121200000_limite_lancamentos.sql  limite mensal de lançamentos configurável no admin: 2 tabelas fechadas ao cliente
           (padrão de todos = 300, e limite próprio por cliente) e 3 funções do admin. Não muda o comportamento de hoje.
           Sem ela, a Granninha segue com o limite de fábrica (300) e as telas de limite do admin avisam que falta a migration.
@@ -50,6 +52,7 @@ MIGRATIONS = {
     "adminsegunda": "20261121161000_admin_segunda_mensagem.sql",
     "adminvisao": "20261121140000_admin_visao_geral.sql",
     "adminacoes": "20261121150000_admin_acoes_retencao_publico.sql",
+    "desfazercortesia": "20261121173700_admin_desfazer_cortesia.sql",
     "limite": "20261121200000_limite_lancamentos.sql",
 }
 # O que olhar antes e depois de cada uma.
@@ -72,6 +75,30 @@ CONFERE = {
           and grantee='authenticated' and privilege_type='UPDATE'
           and column_name in ('nascimento','cidade','uf','faturamento_faixa','ocupacao','perfil_em','renda_faixa')) as grant_de_7,
         (select count(*) from pg_constraint where conname='perfis_publico_tamanho' and conrelid='public.perfis'::regclass) as trava""",
+    # Recria a função admin_acao (ações do admin sobre a conta) com a ação nova "desfazer_cortesia". Não cria tabela nem coluna.
+    # Confere: a função existe uma vez só (assinatura única), já traz a ação nova, e as permissões seguem as de sempre:
+    # anon NÃO executa, authenticated executa (a função confere eh_admin() lá dentro).
+    "desfazercortesia": """select
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_acao') as admin_acao_definicoes,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname='admin_acao' and pg_get_functiondef(p.oid) like '%desfazer_cortesia%') as ja_tem_desfazer_cortesia,
+        has_function_privilege('anon', 'public.admin_acao(uuid,text,text,integer)', 'execute') as anon_executa,
+        has_function_privilege('authenticated', 'public.admin_acao(uuid,text,text,integer)', 'execute') as authenticated_executa,
+        -- O que decide se o botão funciona nas contas que existem hoje: só dá para desfazer cortesia que tem registro na auditoria
+        -- (mesmo filtro da função). Se "desfaziveis" for menor que "cortesias", as outras caem na recusa e precisam de ação manual.
+        (select count(*) from public.assinaturas where status='cortesia') as cortesias,
+        (select count(*) from public.assinaturas a where a.status='cortesia' and exists (
+          select 1 from public.admin_auditoria au where au.alvo_user_id=a.user_id and au.acao='cortesia'
+            and au.detalhes->>'depois'='cortesia' and au.detalhes->>'antes' in ('trial','ativa','atrasada','bloqueada'))) as desfaziveis,
+        -- Para onde cada cortesia VOLTARIA (estado e fim do teste de antes, sem nomes). Teste com fim no passado = volta sem acesso.
+        (select string_agg(x.destino, ' | ') from (
+          select (select au.detalhes->>'antes' || coalesce('@' || (au.detalhes->>'trial_fim_antes'), '')
+                    from public.admin_auditoria au where au.alvo_user_id=a.user_id and au.acao='cortesia'
+                     and au.detalhes->>'depois'='cortesia' and au.detalhes->>'antes' in ('trial','ativa','atrasada','bloqueada')
+                   order by au.criado_em desc, au.id desc limit 1) as destino
+            from public.assinaturas a where a.status='cortesia') x) as voltariam_para,
+        -- Cortesia que ainda tem assinatura na Stripe (to_jsonb não quebra se a migration cobranca não rodou).
+        (select count(*) from public.assinaturas a where a.status='cortesia' and (to_jsonb(a)->>'stripe_subscription_id') is not null) as cortesias_com_stripe""",
     # Limite mensal de lançamentos configurável. Cria 2 tabelas (padrão de todos e limite próprio por cliente) e 3 funções do admin.
     # Confere o que importa: as tabelas existem, estão FECHADAS ao cliente (RLS ligada e sem permissão para anon/authenticated),
     # as 3 funções existem e o anon não executa nenhuma, e qual é o padrão (tem que ser 300, o de fábrica de hoje: nada muda no comportamento).

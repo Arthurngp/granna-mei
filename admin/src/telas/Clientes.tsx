@@ -5,7 +5,7 @@ import { api, rpc } from '../sb'
 import { dataBR, dataHora, Falha, NOME_SITUACAO } from './comum'
 import { Cartao, Gaveta, Pagina, type HeadDef } from './visao/layout'
 import { usePainel } from './visao/painel'
-import { n } from './visao/usar'
+import { hojeSP, n } from './visao/usar'
 
 interface Cliente {
   id: string
@@ -56,8 +56,13 @@ const FILTROS: [string, string][] = [
   ['cortesia', 'Cortesia'],
 ]
 
-const ACOES: Record<string, { rotulo: string; dica: string; dias?: boolean }> = {
+const ACOES: Record<string, { rotulo: string; dica: string; dias?: boolean; exemplo?: string }> = {
   cortesia: { rotulo: 'Liberar sem pagamento (cortesia)', dica: 'Para parceiros. A cobrança nunca bloqueia esta conta.' },
+  desfazer_cortesia: {
+    rotulo: 'Desfazer cortesia',
+    dica: 'Tira a conta da cortesia e devolve ao que ela era antes: em teste, em dia, em atraso ou bloqueada. Se o teste já tiver vencido, o cliente volta sem acesso e só consegue pagar.',
+    exemplo: 'Ex.: parceria encerrada',
+  },
   estender_teste: { rotulo: 'Estender o teste grátis', dica: 'Soma dias ao fim do teste (ou a partir de hoje, se já venceu).', dias: true },
   liberar: { rotulo: 'Liberar como em dia', dica: 'Use quando o pagamento foi confirmado por fora.' },
   bloquear: { rotulo: 'Bloquear acesso', dica: 'O cliente só consegue pagar e baixar os dados.' },
@@ -178,8 +183,14 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
     setErro('')
     setOcupado(true)
     try {
-      const r = await rpc<{ situacao: string }>('admin_acao', { p_user: c.id, p_acao: a, p_motivo: motivo.trim(), p_dias: Number(dias) || 0 })
-      avisar(`Feito. Situação agora: ${NOME_SITUACAO[r.situacao] ?? r.situacao}`)
+      const r = await rpc<{ situacao: string; trial_fim?: string | null }>('admin_acao', { p_user: c.id, p_acao: a, p_motivo: motivo.trim(), p_dias: Number(dias) || 0 })
+      // Desfazer cortesia pode devolver a conta a um teste que já acabou: o cliente fica sem acesso e o admin precisa saber disso na hora.
+      const semAcesso = a === 'desfazer_cortesia' && r.situacao === 'trial' && !!r.trial_fim && r.trial_fim < hojeSP()
+      avisar(
+        a === 'desfazer_cortesia'
+          ? `Cortesia desfeita. Situação agora: ${NOME_SITUACAO[r.situacao] ?? r.situacao}.${semAcesso ? ' O teste já tinha vencido, então o cliente está sem acesso até pagar.' : ''}`
+          : `Feito. Situação agora: ${NOME_SITUACAO[r.situacao] ?? r.situacao}`,
+      )
       mudou()
       fechar()
     } catch (e) {
@@ -275,7 +286,10 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
         <div className="rotulo" style={{ marginBottom: 0 }}>Ações</div>
         {!acao ? (
           <div className="pilha" style={{ gap: 8 }}>
-            {Object.entries(ACOES).map(([k, v]) => (
+            {Object.entries(ACOES)
+              // "Desfazer cortesia" só faz sentido para conta em cortesia, e "Liberar sem pagamento" só para quem ainda não está.
+              .filter(([k]) => (k === 'desfazer_cortesia' ? c.situacao === 'cortesia' : k === 'cortesia' ? c.situacao !== 'cortesia' : true))
+              .map(([k, v]) => (
               <button key={k} type="button" className={`btn btn-bloco ${k === 'bloquear' ? 'btn-perigo' : 'btn-sec'}`} onClick={() => setAcao(k)}>
                 {v.rotulo}
               </button>
@@ -396,7 +410,7 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
             )}
             <label className="campo">
               <span>Motivo (fica na auditoria)</span>
-              <input className="entrada" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ex.: parceiro da NGP" />
+              <input className="entrada" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder={def!.exemplo ?? 'Ex.: parceiro da NGP'} />
             </label>
             <div className="dupla">
               <button type="button" className="btn btn-sec" onClick={() => setAcao(null)}>
