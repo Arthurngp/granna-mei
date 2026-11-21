@@ -1,7 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
-const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+/** Só em desenvolvimento (`VITE_ADMIN_MOCK=1 npm run dev:admin`): troca o banco por dados de exemplo, para olhar as telas sem login. */
+export const MOCK = import.meta.env.VITE_ADMIN_MOCK === '1'
+
+const url = MOCK ? 'http://mock.invalid' : (import.meta.env.VITE_SUPABASE_URL as string | undefined)
+const anon = MOCK ? 'mock' : (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)
 if (!url || !anon) throw new Error('Faltam VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY')
 
 // Sessão guardada com outra chave: entrar no admin não mexe na sessão do painel do cliente.
@@ -12,6 +15,7 @@ export const API = ((import.meta.env.VITE_GRANNINHA_API as string | undefined) ?
 
 /** Chama uma função do banco. Erro de permissão vira mensagem, nunca expulsa da tela. */
 export async function rpc<T>(nome: string, args: Record<string, unknown> = {}): Promise<T> {
+  if (MOCK) return (await import('./mock')).mockRpc(nome, args) as T
   const { data, error } = await sb.rpc(nome, args)
   if (error) throw new Error(error.message.includes('acesso negado') ? 'Sem permissão. Entre de novo com o código do autenticador.' : error.message)
   return data as T
