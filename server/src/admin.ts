@@ -8,8 +8,21 @@ import { garantirSessao, qrDaSessao } from './gateway.ts'
 import { ErroExclusao, excluirContaDefinitivo } from './excluir.ts'
 import { numeroDeAviso } from './alerta.ts'
 
-// Os dois domínios valem sempre, além do que vier em ADMIN_ORIGENS: trocar o domínio não pode derrubar o admin.
-const ORIGENS = [...new Set([...(process.env.ADMIN_ORIGENS ?? '').split(','), 'https://granninha.amplasoft.me', 'https://grannamei.amplasoft.me'].map((s) => s.trim()).filter(Boolean))]
+// Os domínios valem sempre, além do que vier em ADMIN_ORIGENS: trocar o domínio não pode derrubar o admin.
+// O admin em granninha.com.br/admin chama esta API de outra origem; sem ela aqui o navegador bloqueia por CORS.
+const ORIGENS = [
+  ...new Set(
+    [
+      ...(process.env.ADMIN_ORIGENS ?? '').split(','),
+      'https://granninha.com.br',
+      'https://www.granninha.com.br',
+      'https://granninha.amplasoft.me',
+      'https://grannamei.amplasoft.me',
+    ]
+      .map((s) => s.trim())
+      .filter(Boolean),
+  ),
+]
 
 function cors(req: IncomingMessage, res: ServerResponse) {
   const o = req.headers.origin
