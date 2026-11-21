@@ -42,7 +42,7 @@ try:
     create schema auth;
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('teste.uid', true), '')::uuid $$;
     create function public.eh_admin() returns boolean language sql stable as $$ select coalesce(current_setting('teste.admin', true), 'f') = 't' $$;
-    create table public.assinaturas (user_id uuid primary key, status text not null, trial_fim date, prox_cobranca date, motivo text, atualizado_em timestamptz,
+    create table public.assinaturas (user_id uuid primary key, status text not null, trial_fim date, prox_cobranca date, motivo text, atualizado_em timestamptz, stripe_subscription_id text,
       constraint assinaturas_status_check check (status in ('trial', 'ativa', 'atrasada', 'bloqueada', 'cortesia')));
     create table public.perfis (id uuid primary key, whats_verificado boolean not null default false);
     create table public.admin_auditoria (id bigint generated always as identity primary key, admin_id uuid not null, acao text not null, alvo_user_id uuid, detalhes jsonb not null default '{}'::jsonb, criado_em timestamptz not null default now());
@@ -188,6 +188,12 @@ try:
         deve_ok(12, "cortesia", "cortesia dois")
         deve_ok(12, "desfazer_cortesia", "desfeita dois")
         confere("histórico: usa o ÚLTIMO registro de cortesia (volta a ativa, não ao trial antigo)", estado(12).startswith("ativa"), estado(12))
+        # S13 assinatura na Stripe: recusa e não altera
+        cria(13, "ativa")
+        deve_ok(13, "cortesia", "parceiro com stripe")
+        psql("update public.assinaturas set stripe_subscription_id='sub_teste' where user_id='%s'" % uuid(13))
+        rc, o, e = chama(13, "desfazer_cortesia", "fim")
+        confere("assinatura na Stripe: recusa e a conta segue em cortesia", rc != 0 and "Stripe" in e and estado(13).startswith("cortesia") and n_aud(13, "desfazer_cortesia") == 0, (rc, e, estado(13)))
         # permissões
         p = psql("select has_function_privilege('anon','public.admin_acao(uuid,text,text,integer)','execute') || '|' || has_function_privilege('authenticated','public.admin_acao(uuid,text,text,integer)','execute')")[1]
         confere("permissões: anon não executa, authenticated executa", p == "false|true", p)
@@ -212,6 +218,7 @@ try:
         ("motivo deixa de ser exigido no desfazer", ", 'voltar_teste', 'desfazer_cortesia') and", ", 'voltar_teste') and"),
         ("sem registro, ADIVINHA trial em vez de recusar", "      raise exception 'não sei como a conta estava antes da cortesia (sem registro). Use \"Estender o teste grátis\", \"Liberar como em dia\" ou \"Bloquear acesso\".' using errcode = '22023';\n", "      previo := '{\"antes\":\"trial\"}'::jsonb;\n"),
         ("restaura sempre 'ativa' em vez do estado anterior", "      status = previo ->> 'antes',\n", "      status = 'ativa',\n"),
+        ("sem a recusa para conta com assinatura na Stripe", "    if antes ->> 'stripe_subscription_id' is not null then", "    if false then"),
     ]
     pegos = 0
     for desc, de, para in muts:

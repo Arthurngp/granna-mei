@@ -6,6 +6,7 @@
 --   - Volta ao estado do ÚLTIMO registro de cortesia da conta cujo "antes" era um estado real (trial, ativa, atrasada ou bloqueada).
 --     Se a cortesia foi aplicada duas vezes, o "antes" da segunda é "cortesia" e é ignorado: volta ao que era antes da primeira.
 --   - Sem registro (cortesia gravada por fora da auditoria), RECUSA e pede para escolher outra ação. Nada é alterado.
+--   - Conta com assinatura na Stripe: também RECUSA (a Stripe não atualiza o status durante a cortesia, o retrato antigo pode estar errado).
 --   - Motivo obrigatório, como em toda ação que muda acesso. Fica na auditoria (antes = cortesia, depois = o estado restaurado).
 --
 -- Substitui a função admin_acao inteira (create or replace). TODAS as ações que já existiam seguem exatamente como eram; o que muda
@@ -32,6 +33,11 @@ begin
   elsif p_acao = 'desfazer_cortesia' then
     if antes ->> 'status' is distinct from 'cortesia' then
       raise exception 'a conta não está em cortesia' using errcode = '22023';
+    end if;
+    -- Conta com assinatura na Stripe: durante a cortesia a cobrança ignora os eventos da Stripe (cobranca-regras.ts), então ela pode
+    -- ter sido cancelada ou paga nesse meio-tempo e nenhum evento futuro corrige. Restaurar o retrato antigo erraria; o admin decide.
+    if antes ->> 'stripe_subscription_id' is not null then
+      raise exception 'a conta tem assinatura na Stripe e, durante a cortesia, a Stripe não atualiza o status, então não dá para saber se ela segue valendo. Use "Liberar como em dia" ou "Bloquear acesso".' using errcode = '22023';
     end if;
     select au.detalhes into previo
       from public.admin_auditoria au

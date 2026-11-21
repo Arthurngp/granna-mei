@@ -79,7 +79,22 @@ CONFERE = {
         (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
           where n.nspname='public' and p.proname='admin_acao' and pg_get_functiondef(p.oid) like '%desfazer_cortesia%') as ja_tem_desfazer_cortesia,
         has_function_privilege('anon', 'public.admin_acao(uuid,text,text,integer)', 'execute') as anon_executa,
-        has_function_privilege('authenticated', 'public.admin_acao(uuid,text,text,integer)', 'execute') as authenticated_executa""",
+        has_function_privilege('authenticated', 'public.admin_acao(uuid,text,text,integer)', 'execute') as authenticated_executa,
+        -- O que decide se o botão funciona nas contas que existem hoje: só dá para desfazer cortesia que tem registro na auditoria
+        -- (mesmo filtro da função). Se "desfaziveis" for menor que "cortesias", as outras caem na recusa e precisam de ação manual.
+        (select count(*) from public.assinaturas where status='cortesia') as cortesias,
+        (select count(*) from public.assinaturas a where a.status='cortesia' and exists (
+          select 1 from public.admin_auditoria au where au.alvo_user_id=a.user_id and au.acao='cortesia'
+            and au.detalhes->>'depois'='cortesia' and au.detalhes->>'antes' in ('trial','ativa','atrasada','bloqueada'))) as desfaziveis,
+        -- Para onde cada cortesia VOLTARIA (estado e fim do teste de antes, sem nomes). Teste com fim no passado = volta sem acesso.
+        (select string_agg(x.destino, ' | ') from (
+          select (select au.detalhes->>'antes' || coalesce('@' || (au.detalhes->>'trial_fim_antes'), '')
+                    from public.admin_auditoria au where au.alvo_user_id=a.user_id and au.acao='cortesia'
+                     and au.detalhes->>'depois'='cortesia' and au.detalhes->>'antes' in ('trial','ativa','atrasada','bloqueada')
+                   order by au.criado_em desc, au.id desc limit 1) as destino
+            from public.assinaturas a where a.status='cortesia') x) as voltariam_para,
+        -- Cortesia que ainda tem assinatura na Stripe (to_jsonb não quebra se a migration cobranca não rodou).
+        (select count(*) from public.assinaturas a where a.status='cortesia' and (to_jsonb(a)->>'stripe_subscription_id') is not null) as cortesias_com_stripe""",
     # Só funções de leitura do admin (custo por período, ativação, receita): confere as 3.
     "adminvisao": """select (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
         where n.nspname='public' and p.proname in ('admin_custo_periodo','admin_ativacao','admin_receita')) as funcoes_de_3""",
