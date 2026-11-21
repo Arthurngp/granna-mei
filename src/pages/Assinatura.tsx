@@ -166,6 +166,8 @@ export default function Assinatura() {
           )}
         </section>
 
+        {/* Quem já assina não escolhe plano aqui: trocar durante o teste grátis encerraria o teste e cobraria na hora. */}
+        {!(a.status === 'ativa' && !s.sessao.demo) && (
         <section className="card g-6 pilha" style={{ gap: 10 }}>
           <div className="card-cab" style={{ marginBottom: 0 }}>
             <h2>Seu plano</h2>
@@ -207,6 +209,7 @@ export default function Assinatura() {
             </button>
           )}
         </section>
+        )}
 
         <section className="card g-6 pilha">
           <div className="card-cab" style={{ marginBottom: 0 }}>
