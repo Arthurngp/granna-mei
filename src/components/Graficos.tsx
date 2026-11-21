@@ -49,7 +49,23 @@ export interface Serie {
 }
 
 /** Linhas com área em degradê ("morrinhos"). Toque ou passe o mouse para ver o valor do ponto. */
-export function AreaLinhas({ labels, series, altura = 190, rotulo }: { labels: string[]; series: Serie[]; altura?: number; rotulo?: (i: number) => string }) {
+export function AreaLinhas({
+  labels,
+  series,
+  altura = 190,
+  rotulo,
+  formato = brl,
+  formatoCurto = brlCurto,
+}: {
+  labels: string[]
+  series: Serie[]
+  altura?: number
+  rotulo?: (i: number) => string
+  /** Como escrever o valor no balão. Padrão: reais (painel do cliente). O admin passa número puro para contagens. */
+  formato?: (n: number) => string
+  /** Como escrever o valor nas linhas do eixo. */
+  formatoCurto?: (n: number) => string
+}) {
   const [ref, w] = useLargura<HTMLDivElement>()
   const [ativo, setAtivo] = useState<number | null>(null)
   const uid = useId().replace(/:/g, '')
@@ -85,7 +101,7 @@ export function AreaLinhas({ labels, series, altura = 190, rotulo }: { labels: s
           <g key={f}>
             <line x1={0} x2={w} y1={y(max * f)} y2={y(max * f)} stroke="#E7EAF5" strokeWidth="1" strokeDasharray="3 4" />
             <text className="eixo" x={0} y={y(max * f) - 4}>
-              {brlCurto(max * f)}
+              {formatoCurto(max * f)}
             </text>
           </g>
         ))}
@@ -127,7 +143,7 @@ export function AreaLinhas({ labels, series, altura = 190, rotulo }: { labels: s
           {series.map((s, k) => (
             <div key={k}>
               <i style={{ background: s.cor }} />
-              {s.nome}: {brl(s.valores[ativo] ?? 0)}
+              {s.nome}: {formato(s.valores[ativo] ?? 0)}
             </div>
           ))}
         </div>

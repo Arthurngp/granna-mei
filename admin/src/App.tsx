@@ -1,7 +1,7 @@
 import { LoaderCircle, ShieldCheck } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Mascote } from '../../src/components/ui'
-import { sb, rpc } from './sb'
+import { MOCK, sb, rpc } from './sb'
 import { Auditoria } from './telas/Auditoria'
 import { Clientes } from './telas/Clientes'
 import { Granninha } from './telas/Granninha'
@@ -13,9 +13,11 @@ type Aba = 'visao' | 'clientes' | 'granninha' | 'auditoria'
 export default function App() {
   const [etapa, setEtapa] = useState<Etapa>('carregando')
   const [aba, setAba] = useState<Aba>('visao')
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
 
   /** Decide a etapa: sem login → entrar; não é admin → sem acesso; sem 2ª etapa → ativar ou pedir código. */
   const avaliar = useCallback(async () => {
+    if (MOCK) return setEtapa('dentro')
     const { data } = await sb.auth.getSession()
     if (!data.session) return setEtapa('entrar')
     const admin = await rpc<boolean>('admin_papel').catch(() => false)
@@ -52,33 +54,36 @@ export default function App() {
 
   return (
     <div>
-      <header className="adm-topo">
-        <div className="linha1">
-          <img src={`${import.meta.env.BASE_URL}logo-96.png`} alt="" />
-          <div className="cresce">
-            <b>Granninha</b> <small>Admin</small>
-          </div>
-          <button type="button" onClick={sair}>
-            Sair
-          </button>
-        </div>
-        <nav className="adm-abas" aria-label="Seções">
-          {(
-            [
-              ['visao', 'Visão geral'],
-              ['clientes', 'Clientes'],
-              ['granninha', 'Granninha'],
-              ['auditoria', 'Auditoria'],
-            ] as const
-          ).map(([v, r]) => (
-            <button key={v} type="button" aria-pressed={aba === v} onClick={() => setAba(v)}>
-              {r}
+      <div className={`cabeca ${aba === 'visao' ? 'larga' : ''}`}>
+        <header className="adm-topo">
+          <div className="linha1">
+            <img src={`${import.meta.env.BASE_URL}logo-96.png`} alt="" />
+            <div className="cresce">
+              <b>Granninha</b> <small>Admin{MOCK ? ' · dados de exemplo' : ''}</small>
+            </div>
+            <button type="button" onClick={sair}>
+              Sair
             </button>
-          ))}
-        </nav>
-      </header>
-      <main className="adm-conteudo">
-        {aba === 'visao' && <Visao />}
+          </div>
+          <nav className="adm-abas" aria-label="Seções">
+            {(
+              [
+                ['visao', 'Visão geral'],
+                ['clientes', 'Clientes'],
+                ['granninha', 'Granninha'],
+                ['auditoria', 'Auditoria'],
+              ] as const
+            ).map(([v, r]) => (
+              <button key={v} type="button" aria-pressed={aba === v} onClick={() => setAba(v)}>
+                {r}
+              </button>
+            ))}
+          </nav>
+        </header>
+        {aba === 'visao' && <div ref={setSlot} />}
+      </div>
+      <main className={`adm-conteudo ${aba === 'visao' ? 'larga' : ''}`}>
+        {aba === 'visao' && <Visao slot={slot} />}
         {aba === 'clientes' && <Clientes />}
         {aba === 'granninha' && <Granninha />}
         {aba === 'auditoria' && <Auditoria />}
