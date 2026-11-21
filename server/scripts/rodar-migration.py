@@ -10,6 +10,8 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
 
   desfazercortesia 20261121173700_admin_desfazer_cortesia.sql   admin_acao ganha a ação "Desfazer cortesia" (devolve a conta ao
           estado de antes, lido da auditoria; recusa se não souber). Sem ela o botão do admin dá erro. Não cria tabela nem coluna.
+  retencao 20261121210000_retencao.sql           lembretes de retenção (nunca mandou / parou de usar): tabela de configuração, função de
+          elegíveis, funções do admin, coluna do SAIR e o marco do número atual. NÃO liga nada (as regras nascem desligadas).
   limite  20261121200000_limite_lancamentos.sql  limite mensal de lançamentos configurável no admin: 2 tabelas fechadas ao cliente
           (padrão de todos = 300, e limite próprio por cliente) e 3 funções do admin. Não muda o comportamento de hoje.
           Sem ela, a Granninha segue com o limite de fábrica (300) e as telas de limite do admin avisam que falta a migration.
@@ -54,6 +56,7 @@ MIGRATIONS = {
     "adminacoes": "20261121150000_admin_acoes_retencao_publico.sql",
     "desfazercortesia": "20261121173700_admin_desfazer_cortesia.sql",
     "limite": "20261121200000_limite_lancamentos.sql",
+    "retencao": "20261121210000_retencao.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
@@ -99,6 +102,32 @@ CONFERE = {
             from public.assinaturas a where a.status='cortesia') x) as voltariam_para,
         -- Cortesia que ainda tem assinatura na Stripe (to_jsonb não quebra se a migration cobranca não rodou).
         (select count(*) from public.assinaturas a where a.status='cortesia' and (to_jsonb(a)->>'stripe_subscription_id') is not null) as cortesias_com_stripe""",
+    # Lembretes de retenção. NÃO liga nada: as duas regras nascem DESLIGADAS. Confere o que importa: as duas regras existem e estão
+    # desligadas, a tabela de configuração é FECHADA ao cliente, o service_role (o servidor) lê a tabela e executa a função de
+    # elegíveis (sem isso o Arthur liga "Todos" e nada sai, sem erro nenhum), a função de elegíveis NÃO é executável pelo cliente
+    # (devolve nome e telefone), as 3 funções do admin existem e o anon não executa nenhuma, o tipo novo cabe em `avisos`, a coluna
+    # do SAIR existe e o marco do número atual está preenchido (sem marco ninguém é elegível, de propósito).
+    "retencao": """select
+        (select case when to_regclass('public.config_retencao') is null then null
+              else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.config_retencao', false, true, '')))[1]::text end) as regras,
+        (select case when to_regclass('public.config_retencao') is null then null
+              else (xpath('/row/c/text()', query_to_xml($q$select count(*) as c from public.config_retencao where modo <> 'desligado'$q$, false, true, '')))[1]::text end) as regras_ligadas,
+        (select case when to_regclass('public.config_retencao') is null then null else has_table_privilege('service_role', 'public.config_retencao', 'select') end) as service_role_le_config,
+        (select case when to_regclass('public.config_retencao') is null then null else has_table_privilege('authenticated', 'public.config_retencao', 'select') end) as cliente_le_config,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis') as funcao_elegiveis,
+        (select case when count(*) = 0 then null else bool_and(has_function_privilege('service_role', p.oid, 'execute')) end
+           from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis') as service_role_executa_elegiveis,
+        (select case when count(*) = 0 then null else bool_or(has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('anon', p.oid, 'execute')) end
+           from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis') as cliente_executa_elegiveis,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname in ('admin_retencao_config','admin_retencao_previa','admin_retencao_definir')) as funcoes_admin_de_3,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname in ('admin_retencao_config','admin_retencao_previa','admin_retencao_definir')
+            and has_function_privilege('anon', p.oid, 'execute')) as funcoes_admin_abertas_ao_anon,
+        (select count(*) from pg_constraint where conrelid = 'public.avisos'::regclass and contype = 'c' and pg_get_constraintdef(oid) ilike '%retencao_nunca%') as avisos_aceita_tipo_novo,
+        (select count(*) from information_schema.columns where table_schema='public' and table_name='perfis' and column_name='avisos_off') as coluna_sair,
+        -- to_jsonb em vez de citar a coluna: antes da migration ela não existe, e citá-la faria o ANTES inteiro falhar.
+        (select to_jsonb(s) ->> 'numero_desde' from public.granninha_saude s where s.id = 1) as numero_desde""",
     # Limite mensal de lançamentos configurável. Cria 2 tabelas (padrão de todos e limite próprio por cliente) e 3 funções do admin.
     # Confere o que importa: as tabelas existem, estão FECHADAS ao cliente (RLS ligada e sem permissão para anon/authenticated),
     # as 3 funções existem e o anon não executa nenhuma, e qual é o padrão (tem que ser 300, o de fábrica de hoje: nada muda no comportamento).

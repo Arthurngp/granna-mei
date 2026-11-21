@@ -3,9 +3,10 @@
  * Ordem: registra (sem duplicar) → reconhece o cliente pelo número verificado → confere acesso e uso →
  * transforma áudio, foto ou PDF em texto → entende → grava → responde.
  */
-import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, usoDoMes } from './banco.ts'
+import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, silenciarLembretes, usoDoMes } from './banco.ts'
 import { despedidaDe, RESPOSTA_DESPEDIDA } from './despedida.ts'
 import { AVISO_PERTO_DO_LIMITE, limiteDeMidias, limiteDoCliente, TEXTO_LIMITE_LANCAMENTOS, TEXTO_LIMITE_MIDIAS } from './limite.ts'
+import { ehSair, TEXTO_SAIR } from './retencao.ts'
 import { ErroIA, MARCA_RETOMAR, recadoDaFalhaIA, valeRetomarIA } from './ia-estado.ts'
 import { avisoDeRetirada, categoriaDeNegocio, ehDoNegocio } from './retirada.ts'
 import { faturaDe } from './cartao.ts'
@@ -213,32 +214,40 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
     } else {
       userId = cliente.id
       const hoje = hojeSP()
-      // O limite de lançamentos é por cliente (próprio, ou o padrão de todos, definidos no admin): ver limite.ts.
-      const [acesso, uso, { limite }] = await Promise.all([acessoDe(cliente.id, hoje), usoDoMes(cliente.id, hoje.slice(0, 8) + '01T00:00:00-03:00'), limiteDoCliente(cliente.id)])
-      if (acesso.acesso === 'bloqueado') {
-        status = 'bloqueada'
-        resposta = `Seu acesso está pausado e por isso não consigo anotar agora. Seus dados estão guardados. Para voltar, é só regularizar em ${PAINEL()}/ajustes/assinatura`
-      } else if (uso.lancamentos >= limite || (tipo !== 'texto' && tipo !== 'outro' && uso.midias >= limiteDeMidias())) {
-        status = 'limite'
-        resposta = uso.lancamentos >= limite ? TEXTO_LIMITE_LANCAMENTOS : TEXTO_LIMITE_MIDIAS
-      } else if (tipo === 'outro' && ehRuido(d)) {
-        status = 'ignorada'
-      } else if (tipo === 'outro') {
-        status = 'ignorada'
-        resposta = 'Por aqui eu entendo texto, áudio, foto de comprovante e PDF. Me manda de um desses jeitos?'
-      } else if (await codigoDeOutraConta(cliente.id, d.content ?? '')) {
-        // Abriu outra conta e tentou confirmar com o mesmo número: o número já é desta conta, então
-        // sem isto o código viraria uma conversa comum aqui e a conta nova ficaria esperando para sempre.
-        status = 'ignorada'
-        resposta = `Esse número já está confirmado nesta conta, então não dá para usá-lo em outra ao mesmo tempo. Se quiser levá-lo para a conta nova, troque o número aqui em ${PAINEL()}/ajustes (ou peça a exclusão desta conta) e confirme lá.`
+      if (tipo === 'texto' && ehSair(d.content ?? '')) {
+        // SAIR: a pessoa pediu para não receber lembretes. Vale antes de bloqueio, limite e IA: é um pedido que se honra sempre.
+        // Se não conseguir gravar, lança (vira erro): nunca responder "pronto" sem ter gravado.
+        await silenciarLembretes(cliente.id)
+        status = 'pergunta'
+        resposta = TEXTO_SAIR
       } else {
-        const r = await conversar(cliente, hoje, tipo, d, msgId, telefone, consumo, opts.retomada === true)
-        ;({ status, resposta, efeitos, intencao } = r)
-        textoFinal = r.texto
-        tokens = r.tokens
-        // Aviso de 80% do limite, uma vez, junto da resposta.
-        if (status === 'ok' && uso.lancamentos + 1 === Math.floor(limite * 0.8)) {
-          resposta += `\n\n${AVISO_PERTO_DO_LIMITE}`
+        // O limite de lançamentos é por cliente (próprio, ou o padrão de todos, definidos no admin): ver limite.ts.
+        const [acesso, uso, { limite }] = await Promise.all([acessoDe(cliente.id, hoje), usoDoMes(cliente.id, hoje.slice(0, 8) + '01T00:00:00-03:00'), limiteDoCliente(cliente.id)])
+        if (acesso.acesso === 'bloqueado') {
+          status = 'bloqueada'
+          resposta = `Seu acesso está pausado e por isso não consigo anotar agora. Seus dados estão guardados. Para voltar, é só regularizar em ${PAINEL()}/ajustes/assinatura`
+        } else if (uso.lancamentos >= limite || (tipo !== 'texto' && tipo !== 'outro' && uso.midias >= limiteDeMidias())) {
+          status = 'limite'
+          resposta = uso.lancamentos >= limite ? TEXTO_LIMITE_LANCAMENTOS : TEXTO_LIMITE_MIDIAS
+        } else if (tipo === 'outro' && ehRuido(d)) {
+          status = 'ignorada'
+        } else if (tipo === 'outro') {
+          status = 'ignorada'
+          resposta = 'Por aqui eu entendo texto, áudio, foto de comprovante e PDF. Me manda de um desses jeitos?'
+        } else if (await codigoDeOutraConta(cliente.id, d.content ?? '')) {
+          // Abriu outra conta e tentou confirmar com o mesmo número: o número já é desta conta, então
+          // sem isto o código viraria uma conversa comum aqui e a conta nova ficaria esperando para sempre.
+          status = 'ignorada'
+          resposta = `Esse número já está confirmado nesta conta, então não dá para usá-lo em outra ao mesmo tempo. Se quiser levá-lo para a conta nova, troque o número aqui em ${PAINEL()}/ajustes (ou peça a exclusão desta conta) e confirme lá.`
+        } else {
+          const r = await conversar(cliente, hoje, tipo, d, msgId, telefone, consumo, opts.retomada === true)
+          ;({ status, resposta, efeitos, intencao } = r)
+          textoFinal = r.texto
+          tokens = r.tokens
+          // Aviso de 80% do limite, uma vez, junto da resposta.
+          if (status === 'ok' && uso.lancamentos + 1 === Math.floor(limite * 0.8)) {
+            resposta += `\n\n${AVISO_PERTO_DO_LIMITE}`
+          }
         }
       }
     }

@@ -19,6 +19,8 @@ import { estadoIA, MARCA_RETOMAR } from './ia-estado.ts'
 import { decidirAviso, textoVoltou, type ConfigAlerta } from './alerta.ts'
 import { estado as estadoAvisos, estadoTeste, lerConfig as lerConfigAvisos, lerConfigTeste, rodarAvisos, rodarAvisosTeste } from './avisos.ts'
 import { depsAvisosDoBanco } from './avisos-banco.ts'
+import { rodarRetencao, estado as estadoRetencao } from './retencao.ts'
+import { depsRetencaoDoBanco } from './retencao-banco.ts'
 
 const PORTA = Number(process.env.PORT ?? 3000)
 let ultimaMensagem: string | null = null
@@ -216,7 +218,8 @@ export function iniciar(porta = PORTA) {
         res.writeHead(200, { 'Content-Type': 'application/json' }).end(
           JSON.stringify({ ok: true, whatsapp: wa, ia: estadoIA(), mensagens_24h: hoje.count ?? null, erros_24h: falhas.count ?? null, erros_envio_desde_inicio: erros, ultima_mensagem: ultimaMensagem, fila: filas.size,
             avisos: { modo: estadoAvisos.modo, ultimo_ciclo: estadoAvisos.ultimoCiclo, enviados_desde_inicio: estadoAvisos.enviados, falhas_desde_inicio: estadoAvisos.falhas, ultimo_erro: estadoAvisos.ultimoErro,
-              fim_do_teste: { modo: estadoTeste.modo, ultimo_ciclo: estadoTeste.ultimoCiclo, enviados_desde_inicio: estadoTeste.enviados, falhas_desde_inicio: estadoTeste.falhas, ultimo_erro: estadoTeste.ultimoErro } } }),
+              fim_do_teste: { modo: estadoTeste.modo, ultimo_ciclo: estadoTeste.ultimoCiclo, enviados_desde_inicio: estadoTeste.enviados, falhas_desde_inicio: estadoTeste.falhas, ultimo_erro: estadoTeste.ultimoErro },
+              retencao: { ultimo_ciclo: estadoRetencao.ultimoCiclo, enviados_desde_inicio: estadoRetencao.enviados, falhas_desde_inicio: estadoRetencao.falhas, parado_ate: estadoRetencao.pausaAte > Date.now() ? new Date(estadoRetencao.pausaAte).toISOString() : null, ultimo_erro: estadoRetencao.ultimoErro } } }),
         )
         return
       }
@@ -230,6 +233,8 @@ export function iniciar(porta = PORTA) {
   // Aviso de conta vencendo (fase f4). Corre à parte do batimento porque dorme entre um envio e outro, e isso
   // não pode atrasar o resto. Desligado por padrão: AVISOS=ensaio | piloto | todos (ver avisos.ts).
   const depsAvisos = depsAvisosDoBanco(sb, enviarTexto)
+  // Lembretes de retenção (quem nunca mandou nada e quem parou de usar). Desligados até o Arthur ligar no admin; ver retencao.ts.
+  const depsRetencao = depsRetencaoDoBanco(sb, enviarTexto, async () => (await statusSessao()).estado === 'CONNECTED', () => lerConfigAvisos().piloto)
   const avisar = async () => {
     try {
       for (const linha of await rodarAvisos(depsAvisos, lerConfigAvisos())) console.log('[avisos]', linha)
@@ -241,6 +246,12 @@ export function iniciar(porta = PORTA) {
       for (const linha of await rodarAvisosTeste(depsAvisos, lerConfigTeste())) console.log('[avisos]', linha)
     } catch (e) {
       console.error('[avisos] fim do teste:', (e as Error).message)
+    }
+    // Lembretes de retenção: por último, e só depois de os dois acima terminarem (saem pelo mesmo chip).
+    try {
+      for (const linha of await rodarRetencao(depsRetencao)) console.log('[retencao]', linha)
+    } catch (e) {
+      console.error('[retencao]', (e as Error).message)
     }
   }
   // Batimento: a cada minuto grava o estado do número para o painel admin (e para o alerta de "parou").

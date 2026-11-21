@@ -17,6 +17,8 @@ const PKS: Record<string, string[]> = {
 export const E = {
   tabelas: {} as Record<string, Linha[]>,
   falharTabela: null as string | null,
+  /** falha só a ESCRITA (POST, PATCH, DELETE) nesta tabela: a leitura segue funcionando */
+  falharEscritaEm: null as string | null,
   /** falha só a leitura cujo `select` é exatamente este */
   falharSelect: null as string | null,
   /** finge que a coluna não existe (banco sem a migration): recusa insert e select que a citem */
@@ -85,6 +87,7 @@ const db = createServer(async (req, res) => {
   }
   if (E.falharSelect && req.method === 'GET' && url.searchParams.get('select') === E.falharSelect) return enviar(500, { message: 'banco falso: leitura provocada', code: 'XX000' })
   if (E.falharTabela === tabela) return enviar(500, { message: 'banco falso: falha provocada', code: 'XX000' })
+  if (E.falharEscritaEm === tabela && req.method !== 'GET' && req.method !== 'HEAD') return enviar(500, { message: 'banco falso: escrita recusada', code: 'XX000' })
   // Banco sem a migration: a coluna não existe nem para gravar nem para ler.
   if (E.recusarColuna) {
     const col = E.recusarColuna
@@ -266,6 +269,7 @@ export const HOJE = hojeSP()
 export function semear() {
   E.tabelas = {}
   E.falharTabela = null
+  E.falharEscritaEm = null
   E.falharSelect = null
   E.storage = []
   ia.regras = []
