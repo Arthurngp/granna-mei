@@ -97,5 +97,24 @@ export function depsAvisosDoBanco(sb: SupabaseClient, enviar: (telefone: string,
 
     enviar,
     esperar: (ms) => new Promise((ok) => setTimeout(ok, ms)),
+
+    async emTeste(hoje, amanha) {
+      // Começa pelas assinaturas (poucas linhas: só quem termina hoje ou amanhã) e só então busca o perfil.
+      const a = await sb.from('assinaturas').select('user_id, status, trial_fim').eq('status', 'trial').in('trial_fim', [hoje, amanha])
+      falha('assinaturas em teste', a.error)
+      const linhas = (a.data ?? []) as { user_id: string; status: string; trial_fim: string | null }[]
+      const out: PerfilAviso[] = []
+      for (let i = 0; i < linhas.length; i += LOTE) {
+        const lote = linhas.slice(i, i + LOTE)
+        const r = await sb.from('perfis').select('id, nome, whats, whats_chave, exclusao_em').in('id', lote.map((l) => l.user_id)).eq('whats_verificado', true).is('exclusao_em', null)
+        falha('perfis em teste', r.error)
+        for (const p of (r.data ?? []) as { id: string; nome: string; whats: string; whats_chave: string | null; exclusao_em: string | null }[]) {
+          const l = lote.find((x) => x.user_id === p.id)!
+          // lembrete_hora, antecedencia e ocultar não entram no aviso de fim de teste.
+          out.push({ ...p, lembrete_hora: '09:00', antecedencia: 1, ocultar: false, assinatura: { status: l.status, trial_fim: l.trial_fim } })
+        }
+      }
+      return out
+    },
   }
 }

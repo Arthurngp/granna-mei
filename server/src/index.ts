@@ -17,7 +17,7 @@ import { clientePorNumero } from './banco.ts'
 import { PISO_MS, varrerPresas, varrerRetomarIA, type Presa } from './presas.ts'
 import { estadoIA, MARCA_RETOMAR } from './ia-estado.ts'
 import { decidirAviso, textoVoltou, type ConfigAlerta } from './alerta.ts'
-import { estado as estadoAvisos, lerConfig as lerConfigAvisos, rodarAvisos } from './avisos.ts'
+import { estado as estadoAvisos, estadoTeste, lerConfig as lerConfigAvisos, lerConfigTeste, rodarAvisos, rodarAvisosTeste } from './avisos.ts'
 import { depsAvisosDoBanco } from './avisos-banco.ts'
 
 const PORTA = Number(process.env.PORT ?? 3000)
@@ -215,7 +215,8 @@ export function iniciar(porta = PORTA) {
         ])
         res.writeHead(200, { 'Content-Type': 'application/json' }).end(
           JSON.stringify({ ok: true, whatsapp: wa, ia: estadoIA(), mensagens_24h: hoje.count ?? null, erros_24h: falhas.count ?? null, erros_envio_desde_inicio: erros, ultima_mensagem: ultimaMensagem, fila: filas.size,
-            avisos: { modo: estadoAvisos.modo, ultimo_ciclo: estadoAvisos.ultimoCiclo, enviados_desde_inicio: estadoAvisos.enviados, falhas_desde_inicio: estadoAvisos.falhas, ultimo_erro: estadoAvisos.ultimoErro } }),
+            avisos: { modo: estadoAvisos.modo, ultimo_ciclo: estadoAvisos.ultimoCiclo, enviados_desde_inicio: estadoAvisos.enviados, falhas_desde_inicio: estadoAvisos.falhas, ultimo_erro: estadoAvisos.ultimoErro,
+              fim_do_teste: { modo: estadoTeste.modo, ultimo_ciclo: estadoTeste.ultimoCiclo, enviados_desde_inicio: estadoTeste.enviados, falhas_desde_inicio: estadoTeste.falhas, ultimo_erro: estadoTeste.ultimoErro } } }),
         )
         return
       }
@@ -234,6 +235,12 @@ export function iniciar(porta = PORTA) {
       for (const linha of await rodarAvisos(depsAvisos, lerConfigAvisos())) console.log('[avisos]', linha)
     } catch (e) {
       console.error('[avisos]', (e as Error).message)
+    }
+    // Fim do teste grátis: roda sozinho (AVISOS_TESTE=off desliga). Cada ciclo tem a sua trava, então um não segura o outro.
+    try {
+      for (const linha of await rodarAvisosTeste(depsAvisos, lerConfigTeste())) console.log('[avisos]', linha)
+    } catch (e) {
+      console.error('[avisos] fim do teste:', (e as Error).message)
     }
   }
   // Batimento: a cada minuto grava o estado do número para o painel admin (e para o alerta de "parou").

@@ -89,6 +89,8 @@ export interface DepsAvisos {
   concluir: (userId: string, chaves: string[], enviado: boolean) => Promise<void>
   enviar: (telefone: string, texto: string) => Promise<void>
   esperar: (ms: number) => Promise<void>
+  /** Clientes com WhatsApp verificado cujo teste grátis termina hoje ou amanhã (aviso de fim de teste, ver abaixo). */
+  emTeste?: (hoje: string, amanha: string) => Promise<PerfilAviso[]>
 }
 
 /* ---------- relógio de São Paulo ---------- */
@@ -266,6 +268,144 @@ export async function rodarAvisos(d: DepsAvisos, cfg: ConfigAvisos, agora = new 
     log.push(`erro no ciclo, nada enviado depois dele: ${estado.ultimoErro}`)
   } finally {
     estado.rodando = false
+  }
+  return log
+}
+
+/* ---------- fim do teste grátis (autônomo) ----------
+ * Quem está em teste grátis recebe no WhatsApp um aviso no penúltimo dia ("termina amanhã") e outro no último
+ * ("hoje é o último dia"). No dia seguinte o acesso já está bloqueado, pela regra que já existe
+ * (acesso_liberado: trial_fim < hoje). Serve ao teste de 7 dias sem cartão que vale a partir de 01/01/2027 e,
+ * pelo mesmo motivo, à oferta que acaba em 31/12/2026.
+ *
+ * Diferente do aviso de conta vencendo, este roda SOZINHO, ligado por padrão: o Arthur pediu que fosse autônomo.
+ * AVISOS_TESTE=off desliga tudo; =ensaio só escreve no log o que enviaria. As travas são as mesmas: um aviso por
+ * pessoa e dia (reserva atômica na tabela `avisos`, com chave própria `teste:`), envios espaçados, teto por ciclo,
+ * no máximo 3 falhas por pessoa por dia, nunca à noite. Só conta com WhatsApp verificado e que não pediu exclusão.
+ * Quem já assinou (status ativa) não é avisado: só `trial`.
+ */
+export type ModoTeste = 'off' | 'ensaio' | 'todos'
+
+export interface ConfigTeste {
+  modo: ModoTeste
+  /** Os avisos saem entre estas horas (São Paulo): cobre reinício do serviço sem acordar ninguém. */
+  de: string
+  ate: string
+  maxPorCiclo: number
+  espacoMs: number
+  painelUrl: string
+}
+
+export function lerConfigTeste(e: Record<string, string | undefined> = process.env): ConfigTeste {
+  const m = (e.AVISOS_TESTE ?? 'todos').trim().toLowerCase()
+  const hora = (v: string | undefined, padrao: string) => (/^\d{1,2}:\d{2}$/.test((v ?? '').trim()) ? v!.trim() : padrao)
+  return {
+    modo: m === 'off' || m === 'ensaio' ? m : 'todos',
+    de: hora(e.AVISOS_TESTE_DE, '09:00'),
+    ate: hora(e.AVISOS_TESTE_ATE, '20:00'),
+    maxPorCiclo: num(e.AVISOS_MAX_POR_CICLO, 15),
+    espacoMs: num(e.AVISOS_ESPACO_MS, 5000),
+    painelUrl: (e.PAINEL_URL ?? 'https://granninha.com.br/painel').replace(/\/+$/, ''),
+  }
+}
+
+export const estadoTeste = {
+  rodando: false,
+  modo: 'todos' as ModoTeste,
+  ultimoCiclo: null as string | null,
+  enviados: 0,
+  falhas: 0,
+  ultimoErro: null as string | null,
+  falhasPorPessoa: new Map<string, { dia: string; n: number }>(),
+}
+export function zerarEstadoTeste() {
+  estadoTeste.rodando = false
+  estadoTeste.modo = 'todos'
+  estadoTeste.ultimoCiclo = null
+  estadoTeste.enviados = 0
+  estadoTeste.falhas = 0
+  estadoTeste.ultimoErro = null
+  estadoTeste.falhasPorPessoa.clear()
+}
+
+export type QuandoTeste = 'amanha' | 'hoje'
+/** Uma chave por conta, dia final do teste e momento: trocar o `trial_fim` (cortesia, extensão) gera aviso novo, de propósito. */
+export const chaveTeste = (userId: string, trialFim: string, quando: QuandoTeste) => `teste:${userId}:${trialFim}:${quando}`
+
+/** Sem emoji, sem travessão. Diz o que acontece, quanto custa e onde assinar. */
+export function textoFimDoTeste(nome: string, quando: QuandoTeste, painelUrl: string): string {
+  const primeiro = (nome ?? '').trim().split(/\s+/)[0]
+  const oi = primeiro ? `Oi, ${primeiro}.` : 'Oi.'
+  const assinar = `Para continuar anotando comigo, é só assinar (R$ 29,90 por mês, sem fidelidade):\n${painelUrl}/ajustes/assinatura`
+  if (quando === 'hoje') {
+    return `${oi} Hoje é o último dia do seu teste grátis da Granninha. A partir de amanhã o acesso fica pausado, mas seus lançamentos continuam guardados.\n\n${assinar}`
+  }
+  return `${oi} Seu teste grátis da Granninha termina amanhã. Depois disso o acesso fica pausado, mas seus lançamentos continuam guardados.\n\n${assinar}`
+}
+
+export async function rodarAvisosTeste(d: DepsAvisos, cfg: ConfigTeste, agora = new Date()): Promise<string[]> {
+  estadoTeste.modo = cfg.modo
+  if (cfg.modo === 'off' || !d.emTeste) return []
+  if (estadoTeste.rodando) return ['ciclo anterior ainda em andamento, pulei este']
+  estadoTeste.rodando = true
+  const log: string[] = []
+  try {
+    const hoje = dataSP(agora)
+    const amanha = somaDias(hoje, 1)
+    const hhmm = horaSP(agora)
+    estadoTeste.ultimoCiclo = agora.toISOString()
+    const min = minutos(hhmm) ?? 0
+    const ini = minutos(cfg.de) ?? 9 * 60
+    const fim = Math.min(minutos(cfg.ate) ?? 20 * 60, LIMITE_NOITE_MIN)
+    if (min < ini || min > fim) return log
+    const perfis = await d.emTeste(hoje, amanha)
+    let usados = 0
+    for (const p of perfis) {
+      const a = p.assinatura
+      if (p.exclusao_em || !a || a.status !== 'trial' || !a.trial_fim) continue
+      const quando: QuandoTeste | null = a.trial_fim === hoje ? 'hoje' : a.trial_fim === amanha ? 'amanha' : null
+      if (!quando) continue
+      const f = estadoTeste.falhasPorPessoa.get(p.id)
+      if (f && f.dia === hoje && f.n >= MAX_FALHAS_DIA) continue
+      const chave = chaveTeste(p.id, a.trial_fim, quando)
+      if ((await d.jaAvisadas(p.id, [chave])).has(chave)) continue
+      if (usados >= cfg.maxPorCiclo) {
+        log.push('teto de envios por ciclo atingido: o resto fica para o minuto seguinte')
+        break
+      }
+      const tel = await d.telefoneDe(p)
+      if (!tel) {
+        log.push(`sem número para avisar o fim do teste da conta ${p.id}`)
+        continue
+      }
+      if (cfg.modo === 'ensaio') {
+        log.push(`ensaio: avisaria (${quando === 'hoje' ? 'último dia' : 'termina amanhã'}) a ${mascarar(tel)}`)
+        continue
+      }
+      // Espera ANTES de reservar: se o processo morrer dormindo, nada fica reservado sem ter saído.
+      if (usados > 0) await d.esperar(cfg.espacoMs + Math.floor(Math.random() * 3000))
+      const ganhas = await d.reservar(p.id, tel, [{ chave, referencia: a.trial_fim }])
+      if (!ganhas.includes(chave)) continue
+      usados++
+      try {
+        await d.enviar(tel, textoFimDoTeste(p.nome, quando, cfg.painelUrl))
+        await d.concluir(p.id, [chave], true)
+        estadoTeste.enviados++
+        log.push(`fim do teste (${quando === 'hoje' ? 'último dia' : 'termina amanhã'}): enviado a ${mascarar(tel)}`)
+      } catch (e) {
+        await d.concluir(p.id, [chave], false).catch((e2) => log.push(`não consegui soltar a reserva: ${(e2 as Error).message}`))
+        estadoTeste.falhas++
+        estadoTeste.ultimoErro = (e as Error).message.slice(0, 200)
+        const antes = estadoTeste.falhasPorPessoa.get(p.id)
+        estadoTeste.falhasPorPessoa.set(p.id, { dia: hoje, n: antes && antes.dia === hoje ? antes.n + 1 : 1 })
+        log.push(`falha ao avisar o fim do teste a ${mascarar(tel)}: ${estadoTeste.ultimoErro}`)
+      }
+    }
+  } catch (e) {
+    estadoTeste.ultimoErro = (e as Error).message.slice(0, 200)
+    log.push(`erro no ciclo do fim do teste: ${estadoTeste.ultimoErro}`)
+  } finally {
+    estadoTeste.rodando = false
   }
   return log
 }
