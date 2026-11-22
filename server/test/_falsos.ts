@@ -176,7 +176,10 @@ export const SEM_ACAO = { intencao: 'outro', acoes: [], pergunta: null, correcao
 export const ia = {
   /** Texto da mensagem (sem o invólucro) → o que a "IA" entendeu. */
   regras: [] as [RegExp, unknown][],
-  chamadas: { interpretacao: 0, resposta: 0, transcricao: 0, documento: 0 },
+  chamadas: { interpretacao: 0, resposta: 0, transcricao: 0, documento: 0, ajuda: 0 },
+  /** O que a IA falsa devolve para a ajuda, e o último prompt (sistema e usuário) que ela recebeu. */
+  respostaAjuda: 'Eu sou a Granninha, ajudo a anotar o dinheiro do seu negócio. Me manda o primeiro registro quando quiser.',
+  ultimaAjuda: { sistema: '', usuario: '' },
   ultimoResumo: null as null | Record<string, any>,
   /** Prompt de sistema da última interpretação (para provar o que a IA recebeu). */
   ultimoSistema: '',
@@ -222,6 +225,10 @@ const iaServer = createServer(async (req, res) => {
   } else if (nome === 'documento') {
     ia.chamadas.documento++
     saida = ia.documento
+  } else if (nome === 'ajuda') {
+    ia.chamadas.ajuda++
+    ia.ultimaAjuda = { sistema: String(b.messages[0].content), usuario }
+    saida = { resposta: ia.respostaAjuda }
   } else if (nome === 'resposta') {
     ia.chamadas.resposta++
     const m = /RESUMO \(JSON\):\n([\s\S]*?)\n\nPERGUNTA:/.exec(usuario)
@@ -273,7 +280,9 @@ export function semear() {
   E.falharSelect = null
   E.storage = []
   ia.regras = []
-  ia.chamadas = { interpretacao: 0, resposta: 0, transcricao: 0, documento: 0 }
+  ia.chamadas = { interpretacao: 0, resposta: 0, transcricao: 0, documento: 0, ajuda: 0 }
+  ia.respostaAjuda = 'Eu sou a Granninha, ajudo a anotar o dinheiro do seu negócio. Me manda o primeiro registro quando quiser.'
+  ia.ultimaAjuda = { sistema: '', usuario: '' }
   ia.ultimoResumo = null
   ia.ultimoSistema = ''
   ia.queda = false
