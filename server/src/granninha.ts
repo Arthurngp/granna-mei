@@ -4,6 +4,7 @@
  * transforma áudio, foto ou PDF em texto → entende → grava → responde.
  */
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, silenciarLembretes, usoDoMes } from './banco.ts'
+import { ehPedidoDeAjuda, responderAjuda } from './ajuda.ts'
 import { despedidaDe, RESPOSTA_DESPEDIDA } from './despedida.ts'
 import { AVISO_PERTO_DO_LIMITE, limiteDeMidias, limiteDoCliente, TEXTO_LIMITE_LANCAMENTOS, TEXTO_LIMITE_MIDIAS } from './limite.ts'
 import { ehSair, TEXTO_SAIR } from './retencao.ts'
@@ -91,12 +92,8 @@ function tipoDaMensagem(d: EventoGateway['data']): Origem | 'outro' {
   return 'outro'
 }
 
-const AJUDA = `É só me mandar do seu jeito:
-"recebi 150 da Juliana no pix"
-"paguei 89 de luz"
-"aluguel 900 todo dia 10"
-"comprei 1.200 de material em 4x"
-Também entendo áudio, foto do comprovante e PDF. E você pode perguntar: "quanto sobrou esse mês?"`
+/** Mensagem que não tem a ver com dinheiro. Curta, sem despejar exemplos, e diz como pedir a ajuda de verdade. */
+const RESPOSTA_FORA_DO_ASSUNTO = `Isso eu não consigo te ajudar, eu cuido só do dinheiro do seu negócio. Mas me conta o que entrou ou saiu que eu anoto, tipo "recebi 150 no pix". Se quiser saber tudo o que eu faço, é só mandar AJUDA.`
 
 /**
  * Os cortes que valem antes de gravar qualquer coisa: evento que não é mensagem recebida, mensagem
@@ -274,7 +271,8 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
   // A pergunta em aberto só sai agora, e só se deu certo: deu erro no meio (IA fora, transcrição),
   // ela continua lá para a resposta seguinte fazer sentido. O filtro por `atualizado_em` é o que
   // impede de apagar uma pergunta NOVA que o próprio processamento acabou de gravar.
-  if (consumo.pendenteLida && status !== 'erro') {
+  // Pedir ajuda no meio da pergunta não consome a pergunta: ela segue em aberto para a resposta que vem depois.
+  if (consumo.pendenteLida && status !== 'erro' && intencao !== 'ajuda') {
     const lim = await sb.from('conversas').update({ pendente: null, atualizado_em: new Date().toISOString() }).eq('telefone', telefone).eq('atualizado_em', consumo.pendenteLida)
     if (lim.error) console.error('[granninha] limpar pergunta em aberto', lim.error.message)
   }
@@ -594,8 +592,11 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   // As respostas se acumulam (ex.: "do negócio" e depois "Nubank") até o lançamento fechar.
   // Se a pergunta tinha opções e a pessoa mandou outra coisa (outro lançamento, uma pergunta), a pergunta antiga
   // é deixada de lado e a mensagem nova vale sozinha: nada de repetir a mesma pergunta para sempre.
+  // Quem pede ajuda no meio de uma pergunta ("qual foi o valor?") recebe a ajuda: o texto NÃO vira resposta da pergunta,
+  // e a pergunta continua em aberto para quando ela responder.
+  const pediuAjuda = !documento && !anexo && ehPedidoDeAjuda(texto)
   const escolha = pend?.tipo === 'pergunta' && fresco && pend.opcoes?.length ? opcaoEscolhida(texto, pend.opcoes) : null
-  const continua = pend?.tipo === 'pergunta' && fresco && !!pend.texto && (!pend.opcoes?.length || !!escolha || /^\s*\d{1,2}\s*$/.test(texto))
+  const continua = !pediuAjuda && pend?.tipo === 'pergunta' && fresco && !!pend.texto && (!pend.opcoes?.length || !!escolha || /^\s*\d{1,2}\s*$/.test(texto))
   const forcar: { carteira?: string; pessoal?: boolean } = continua ? { ...(pend!.forcar ?? {}) } : {}
   if (continua && pend!.documento && !documento) documento = pend!.documento
   // O lançamento guarda de onde veio a primeira mensagem (áudio, foto, PDF) e o comprovante, mesmo depois das perguntas.
@@ -619,6 +620,13 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
       const direta = responderConsulta(consulta, await carregarBase(cliente.id), hoje)
       return { status: 'ok', resposta: direta, efeitos: {}, intencao: 'pergunta', texto, tokens }
     }
+  }
+
+  // Pedido geral de ajuda ("ajuda", "o que você faz?", "você é um robô?"): decidido por código, sem gastar a classificação da IA.
+  if (pediuAjuda) {
+    const a = await responderAjuda(texto, nome, ctx.historico)
+    if (a.uso) soma(a.uso)
+    return { status: 'ok', resposta: a.texto, efeitos: {}, intencao: 'ajuda', texto, tokens }
   }
 
   const it = await interpretar(texto, ctx, { forcarCarteira: forcar.carteira, forcarPessoal: forcar.pessoal, documento })
@@ -713,9 +721,13 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     if (dp === 'silencio') return { status: 'ignorada', resposta: '', efeitos: {}, intencao: 'confirmacao', texto, tokens }
     if (dp) return { status: 'ok', resposta: RESPOSTA_DESPEDIDA[dp], efeitos: {}, intencao: 'despedida', texto, tokens }
   }
-  if (it.intencao === 'saudacao') return { status: 'ok', resposta: `Oi${nome ? `, ${nome}` : ''}! Me manda o que entrou ou saiu que eu anoto. Pode ser texto, áudio ou foto do comprovante.`, efeitos: {}, intencao: 'saudacao', texto, tokens }
-  if (it.intencao === 'ajuda') return { status: 'ok', resposta: AJUDA, efeitos: {}, intencao: 'ajuda', texto, tokens }
-  return { status: 'ok', resposta: `Eu cuido do dinheiro do seu negócio. Me conta o que entrou ou saiu, ou pergunte como estão as contas.\n\n${AJUDA}`, efeitos: {}, intencao: 'outro', texto, tokens }
+  if (it.intencao === 'saudacao') return { status: 'ok', resposta: `Oi${nome ? `, ${nome}` : ''}! Me manda o que entrou ou saiu que eu anoto. Pode ser texto, áudio ou foto do comprovante. Se quiser saber tudo o que eu faço, é só pedir ajuda.`, efeitos: {}, intencao: 'saudacao', texto, tokens }
+  if (it.intencao === 'ajuda') {
+    const a = await responderAjuda(texto, nome, ctx.historico)
+    if (a.uso) soma(a.uso)
+    return { status: 'ok', resposta: a.texto, efeitos: {}, intencao: 'ajuda', texto, tokens }
+  }
+  return { status: 'ok', resposta: RESPOSTA_FORA_DO_ASSUNTO, efeitos: {}, intencao: 'outro', texto, tokens }
 }
 
 /**

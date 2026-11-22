@@ -151,7 +151,9 @@ INTENÇÃO
 - "desfazer": quer anular o último registro ("desfazer", "apaga o último", "cancela isso", "errei, apaga").
 - "corrigir": quer mudar o último registro ("não foi 50, foi 60", "era dinheiro, não pix", "esse recebimento foi de prestação de serviço", "na verdade foi no Nubank", "era da casa, não do negócio", "muda a categoria para Material"). Descreva a correção em "correcao".
   Frase que fala de "esse", "essa", "isso", "o último" ou "o de agora" e só diz o que ele É (categoria, conta, meio, se é da casa) é "corrigir", NUNCA um registro novo: quem registra algo novo conta um fato novo ("recebi 290 do João").
-- "saudacao": só cumprimento ou agradecimento. "ajuda": pergunta como usar. "outro": nada a ver com dinheiro.
+- "saudacao": só cumprimento ou agradecimento.
+- "ajuda": pede ajuda ou pergunta sobre a própria Granninha: o que ela faz, quem é, se é robô, como usar, se ela faz tal coisa ("como eu lanço uma conta?", "dá pra mandar áudio?", "você controla o cartão?"), ou diz que não entendeu como funciona. Pergunta sobre os NÚMEROS do cliente ("quanto sobrou", "o que vence") é "pergunta", nunca "ajuda".
+- "outro": nada a ver com dinheiro nem com a Granninha.
 
 TIPOS DE AÇÃO
 - "lancamento": dinheiro que JÁ entrou ou saiu, inclusive compra no cartão de crédito à vista. movimento entrada/saida.
