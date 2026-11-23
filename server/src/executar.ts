@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { falhou, sb } from './banco.ts'
 import type { Acao, Contexto } from './interpretar.ts'
 import { confirma } from './voz.ts'
+import { somaMeses, vencimentoNoMes } from './datas.ts'
 
 export interface Efeitos {
   lancamentos?: string[]
@@ -24,12 +25,7 @@ const agora = () => {
   const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
-const somaMes = (data: string, n: number, dia?: number) => {
-  const [y, m, d] = data.split('-').map(Number)
-  const alvo = new Date(y, m - 1 + n, 1)
-  const ult = new Date(alvo.getFullYear(), alvo.getMonth() + 1, 0).getDate()
-  return `${alvo.getFullYear()}-${String(alvo.getMonth() + 1).padStart(2, '0')}-${String(Math.min(dia ?? d, ult)).padStart(2, '0')}`
-}
+const somaMes = (data: string, n: number, dia?: number) => vencimentoNoMes(somaMeses(data.slice(0, 7), n), dia ?? Number(data.slice(8, 10)))
 const centavos = (n: number) => Math.round(n * 100) / 100
 
 export interface Resultado {
