@@ -23,6 +23,8 @@ import { rodarRetencao, estado as estadoRetencao } from './retencao.ts'
 import { depsRetencaoDoBanco } from './retencao-banco.ts'
 import { sincronizarCobrancaDasExclusoes } from './exclusao-cobranca.ts'
 import { estadoResumo, lerConfigResumo, rodarResumo } from './resumo-diario.ts'
+import { estadoReposicao, lerModoRepor, reporContasFixas } from './fixas-repor.ts'
+import { depsReporDoBanco } from './fixas-repor-banco.ts'
 import { depsResumoDoBanco } from './resumo-diario-banco.ts'
 import { estadoSonda, sondarIA } from './ia-sonda.ts'
 
@@ -222,6 +224,7 @@ export function iniciar(porta = PORTA) {
         res.writeHead(200, { 'Content-Type': 'application/json' }).end(
           JSON.stringify({ ok: true, whatsapp: wa, ia: { ...estadoIA(), sonda: estadoSonda() }, mensagens_24h: hoje.count ?? null, erros_24h: falhas.count ?? null, erros_envio_desde_inicio: erros, ultima_mensagem: ultimaMensagem, fila: filas.size,
             avisos: { modo: estadoAvisos.modo, ultimo_ciclo: estadoAvisos.ultimoCiclo, enviados_desde_inicio: estadoAvisos.enviados, falhas_desde_inicio: estadoAvisos.falhas, ultimo_erro: estadoAvisos.ultimoErro,
+              reposicao_fixas: { modo: estadoReposicao.modo, ultimo_ciclo: estadoReposicao.ultimoCiclo, fixas_lidas: estadoReposicao.fixasLidas, criadas_desde_inicio: estadoReposicao.criadasDesdeInicio, ultimo_erro: estadoReposicao.ultimoErro },
               resumo_diario: { modo: estadoResumo.modo, ultimo_ciclo: estadoResumo.ultimoCiclo, enviados_desde_inicio: estadoResumo.enviados, falhas_desde_inicio: estadoResumo.falhas, ultimo_erro: estadoResumo.ultimoErro },
               fim_do_teste: { modo: estadoTeste.modo, ultimo_ciclo: estadoTeste.ultimoCiclo, enviados_desde_inicio: estadoTeste.enviados, falhas_desde_inicio: estadoTeste.falhas, ultimo_erro: estadoTeste.ultimoErro },
               retencao: { ultimo_ciclo: estadoRetencao.ultimoCiclo, enviados_desde_inicio: estadoRetencao.enviados, falhas_desde_inicio: estadoRetencao.falhas, parado_ate: estadoRetencao.pausaAte > Date.now() ? new Date(estadoRetencao.pausaAte).toISOString() : null, ultimo_erro: estadoRetencao.ultimoErro } } }),
@@ -239,6 +242,7 @@ export function iniciar(porta = PORTA) {
   // não pode atrasar o resto. Desligado por padrão: AVISOS=ensaio | piloto | todos (ver avisos.ts).
   const depsAvisos = depsAvisosDoBanco(sb, enviarTexto)
   const depsResumo = depsResumoDoBanco(sb, enviarTexto)
+  const depsRepor = depsReporDoBanco(sb)
   // Lembretes de retenção (quem nunca mandou nada e quem parou de usar). Desligados até o Arthur ligar no admin; ver retencao.ts.
   const depsRetencao = depsRetencaoDoBanco(sb, enviarTexto, async () => (await statusSessao()).estado === 'CONNECTED', () => lerConfigAvisos().piloto)
   const avisar = async () => {
@@ -316,6 +320,7 @@ export function iniciar(porta = PORTA) {
       console.error('[cobranca] bloquear atrasadas:', (e as Error).message)
     }
     await varrerVencidas()
+    await reporFixasDoDia()
     void avisar()
   }
 
@@ -335,6 +340,23 @@ export function iniciar(porta = PORTA) {
       diaVarrido = null // deu erro: tenta de novo no próximo minuto
       console.error('[excluir] varrer vencidas:', (e as Error).message)
     }
+  }
+  // Uma vez por dia: repõe as próximas ocorrências das contas fixas (o cadastro só cria as 3 primeiras). Idempotente, sem passado, sem preencher buraco
+  // (ver fixas-repor.ts). REPOR_FIXAS=off desliga e =ensaio só calcula. Com erro, espera 10 minutos antes de tentar de novo.
+  let diaReposto: string | null = null
+  let reporDepoisDe = 0
+  const reporFixasDoDia = async () => {
+    const hoje = hojeSP()
+    if (diaReposto === hoje || Date.now() < reporDepoisDe) return
+    const modo = lerModoRepor()
+    const r = await reporContasFixas(depsRepor, hoje, modo)
+    if (r.erros.length) {
+      reporDepoisDe = Date.now() + 10 * 60_000
+      for (const e of r.erros) console.error('[fixas] repor:', e)
+      return
+    }
+    diaReposto = hoje
+    if (modo !== 'off') console.log(`[fixas] modo ${modo}: ${r.fixas} fixas, ${r.semOcorrencia} sem ocorrência, ${r.aCriar} a criar, ${r.criadas} criadas${r.limitado ? ' (parou no teto da volta, o resto fica para a próxima)' : ''}`)
   }
   if (process.env.SEM_BATIMENTO !== '1') {
     void bater()
