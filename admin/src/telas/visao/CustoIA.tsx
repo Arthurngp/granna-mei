@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { PRECO_MENSAL } from '../../../../src/lib/config'
-import { CAMBIO, custoReais, PRECO_USD, reais, type Consumo } from '../../custo'
+import { CAMBIO, custoLeitura, custoReais, PRECO_USD, reais, type Consumo } from '../../custo'
 import { Falha } from '../comum'
 import { AreaDia } from './graficos'
 import { Cartao, Gaveta, Pagina, type HeadDef } from './layout'
@@ -34,7 +34,11 @@ const MODOS: [Modo, string][] = [
   ['porMensagem', 'Por mensagem'],
 ]
 
-const soma = (ds: Consumo[]): Consumo => ds.reduce((a, d) => ({ entrada: a.entrada + d.entrada, saida: a.saida + d.saida, audio_tokens: a.audio_tokens + d.audio_tokens, audio_seg: a.audio_seg + d.audio_seg }), { entrada: 0, saida: 0, audio_tokens: 0, audio_seg: 0 })
+const soma = (ds: Consumo[]): Consumo =>
+  ds.reduce(
+    (a, d) => ({ entrada: a.entrada + d.entrada, saida: a.saida + d.saida, audio_tokens: a.audio_tokens + d.audio_tokens, audio_seg: a.audio_seg + d.audio_seg, entrada_foto: (a.entrada_foto ?? 0) + (d.entrada_foto ?? 0), entrada_pdf: (a.entrada_pdf ?? 0) + (d.entrada_pdf ?? 0) }),
+    { entrada: 0, saida: 0, audio_tokens: 0, audio_seg: 0, entrada_foto: 0, entrada_pdf: 0 },
+  )
 
 const somaDias = (iso: string, d: number) => {
   const x = new Date(`${iso}T12:00:00Z`)
@@ -90,8 +94,11 @@ export function CustoIA() {
       .sort((p, q) => q.c - p.c)
       .map((p) => ({ ...p, volume: p.x.mensagens > medMsgs * 1.8, cpm: p.c / Math.max(1, p.x.mensagens) }))
     const tot = soma(dias)
+    const leitura = custoLeitura(tot)
     const parte = {
-      entrada: custoReais({ ...tot, saida: 0, audio_tokens: 0, audio_seg: 0 }),
+      entrada: leitura.texto,
+      foto: leitura.foto,
+      pdf: leitura.pdf,
       saida: custoReais({ ...tot, entrada: 0, audio_tokens: 0, audio_seg: 0 }),
       audio: custoReais({ ...tot, entrada: 0, saida: 0 }),
     }
@@ -142,7 +149,9 @@ export function CustoIA() {
   const C = 2 * Math.PI * 52
   const partes = a
     ? [
-        { nome: 'Texto lido (entrada)', v: a.parte.entrada, cor: '#454c83' },
+        { nome: 'Texto lido', v: a.parte.entrada, cor: '#454c83' },
+        { nome: 'Foto lida', v: a.parte.foto, cor: '#e0a458' },
+        { nome: 'Documento lido', v: a.parte.pdf, cor: '#b5788f' },
         { nome: 'Texto escrito (saída)', v: a.parte.saida, cor: '#747ead' },
         { nome: 'Áudio transcrito', v: a.parte.audio, cor: '#8fe9b8' },
       ]
@@ -228,6 +237,7 @@ export function CustoIA() {
                     ))}
                   </div>
                 </div>
+                <p className="texto-ajuda">Foto e documento são a leitura inteira das mensagens com foto ou PDF, com as instruções de sempre. Não entram em "Texto lido".</p>
                 <div className="cartao-cab" style={{ marginTop: 22 }}>
                   <h2>Dias fora do padrão</h2>
                 </div>
@@ -321,7 +331,16 @@ export function CustoIA() {
               <div><small>Por mensagem</small><b>{reais(custoReais(gav.c) / Math.max(1, gav.c.mensagens))}</b></div>
               <div><small>Do total</small><b>{pct(custoReais(gav.c), a.total)}</b></div>
             </div>
-            <div className="fato"><span>Texto lido</span><b>{reais(custoReais({ ...gav.c, saida: 0, audio_tokens: 0, audio_seg: 0 }))}</b></div>
+            {(() => {
+              const l = custoLeitura(gav.c)
+              return (
+                <>
+                  <div className="fato"><span>Texto lido</span><b>{reais(l.texto)}</b></div>
+                  <div className="fato"><span>Foto lida</span><b>{reais(l.foto)}</b></div>
+                  <div className="fato"><span>Documento lido</span><b>{reais(l.pdf)}</b></div>
+                </>
+              )
+            })()}
             <div className="fato"><span>Texto escrito</span><b>{reais(custoReais({ ...gav.c, entrada: 0, audio_tokens: 0, audio_seg: 0 }))}</b></div>
             <div className="fato"><span>Áudio transcrito</span><b>{reais(custoReais({ ...gav.c, entrada: 0, saida: 0 }))}</b></div>
             <p className="texto-ajuda">Comparado ao plano de {reais(PRECO_MENSAL)}: a IA deste cliente pesa {pct(custoReais(gav.c), PRECO_MENSAL)} do plano no período.</p>

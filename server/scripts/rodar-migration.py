@@ -8,6 +8,8 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  custofoto 20261123140000_custo_foto_documento.sql   custo de IA no admin: separa a leitura de FOTO e DOCUMENTO da leitura de texto (2 campos novos, por dia e por cliente, que são PARTE de
+          `entrada`: o total não muda). Só leitura, mesma assinatura. Sem ela o admin continua igual, só sem as duas linhas novas. Depende de adminvisao.
   enviomanual 20261123120000_envio_manual.sql   botão "enviar" do admin: fila de pedidos de envio (fechada ao cliente), 3 funções do admin com auditoria e o tipo
           'retencao_manual' em avisos. NÃO envia nada sozinha: só o que o admin aprovar no botão, um por vez, com 5 minutos de espera. Depende de retencaosequencia.
   recursos 20261123030000_recursos_cliente.sql   recursos de plano superior liberados POR CLIENTE, só pelo admin (o primeiro: resumo diário de contas). Tabela fechada ao
@@ -71,6 +73,7 @@ MIGRATIONS = {
     "fixasdia": "20261123020000_fixas_dia_ate_31.sql",
     "recursos": "20261123030000_recursos_cliente.sql",
     "enviomanual": "20261123120000_envio_manual.sql",
+    "custofoto": "20261123140000_custo_foto_documento.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
@@ -215,6 +218,14 @@ CONFERE = {
             and has_function_privilege('anon', p.oid, 'execute')) as funcoes_abertas_ao_anon,
         (case when to_regclass('public.recursos_cliente') is null then null
               else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.recursos_cliente', false, true, '')))[1]::text end) as clientes_com_recurso""",
+    # Custo de foto e documento. Só leitura: confere que a função continua UMA só (sem sobrecarga), que já devolve os dois campos novos, que o anônimo
+    # não executa e o logado executa (a função confere eh_admin lá dentro).
+    "custofoto": """select
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_custo_periodo') as definicoes,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname='admin_custo_periodo' and pg_get_functiondef(p.oid) like '%entrada_foto%' and pg_get_functiondef(p.oid) like '%entrada_pdf%') as ja_tem_foto_e_documento,
+        has_function_privilege('anon', 'public.admin_custo_periodo(date,date)', 'execute') as anon_executa,
+        has_function_privilege('authenticated', 'public.admin_custo_periodo(date,date)', 'execute') as authenticated_executa""",
     # Envio manual pelo admin. Confere o que importa: a fila existe e está FECHADA ao cliente (RLS ligada, sem permissão para anon e authenticated), o serviço lê e
     # atualiza, as 3 funções do admin existem e o anon não executa nenhuma, a conferência da pessoa NÃO é executável por cliente, avisos aceita o tipo novo sem ter
     # perdido os antigos, e há 0 pedidos na fila de início (a migration não envia nada sozinha).

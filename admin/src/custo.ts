@@ -19,6 +19,9 @@ export interface Consumo {
   saida: number
   audio_tokens: number
   audio_seg: number
+  /** Parte de `entrada` que vem de mensagens com foto, e de mensagens com documento (PDF). Já está DENTRO de `entrada`: nunca somar por cima. */
+  entrada_foto?: number
+  entrada_pdf?: number
 }
 
 export function custoReais(c: Consumo) {
@@ -27,3 +30,14 @@ export function custoReais(c: Consumo) {
 }
 
 export const reais = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: n > 0 && n < 0.1 ? 4 : 2 })
+
+/**
+ * O custo de LER (a entrada do modelo) repartido em foto, documento e o resto (texto e áudio). Os três somam sempre o custo de `entrada`: o total do
+ * cliente não muda, só se reparte. Foto e documento aqui são a leitura inteira das mensagens com foto ou PDF, o que inclui as instruções de sempre.
+ */
+export function custoLeitura(c: Consumo) {
+  const foto = Math.min(c.entrada_foto ?? 0, c.entrada)
+  const pdf = Math.min(c.entrada_pdf ?? 0, c.entrada - foto)
+  const em = (tokens: number) => custoReais({ entrada: tokens, saida: 0, audio_tokens: 0, audio_seg: 0 })
+  return { texto: em(c.entrada - foto - pdf), foto: em(foto), pdf: em(pdf) }
+}

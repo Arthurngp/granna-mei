@@ -66,18 +66,22 @@ function dia(iso: string) {
 function periodo(inicio: string, fim: string) {
   const ate = fim < hojeSP() ? fim : hojeSP()
   const dias = []
-  for (let d = inicio; d <= ate; d = somaDias(d, 1)) dias.push(dia(d))
+  // Foto e documento são PARTE da entrada (como no banco): cerca de 12% e 4% dela, para a tela mostrar as duas fatias.
+  for (let d = inicio; d <= ate; d = somaDias(d, 1)) {
+    const x = dia(d)
+    dias.push({ ...x, entrada_foto: Math.round(x.entrada * 0.12), entrada_pdf: Math.round(x.entrada * 0.04) })
+  }
   const totalMsgs = dias.reduce((s, x) => s + x.mensagens, 0)
   const nomes: [string, string][] = [['Marina Costa', 'Studio Marina'], ['João Pedro', 'JP Reformas'], ['Aline Souza', 'Aline Doces'], ['Carlos Lima', 'Lima Fretes'], ['Bruna Alves', 'Bruna Nails'], ['Rafael Dias', 'RD Elétrica']]
   const pesos = [0.28, 0.22, 0.17, 0.14, 0.11, 0.08]
-  const soma = dias.reduce((a, x) => ({ entrada: a.entrada + x.entrada, saida: a.saida + x.saida, audio_tokens: a.audio_tokens + x.audio_tokens, audio_seg: 0 }), { entrada: 0, saida: 0, audio_tokens: 0, audio_seg: 0 })
+  const soma = dias.reduce((a, x) => ({ entrada: a.entrada + x.entrada, saida: a.saida + x.saida, audio_tokens: a.audio_tokens + x.audio_tokens, audio_seg: 0, entrada_foto: a.entrada_foto + x.entrada_foto, entrada_pdf: a.entrada_pdf + x.entrada_pdf }), { entrada: 0, saida: 0, audio_tokens: 0, audio_seg: 0, entrada_foto: 0, entrada_pdf: 0 })
   return {
     inicio,
     fim: ate,
     dias,
     totais: { mensagens: totalMsgs, clientes: totalMsgs ? 18 : 0, estimadas: totalMsgs ? 120 : 0, audios_sem_medida: totalMsgs ? 14 : 0 },
     por_cliente: totalMsgs
-      ? nomes.map(([nome, negocio], i) => ({ user_id: `u${i}`, nome, negocio, mensagens: Math.round(totalMsgs * pesos[i]), entrada: Math.round(soma.entrada * pesos[i]), saida: Math.round(soma.saida * pesos[i]), audio_tokens: Math.round(soma.audio_tokens * pesos[i]), audio_seg: 0 }))
+      ? nomes.map(([nome, negocio], i) => ({ user_id: `u${i}`, nome, negocio, mensagens: Math.round(totalMsgs * pesos[i]), entrada: Math.round(soma.entrada * pesos[i]), saida: Math.round(soma.saida * pesos[i]), audio_tokens: Math.round(soma.audio_tokens * pesos[i]), audio_seg: 0, entrada_foto: Math.round(soma.entrada_foto * pesos[i]), entrada_pdf: Math.round(soma.entrada_pdf * pesos[i]) }))
       : [],
     meses: ['2026-11', '2026-10', '2026-09'],
   }
