@@ -165,9 +165,12 @@ function ChipEnvio({ e, whatsOk, desvio }: { e: EstadoEnvio; whatsOk: boolean; d
   if (e.tipo === 'enviando') return <div className="ac-fila" role="status"><b>Enviando</b>agora</div>
   if (e.tipo === 'enviado') return <div className="ac-fila ok"><b>Enviado</b>{e.em ? haQuanto(servidor - e.em) : 'pelo sistema'}</div>
   if (e.tipo === 'falhou') return <div className="ac-fila ruim" title={e.erro}><b>Não saiu</b>abra a ficha</div>
-  const falta = Math.max(0, Math.round((e.previsto - servidor) / 1000))
+  // O banco prevê 5 minutos entre os envios, mas o servidor confere uma vez por minuto e o tique dos 5:00 cheios cai uns centésimos antes: o intervalo real é de 6
+  // (medido em 2026-11-23). O erro cresce com a posição (o 1º atrasa 1 minuto, o 2º 2...), então a tela soma 1 minuto POR POSIÇÃO na fila.
+  const previsto = e.previsto + e.posicao * 60_000
+  const falta = Math.max(0, Math.round((previsto - servidor) / 1000))
   const quem = e.posicao > 1 ? `${e.posicao}º na fila` : 'Na fila'
-  const quando = !whatsOk ? 'WhatsApp desconectado' : falta <= 20 * 60 ? (falta === 0 ? 'sai em instantes' : `sai em ${mmss(falta)}`) : `sai ${diaSP(e.previsto) !== diaSP(servidor) ? 'amanhã ' : ''}às ${hhmm(e.previsto)}`
+  const quando = !whatsOk ? 'WhatsApp desconectado' : falta <= 20 * 60 ? (falta === 0 ? 'sai em instantes' : `sai em ${mmss(falta)}`) : `sai ${diaSP(previsto) !== diaSP(servidor) ? 'amanhã ' : ''}às ${hhmm(previsto)}`
   return <div className="ac-fila" role="status"><b>{quem}</b>{quando}</div>
 }
 
@@ -209,8 +212,8 @@ function ConfirmarEnvio({ item, fila, desvio, jaFria, onFechar, onEnviado, onRec
       </div>
       <p className="texto-ajuda">
         {espera
-          ? `Já há envio recente ou pedidos na frente: esta entra na fila e sai sozinha, ${fila.espera_min} minutos depois do anterior.`
-          : `Sai em até 1 minuto. Entre um envio e outro o sistema espera ${fila.espera_min} minutos.`}{' '}
+          ? `Já há envio recente ou pedidos na frente: esta entra na fila e sai sozinha, de ${fila.espera_min} a ${fila.espera_min + 1} minutos depois do anterior.`
+          : `Sai em até 1 minuto. Entre um envio e outro o sistema espera de ${fila.espera_min} a ${fila.espera_min + 1} minutos.`}{' '}
         Sai pelo número da Granninha e só entre 9h e 19h. Dá para cancelar enquanto estiver na fila.
       </p>
       {!fila.whatsapp_ok && <div className="por">O WhatsApp da Granninha está desconectado agora. O pedido fica na fila e sai quando reconectar.</div>}
