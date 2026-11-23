@@ -10,7 +10,7 @@ import { CampoDinheiro, Chave, Codigo, Folha, Seg, useAviso } from '../component
 import { saldos } from '../lib/calc'
 import { PRECO_ANUAL, PRECO_MENSAL, RAMOS } from '../lib/config'
 import { baixar, csvLancamentos } from '../lib/exportar'
-import { brl, DIAS_SEMANA, diaCurto, documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, somaDias, somaMeses } from '../lib/format'
+import { brl, diaCurto, documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, somaDias, somaMeses } from '../lib/format'
 import { novoId, useApp } from '../lib/store'
 import type { Carteira, Categoria, Conta, Estado, Fixa, StatusAssinatura, TipoCarteira } from '../lib/tipos'
 
@@ -193,7 +193,7 @@ export default function Ajustes() {
                 setAba('whats')
               }}
             />
-            <Item I={Bell} titulo="Horários da Granninha" det={`Resumo ${DIAS_SEMANA[s.prefs.resumoDia]} às ${s.prefs.resumoHora} · lembretes às ${s.prefs.lembreteHora}`} onClick={() => setAba('horarios')} />
+            <Item I={Bell} titulo="Horários da Granninha" det={`Lembrete de conta às ${s.prefs.lembreteHora} (em liberação)`} onClick={() => setAba('horarios')} />
             <Item I={Send} titulo="Contador" det={s.contador.nome || 'Cadastre quem recebe seus relatórios'} onClick={() => setAba('contador')} />
           </section>
         </div>
@@ -404,34 +404,15 @@ export default function Ajustes() {
       {/* ---------- Horários ---------- */}
       <Folha aberta={aba === 'horarios'} onFechar={fechar} titulo="Horários da Granninha" pe={<button type="button" className="btn btn-pri btn-bloco" onClick={fechar}>Pronto</button>}>
         <div className="pilha">
-          <div>
-            <div className="rotulo">Resumo da semana: em que dia?</div>
-            <div className="dias">
-              {DIAS_SEMANA.map((d, i) => (
-                <button type="button" key={d} aria-pressed={s.prefs.resumoDia === i} aria-label={d} onClick={() => prefs({ resumoDia: i })}>
-                  {d.slice(0, 3)}
-                </button>
+          <p className="suave">Os lembretes de conta estão sendo liberados aos poucos. A sua escolha já fica guardada.</p>
+          <label className="campo">
+            <span>Hora dos lembretes</span>
+            <select className="entrada num" value={s.prefs.lembreteHora} onChange={(e) => prefs({ lembreteHora: e.target.value })}>
+              {HORAS.map((h) => (
+                <option key={h}>{h}</option>
               ))}
-            </div>
-          </div>
-          <div className="dupla">
-            <label className="campo">
-              <span>Hora do resumo</span>
-              <select className="entrada num" value={s.prefs.resumoHora} onChange={(e) => prefs({ resumoHora: e.target.value })}>
-                {HORAS.map((h) => (
-                  <option key={h}>{h}</option>
-                ))}
-              </select>
-            </label>
-            <label className="campo">
-              <span>Hora dos lembretes</span>
-              <select className="entrada num" value={s.prefs.lembreteHora} onChange={(e) => prefs({ lembreteHora: e.target.value })}>
-                {HORAS.map((h) => (
-                  <option key={h}>{h}</option>
-                ))}
-              </select>
-            </label>
-          </div>
+            </select>
+          </label>
           <div>
             <div className="rotulo">Lembrar de conta vencendo</div>
             <Seg
@@ -698,7 +679,7 @@ export default function Ajustes() {
       {/* ---------- Contas fixas ---------- */}
       <Folha aberta={aba === 'fixas'} onFechar={fechar} titulo="Contas fixas" pe={<button type="button" className="btn btn-pri btn-bloco" onClick={fechar}>Pronto</button>}>
         <div className="pilha">
-          <p className="suave">Contas que chegam todo mês. A Granninha cria o lembrete sozinha.</p>
+          <p className="suave">Contas que chegam todo mês. A Granninha cadastra os próximos 3 meses de cada uma.</p>
           {s.fixas.map((f) => (
             <div className="item-ob" key={f.id}>
               <div className="cab">
