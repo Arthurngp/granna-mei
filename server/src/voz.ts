@@ -76,6 +76,13 @@ export const MSG = {
       : escolhe(['Pode mandar.', 'Tô por aqui.', 'O que entrou ou saiu hoje?'])
     return `${abre}${n}! ${corpo}`
   },
+  /** Foto ou PDF em que não saiu valor nenhum: se nem parece documento de dinheiro, diz isso; se parece mas não deu para ler, diz como resolver. */
+  semValorNoArquivo: (tipo: 'foto' | 'pdf', naoEhDocumento: boolean) =>
+    naoEhDocumento
+      ? 'Isso não parece um comprovante. Se foi um gasto ou uma venda, me diz o que foi e quanto.'
+      : tipo === 'pdf'
+        ? 'Não consegui ler o valor nesse PDF. Me diz o que foi e quanto que eu anoto.'
+        : 'Não consegui ler o valor nessa foto. Tenta mandar de mais perto, ou me diz o que foi e quanto.',
   apagarTudo: 'Eu só desfaço o último registro: é só responder DESFAZER. Pra apagar mais de um, é pelo painel, em Lançamentos.',
   valorSozinho: (v: string) => `${v} de quê? Entrou ou saiu?`,
   numeroConfirmado: (nome: string) => `Pronto${nome ? `, ${nome}` : ''}, seu número tá confirmado e agora a gente tá conectado! Me manda o que entrou ou saiu que eu anoto.\n\nPor exemplo: "recebi 150 no pix" ou "paguei 89 de luz".`,

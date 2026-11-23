@@ -28,6 +28,7 @@ Diga o tipo do documento e liste as transações que estão nele, com valor exat
 - nota fiscal ou cupom: o total como uma transação.
 - fatura de cartão de crédito: tipo "fatura_cartao", cada COMPRA como transação de saída com data (AAAA-MM-DD) e descrição; compra parcelada leva a parcela na descrição (ex.: "Loja X 2/4") e o valor da parcela. Não inclua pagamento da fatura anterior, estorno, crédito, juros de atraso nem o total. "vencimento" = data de vencimento da fatura.
 - se não for documento de dinheiro: tipo "outro" e nenhuma transação.
+- se PARECE documento de dinheiro (comprovante, extrato, boleto, fatura) mas está borrado, cortado ou ilegível: use o tipo do documento (ex.: "comprovante") com nenhuma transação. Nunca "outro": "outro" é só para o que não tem nada a ver com dinheiro.
 Direção: "entrada" quando o dinheiro chegou para o dono (Pix recebido, venda), "saida" quando ele pagou.
 "meio": como o dinheiro passou, quando o documento mostra (comprovante de Pix → pix; TED/DOC → transferencia; débito; crédito; boleto pago → boleto; recibo em dinheiro → dinheiro). Sem pista → null.
 "resumo": uma frase curta em português dizendo o que é, com o valor no formato 1234,56 (ex.: "Pix enviado de 89,90 para CEMIG em 14/11/2026").
