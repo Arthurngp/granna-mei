@@ -14,7 +14,13 @@ const lembretes = {
   regras: [
     { regra: 'nunca_mandou', modo: 'desligado', atraso_horas: 24, atualizado_em: new Date().toISOString(), enviados_7d: 0, texto: 'Oi, {nome}! Aqui é a Granninha. Vi que você ainda não me mandou nenhum lançamento. É só escrever do seu jeito, por exemplo "recebi 300 de um serviço" ou "gasolina 60 pro negócio", que eu anoto pra você.' },
     { regra: 'parou_de_usar', modo: 'desligado', atraso_horas: 48, atualizado_em: new Date().toISOString(), enviados_7d: 0, texto: 'Oi, {nome}! Faz uns dias que você não me manda nada. Se teve venda ou gasto nesse tempo, me conta por aqui que eu anoto, e você não perde o controle do mês.' },
-  ] as { regra: string; modo: string; atraso_horas: number; atualizado_em: string; enviados_7d: number; texto: string }[],
+  ] as { regra: string; modo: string; atraso_horas: number; atualizado_em: string; enviados_7d: number; texto: string; etapas: { etapa: number; ativa: boolean; atraso_horas: number; texto: string; atualizado_em: string }[] }[],
+}
+for (const r of lembretes.regras) {
+  r.etapas = [
+    { etapa: 2, ativa: false, atraso_horas: 96, atualizado_em: new Date().toISOString(), texto: 'Oi, {nome}! Tô passando de novo por aqui. Se você recebeu ou pagou alguma coisa e não me contou, me manda que eu anoto, do seu jeito.' },
+    { etapa: 3, ativa: false, atraso_horas: 240, atualizado_em: new Date().toISOString(), texto: 'Oi, {nome}! Essa é a última vez que te chamo por aqui. Quando quiser começar, é só me mandar um gasto ou uma venda, tipo "paguei 80 de material", que eu anoto.' },
+  ]
 }
 const ruido = (i: number) => Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1
 
@@ -288,13 +294,14 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
       return {
         dias: Number(args.p_dias),
         por_regra: [
-          { regra: 'nunca_mandou', enviados: 12, medidos_24h: 10, responderam_24h: 4, medidos_48h: 8, lancaram_48h: 3, pediram_sair: 1 },
-          { regra: 'parou_de_usar', enviados: 7, medidos_24h: 5, responderam_24h: 0, medidos_48h: 0, lancaram_48h: 0, pediram_sair: 0 },
+          { regra: 'nunca_mandou', etapa: 1, enviados: 12, medidos_24h: 10, responderam_24h: 4, medidos_48h: 8, lancaram_48h: 3, pediram_sair: 1 },
+          { regra: 'nunca_mandou', etapa: 2, enviados: 5, medidos_24h: 4, responderam_24h: 1, medidos_48h: 3, lancaram_48h: 1, pediram_sair: 0 },
+          { regra: 'parou_de_usar', etapa: 1, enviados: 7, medidos_24h: 5, responderam_24h: 0, medidos_48h: 0, lancaram_48h: 0, pediram_sair: 0 },
         ],
         ultimos: [
           { em: ha(2), regra: 'nunca_mandou', nome: 'Juan Pinheiro', negocio: 'Juan', respondeu: null, lancou: null, pediu_sair: false },
-          { em: ha(30), regra: 'parou_de_usar', nome: 'Marina Costa', negocio: 'Studio Marina', respondeu: true, lancou: null, pediu_sair: false },
-          { em: ha(75), regra: 'nunca_mandou', nome: 'Walmir Silva', negocio: 'Growthcode', respondeu: true, lancou: true, pediu_sair: false },
+          { em: ha(30), regra: 'parou_de_usar', etapa: 1, nome: 'Marina Costa', negocio: 'Studio Marina', respondeu: true, lancou: null, pediu_sair: false },
+          { em: ha(75), regra: 'nunca_mandou', etapa: 2, nome: 'Walmir Silva', negocio: 'Growthcode', respondeu: true, lancou: true, pediu_sair: false },
           { em: ha(100), regra: 'nunca_mandou', nome: 'Alvaro Melo', negocio: 'Alvaro Melo', respondeu: false, lancou: false, pediu_sair: true },
         ],
         fila: [
@@ -305,8 +312,33 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
     }
     case 'admin_retencao_config':
       return { regras: lembretes.regras, enviados_hoje: 0, ultimo_envio: null, numero_desde: '2026-11-21T04:04:14+00:00', ciclo_em: lembretes.regras.some((r) => r.modo !== 'desligado') ? new Date().toISOString() : null, erro: null }
+    case 'admin_retencao_etapa_definir': {
+      if (String(args.p_motivo ?? '').trim().length < 3) throw new Error('motivo obrigatório')
+      const r = lembretes.regras.find((x) => x.regra === args.p_regra)
+      if (!r) throw new Error('regra desconhecida')
+      const et = Number(args.p_etapa)
+      const e = r.etapas.find((x) => x.etapa === et)
+      const outra = r.etapas.find((x) => x.etapa !== et)
+      if (!e) throw new Error('esta função muda a etapa 2 ou a 3')
+      const atraso = Number(args.p_atraso)
+      const ativa = !!args.p_ativa
+      if (et === 2) {
+        if (atraso <= r.atraso_horas) throw new Error(`o atraso da etapa 2 precisa ser maior que o da etapa 1 (${r.atraso_horas} h)`)
+        if (outra && atraso >= outra.atraso_horas) throw new Error(`o atraso da etapa 2 precisa ser menor que o da etapa 3 (${outra.atraso_horas} h)`)
+        if (!ativa && outra?.ativa) throw new Error('desligue a etapa 3 antes de desligar a etapa 2')
+      } else {
+        if (outra && atraso <= outra.atraso_horas) throw new Error(`o atraso da etapa 3 precisa ser maior que o da etapa 2 (${outra.atraso_horas} h)`)
+        if (ativa && !outra?.ativa) throw new Error('ligue a etapa 2 antes de ligar a etapa 3')
+      }
+      e.ativa = ativa
+      e.atraso_horas = atraso
+      e.texto = String(args.p_texto)
+      e.atualizado_em = new Date().toISOString()
+      return { ok: true, regra: r.regra, etapa: et, ativa, atraso_horas: atraso }
+    }
     case 'admin_retencao_previa': {
       const h = Number(args.p_atraso)
+      if (Number(args.p_etapa ?? 1) > 1) return { total: 1, fora_por_numero_antigo: 0, itens: [{ nome: 'Carla Dias', negocio: 'Carla Doces', horas: h + 5 }] }
       const nomes = args.p_regra === 'nunca_mandou' ? [['Juan Pinheiro', 'Juan', 30], ['Walmir Silva', 'Growthcode', 95], ['Alvaro Melo', 'Alvaro Melo', 120]] : [['Marina Costa', 'Studio Marina', 60], ['João Pedro', 'JP Reformas', 52]]
       const itens = (nomes as [string, string, number][]).filter((x) => x[2] >= h).map(([nome, negocio, horas]) => ({ nome, negocio, horas }))
       return { total: itens.length, fora_por_numero_antigo: args.p_regra === 'nunca_mandou' ? 3 : 1, itens }
@@ -315,6 +347,7 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
       if (String(args.p_motivo ?? '').trim().length < 3) throw new Error('motivo obrigatório')
       const r = lembretes.regras.find((x) => x.regra === args.p_regra)
       if (!r) throw new Error('regra desconhecida')
+      if (r.etapas[0] && Number(args.p_atraso) >= r.etapas[0].atraso_horas) throw new Error(`o atraso da etapa 1 (${args.p_atraso} h) precisa ser menor que o da etapa 2 (${r.etapas[0].atraso_horas} h)`)
       r.modo = String(args.p_modo)
       r.atraso_horas = Number(args.p_atraso)
       r.texto = String(args.p_texto)

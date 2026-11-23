@@ -34,10 +34,16 @@ puro('confirmação seca fica em silêncio, inclusive só emoji', () => {
   for (const f of ['ok', 'Beleza', 'tá bom', 'blz', 'certo', 'entendi', 'show', 'tudo bem', 'fechado', 'ta bom beleza', '👍', '🙏🙏', 'ok 👍']) assert.equal(despedidaDe(f), 'silencio', f)
 })
 
+puro('gíria de confirmação também fica em silêncio: não gasta IA nem responde fora do assunto', () => {
+  for (const f of ['tmj', 'TMJ', 'tamo junto', 'pode crê', 'pode crer', 'sussa', 'suave', 'firmeza', 'maravilha', 'positivo', 'boa', 'show de bola', 'top demais', 'demais', 'gostei', 'ok tmj', 'beleza, pode crer', 'entendi, tmj']) assert.equal(despedidaDe(f), 'silencio', f)
+  // O "valeu" junto com a gíria segue como agradecimento (resposta de código, sem IA).
+  for (const f of ['valeu', 'tmj, valeu', 'blz valeu']) assert.equal(despedidaDe(f), 'agradecimento', f)
+})
+
 puro('NUNCA engole pedido, número ou dinheiro', () => {
   for (const f of [
     'ok, recebi 50', 'valeu, quanto tenho?', 'beleza, e o saldo', 'tá bom, paguei a luz', 'obrigado, gastei 6', 'ok pix 30', 'volto mais tarde pra pagar a luz',
-    'beleza, desfaz isso', 'certo, anota um recebimento', 'ok e a fatura', 'oi', 'bom dia', 'quanto sobrou', '', '   ',
+    'beleza, desfaz isso', 'certo, anota um recebimento', 'ok e a fatura', 'tmj, paguei a luz', 'pode crer, recebi 50', 'boa, quanto sobrou?', 'demais, e o saldo', 'tmj me manda o saldo', 'oi', 'bom dia', 'quanto sobrou', '', '   ',
     'uma frase muito longa que ninguém diria como confirmação seca porque passa de setenta caracteres com folga',
   ]) assert.equal(despedidaDe(f), null, JSON.stringify(f))
 })

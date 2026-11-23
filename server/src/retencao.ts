@@ -15,6 +15,9 @@
  *   número não oficial. Uma mensagem por pessoa por regra, para sempre (a reserva é um insert que só um processo ganha).
  * - Falhou o envio: solta a reserva e conta a falha. 3 falhas seguidas (qualquer pessoa) param os lembretes por 30 minutos.
  * - Toda mensagem termina com a linha do SAIR, que o admin não consegue tirar (ver `montarTextoRetencao`).
+ * - SEQUÊNCIA, até 3 mensagens por pessoa (24 h, 4 dias e 10 dias, ajustáveis): a etapa 1 é a regra; as etapas 2 e 3 nascem desligadas e só
+ *   saem para quem NÃO reagiu à anterior. O teto de 3 por pessoa (somando as duas regras) e o intervalo de 48 h entre avisos moram na função
+ *   SQL retencao_elegiveis, fonte única do servidor e da prévia. A etapa 1 sempre vem antes das de acompanhamento.
  * - Desligado por padrão. `ensaio` só escreve no log quem receberia. `piloto` manda ao Arthur UM exemplo por regra por dia, com o
  *   texto exato e para quem seria, sem reservar a chave do cliente. `todos` envia de verdade.
  *
@@ -41,13 +44,32 @@ const MAX_TEXTO = 700
 
 export const REGRAS: RegraRetencao[] = ['nunca_mandou', 'parou_de_usar']
 export const TIPO_AVISO: Record<RegraRetencao, 'retencao_nunca' | 'retencao_parou'> = { nunca_mandou: 'retencao_nunca', parou_de_usar: 'retencao_parou' }
-export const chaveRetencao = (regra: RegraRetencao, userId: string) => `ret:${regra}:${userId}`
+export type Etapa = 1 | 2 | 3
+export const ETAPAS: Etapa[] = [1, 2, 3]
+/** Etapa 1 mantém a chave de sempre (sem sufixo): os avisos já enviados continuam valendo. As etapas 2 e 3 levam ":2" e ":3". */
+export const chaveRetencao = (regra: RegraRetencao, userId: string, etapa: Etapa = 1) => `ret:${regra}:${userId}${etapa === 1 ? '' : `:${etapa}`}`
+
+/** Uma etapa de acompanhamento (2 ou 3). Só as LIGADAS chegam aqui. */
+export interface EtapaCfg {
+  etapa: 2 | 3
+  atraso_horas: number
+  texto: string
+}
 
 export interface ConfigRegra {
   regra: RegraRetencao
   modo: ModoRetencao
+  /** Atraso e texto da etapa 1 (a regra). */
   atraso_horas: number
   texto: string
+  /** As etapas 2 e 3 que estão LIGADAS, em ordem. Vazio quando só a etapa 1 vale. */
+  etapas?: EtapaCfg[]
+}
+
+/** A etapa pedida da regra: a 1 é a própria regra; as outras só existem se estiverem ligadas. */
+export function etapaDa(cfg: ConfigRegra, etapa: Etapa): { atraso_horas: number; texto: string } | null {
+  if (etapa === 1) return { atraso_horas: cfg.atraso_horas, texto: cfg.texto }
+  return (cfg.etapas ?? []).find((e) => e.etapa === etapa) ?? null
 }
 
 export interface Elegivel {
@@ -62,14 +84,14 @@ export interface Elegivel {
 export interface DepsRetencao {
   /** Lança se não conseguir ler (inclusive migration ainda não rodada): o ciclo termina sem enviar. */
   configs: () => Promise<ConfigRegra[]>
-  elegiveis: (regra: RegraRetencao, atrasoHoras: number) => Promise<Elegivel[]>
+  elegiveis: (regra: RegraRetencao, atrasoHoras: number, etapa: Etapa) => Promise<Elegivel[]>
   gatewayConectado: () => Promise<boolean>
   /** O envio automático mais recente de QUALQUER tipo, e quantos lembretes de retenção já saíram desde `inicioDoDia`. */
   movimento: (inicioDoDia: string) => Promise<{ ultimoEnvioEm: string | null; retencaoHoje: number }>
   /** Insere a chave e devolve `true` só se ESTA chamada inseriu: quem reserva primeiro é quem envia. */
-  reservar: (userId: string, regra: RegraRetencao, telefone: string) => Promise<boolean>
+  reservar: (userId: string, regra: RegraRetencao, etapa: Etapa, telefone: string) => Promise<boolean>
   /** `true` marca como enviado. `false` solta a reserva. */
-  concluir: (userId: string, regra: RegraRetencao, enviado: boolean) => Promise<void>
+  concluir: (userId: string, regra: RegraRetencao, etapa: Etapa, enviado: boolean) => Promise<void>
   enviar: (telefone: string, texto: string) => Promise<void>
   /** Um aviso de vencimento ou de fim do teste está no meio do ciclo: este minuto não envia. */
   outroCicloAndando: () => boolean
@@ -133,7 +155,7 @@ export const estado = {
   ultimoEnvioMs: 0,
   falhasPorPessoa: new Map<string, { dia: string; n: number }>(),
   ensaioVistoEm: new Map<string, number>(),
-  pilotoDia: new Map<RegraRetencao, string>(),
+  pilotoDia: new Map<string, string>(),
 }
 export function zerarEstado() {
   estado.rodando = false
@@ -184,68 +206,75 @@ export async function rodarRetencao(d: DepsRetencao, agora = new Date()): Promis
     }
     if (agora.getTime() - Math.max(noBanco, estado.ultimoEnvioMs) < ESPERA_MINUTOS * 60_000) return log
 
-    // 3) Escolhe UM lembrete (o do cliente que espera há mais tempo) e envia.
+    // 3) Escolhe UM lembrete e envia. A etapa 1 de todas as regras vem antes das etapas de acompanhamento (quem nunca foi chamado primeiro),
+    //    e dentro de cada etapa vai o que espera há mais tempo.
     const hoje = dataSP(agora)
-    for (const cfg of ativas) {
-      const lista = await d.elegiveis(cfg.regra, cfg.atraso_horas)
-      const candidatos = lista.filter((c) => {
-        const f = estado.falhasPorPessoa.get(c.user_id)
-        return !!c.telefone && !(f && f.dia === hoje && f.n >= MAX_FALHAS_POR_PESSOA_DIA)
-      })
+    for (const et of ETAPAS) {
+      for (const cfg of ativas) {
+        const passo = etapaDa(cfg, et)
+        if (!passo) continue
+        const rotulo = et === 1 ? cfg.regra : `${cfg.regra}, etapa ${et}`
+        const lista = await d.elegiveis(cfg.regra, passo.atraso_horas, et)
+        const candidatos = lista.filter((c) => {
+          const f = estado.falhasPorPessoa.get(c.user_id)
+          return !!c.telefone && !(f && f.dia === hoje && f.n >= MAX_FALHAS_POR_PESSOA_DIA)
+        })
 
-      if (cfg.modo === 'ensaio') {
-        for (const c of candidatos) {
-          const k = `${cfg.regra}:${c.user_id}`
-          if ((estado.ensaioVistoEm.get(k) ?? 0) > agora.getTime()) continue
-          estado.ensaioVistoEm.set(k, agora.getTime() + SILENCIO_ENSAIO_MS)
-          log.push(`ensaio (${cfg.regra}): enviaria a ${mascarar(c.telefone!)} (${primeiroNome(c.nome) || 'sem nome'}, ${c.horas} h)`)
-        }
-        continue
-      }
-
-      if (cfg.modo === 'piloto') {
-        if (estado.pilotoDia.get(cfg.regra) === hoje) continue
-        const alvo = candidatos[0]
-        const para = d.piloto.map((p) => p.replace(/\D/g, '')).find((p) => p.length >= 10)
-        if (!alvo || !para) {
-          if (alvo && !para) log.push(`piloto (${cfg.regra}): sem número do piloto configurado, nada enviado`)
+        if (cfg.modo === 'ensaio') {
+          for (const c of candidatos) {
+            const k = `${cfg.regra}:${et}:${c.user_id}`
+            if ((estado.ensaioVistoEm.get(k) ?? 0) > agora.getTime()) continue
+            estado.ensaioVistoEm.set(k, agora.getTime() + SILENCIO_ENSAIO_MS)
+            log.push(`ensaio (${rotulo}): enviaria a ${mascarar(c.telefone!)} (${primeiroNome(c.nome) || 'sem nome'}, ${c.horas} h)`)
+          }
           continue
         }
-        const exemplo = `[PILOTO] Este lembrete iria para ${primeiroNome(alvo.nome) || 'um cliente'} (${alvo.horas} h sem mensagem). Nada foi enviado a ele. O texto exato:\n\n${montarTextoRetencao(cfg.texto, alvo.nome)}`
-        await d.enviar(para, exemplo)
-        estado.pilotoDia.set(cfg.regra, hoje)
-        estado.ultimoEnvioMs = agora.getTime()
-        estado.enviados++
-        log.push(`piloto (${cfg.regra}): exemplo enviado a ${mascarar(para)}`)
-        return log // um envio por ciclo
-      }
 
-      // todos
-      for (const c of candidatos) {
-        const tel = c.telefone!
-        if (!(await d.reservar(c.user_id, cfg.regra, tel))) continue
-        try {
-          await d.enviar(tel, montarTextoRetencao(cfg.texto, c.nome))
-          await d.concluir(c.user_id, cfg.regra, true)
-          estado.enviados++
-          estado.falhasSeguidas = 0
-          estado.ultimoEnvioMs = agora.getTime()
-          log.push(`${cfg.regra}: enviado a ${mascarar(tel)}`)
-        } catch (e) {
-          await d.concluir(c.user_id, cfg.regra, false).catch((e2) => log.push(`não consegui soltar a reserva: ${(e2 as Error).message}`))
-          estado.falhas++
-          estado.falhasSeguidas++
-          estado.ultimoErro = erroSeguro((e as Error).message)
-          erro = estado.ultimoErro
-          const antes = estado.falhasPorPessoa.get(c.user_id)
-          estado.falhasPorPessoa.set(c.user_id, { dia: hoje, n: antes && antes.dia === hoje ? antes.n + 1 : 1 })
-          log.push(`falha ao enviar a ${mascarar(tel)}: ${estado.ultimoErro}`)
-          if (estado.falhasSeguidas >= FALHAS_SEGUIDAS_PARA_PARAR) {
-            estado.pausaAte = agora.getTime() + PAUSA_APOS_FALHAS_MS
-            log.push(`${estado.falhasSeguidas} falhas seguidas: lembretes parados por ${PAUSA_APOS_FALHAS_MS / 60_000} minutos`)
+        if (cfg.modo === 'piloto') {
+          const chaveDia = `${cfg.regra}:${et}`
+          if (estado.pilotoDia.get(chaveDia) === hoje) continue
+          const alvo = candidatos[0]
+          const para = d.piloto.map((p) => p.replace(/\D/g, '')).find((p) => p.length >= 10)
+          if (!alvo || !para) {
+            if (alvo && !para) log.push(`piloto (${rotulo}): sem número do piloto configurado, nada enviado`)
+            continue
           }
+          const exemplo = `[PILOTO] Este lembrete${et === 1 ? '' : ` (etapa ${et})`} iria para ${primeiroNome(alvo.nome) || 'um cliente'} (${alvo.horas} h sem mensagem). Nada foi enviado a ele. O texto exato:\n\n${montarTextoRetencao(passo.texto, alvo.nome)}`
+          await d.enviar(para, exemplo)
+          estado.pilotoDia.set(chaveDia, hoje)
+          estado.ultimoEnvioMs = agora.getTime()
+          estado.enviados++
+          log.push(`piloto (${rotulo}): exemplo enviado a ${mascarar(para)}`)
+          return log // um envio por ciclo
         }
-        return log // um envio por ciclo, deu certo ou não
+
+        // todos
+        for (const c of candidatos) {
+          const tel = c.telefone!
+          if (!(await d.reservar(c.user_id, cfg.regra, et, tel))) continue
+          try {
+            await d.enviar(tel, montarTextoRetencao(passo.texto, c.nome))
+            await d.concluir(c.user_id, cfg.regra, et, true)
+            estado.enviados++
+            estado.falhasSeguidas = 0
+            estado.ultimoEnvioMs = agora.getTime()
+            log.push(`${rotulo}: enviado a ${mascarar(tel)}`)
+          } catch (e) {
+            await d.concluir(c.user_id, cfg.regra, et, false).catch((e2) => log.push(`não consegui soltar a reserva: ${(e2 as Error).message}`))
+            estado.falhas++
+            estado.falhasSeguidas++
+            estado.ultimoErro = erroSeguro((e as Error).message)
+            erro = estado.ultimoErro
+            const antes = estado.falhasPorPessoa.get(c.user_id)
+            estado.falhasPorPessoa.set(c.user_id, { dia: hoje, n: antes && antes.dia === hoje ? antes.n + 1 : 1 })
+            log.push(`falha ao enviar a ${mascarar(tel)}: ${estado.ultimoErro}`)
+            if (estado.falhasSeguidas >= FALHAS_SEGUIDAS_PARA_PARAR) {
+              estado.pausaAte = agora.getTime() + PAUSA_APOS_FALHAS_MS
+              log.push(`${estado.falhasSeguidas} falhas seguidas: lembretes parados por ${PAUSA_APOS_FALHAS_MS / 60_000} minutos`)
+            }
+          }
+          return log // um envio por ciclo, deu certo ou não
+        }
       }
     }
   } catch (e) {
