@@ -598,6 +598,35 @@ await casoBanco('banco: o ciclo inteiro, de ponta a ponta, com o banco falso: en
   assert.equal(E.tabelas.avisos.length, 2)
 })
 
+/* ---------------- o aviso "a Granninha não está trabalhando" da aba Avisos ---------------- */
+
+const { cicloParado } = await import('../../admin/src/telas/avisosCiclo.ts')
+{
+  const agora = Date.parse('2026-11-23T01:06:00Z')
+  const minAtras = (m: number) => new Date(agora - m * 60_000).toISOString()
+  const reg = (modo: string, atualizadoHaMin: number) => ({ modo, atualizado_em: minAtras(atualizadoHaMin) })
+
+  await caso('aba Avisos: acabou de ligar a regra e o servidor ainda não marcou o ciclo: NÃO alerta (o falso alarme que o Arthur viu)', () => {
+    assert.equal(cicloParado([reg('todos', 1), reg('desligado', 60 * 24)], null, agora), false, 'ligada há 1 minuto, sem carimbo')
+    assert.equal(cicloParado([reg('todos', 2), reg('desligado', 60 * 24)], minAtras(60 * 24), agora), false, 'ligada há 2 minutos, carimbo de ontem')
+  })
+
+  await caso('aba Avisos: regra ligada há tempo e o servidor sem marcar o ciclo: alerta', () => {
+    assert.equal(cicloParado([reg('todos', 10)], null, agora), true, 'ligada há 10 minutos e nunca marcou')
+    assert.equal(cicloParado([reg('ensaio', 600)], minAtras(8), agora), true, 'carimbo de 8 minutos atrás')
+  })
+
+  await caso('aba Avisos: servidor marcando o ciclo em dia, ou tudo desligado: não alerta', () => {
+    assert.equal(cicloParado([reg('todos', 600)], minAtras(1), agora), false)
+    assert.equal(cicloParado([reg('desligado', 600), reg('desligado', 600)], null, agora), false, 'tudo desligado não precisa de ciclo')
+  })
+
+  await caso('aba Avisos: data ilegível conta como antiga (na dúvida alerta, não cala)', () => {
+    assert.equal(cicloParado([{ modo: 'todos', atualizado_em: 'lixo' }], null, agora), true)
+    assert.equal(cicloParado([reg('todos', 600)], 'lixo', agora), true)
+  })
+}
+
 console.log(`\n${ok} casos do motor ok${falhas ? `, ${falhas} falha(s)` : ''}`)
 // O fim() do banco falso só conta os casos dele: as falhas do motor (contador local) também precisam derrubar o processo.
 if (falhas) process.exit(1)
