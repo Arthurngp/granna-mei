@@ -72,9 +72,6 @@ export default function MeuMei() {
               {situacao.texto}
             </div>
           </div>
-          <p className="suave pq" style={{ marginTop: 12 }}>
-            Eu aviso no WhatsApp quando seu faturamento chegar a 70%, 90% e 100% do limite.
-          </p>
         </section>
 
         <section className="card g-7">
