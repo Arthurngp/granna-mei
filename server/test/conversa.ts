@@ -420,4 +420,25 @@ await caso('quem já estava negativo não é avisado de novo a cada registro', a
   assert.doesNotMatch(r, /negativo/, 'já era negativo antes desta mensagem')
 })
 
+/* ---------- "paguei X todo mês" e valores diferentes ---------- */
+
+await caso('"paguei o aluguel, 900, todo dia N" (N já chegou): registra a fixa e o pagamento deste mês', async () => {
+  const dia = Number(HOJE.slice(8, 10))
+  ia.regras = [[/aluguel/, acoes(acao({ tipo_acao: 'recorrente', valor: 900, descricao: 'Aluguel do ponto', dia_do_mes: dia, categoria_id: null, meio: 'pix' }))]]
+  const r = await msg(`paguei o aluguel do ponto, 900, todo dia ${dia}`)
+  assert.match(r, /Anotei a conta fixa: Aluguel do ponto de R\$ 900,00 todo dia/, r)
+  assert.match(r, /saiu R\$ 900,00/, 'e o pagamento deste mês também')
+  const pago = lancsU1().filter((l) => Number(l.valor) === 900)
+  assert.equal(pago.length, 1)
+  assert.equal(pago[0].data, `${HOJE.slice(0, 7)}-${String(Math.min(dia, 28)).padStart(2, '0')}`)
+})
+
+await caso('o prompt manda uma ação por valor quando os valores são diferentes, e soma só quantidade vezes o mesmo preço', async () => {
+  await msg('oi')
+  ia.regras = [[/^.*$/, SEM_ACAO]]
+  await msg('vendi um corte de 35 e outro de 40')
+  assert.match(ia.ultimoSistema, /Valores DIFERENTES citados um a um \("um de 35, outro de 40 e outro de 50"\) são uma ação para cada valor, nunca uma soma\./)
+  assert.match(ia.ultimoSistema, /quantidade vezes o MESMO preço \("3 cortes de 50", "2 escovas de 60"\) é UMA ação com o total/)
+})
+
 fim()

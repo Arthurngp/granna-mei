@@ -63,6 +63,22 @@ caso('sem nome de conta em aberto, ou com o mesmo valor, nada muda', () => {
   assert.equal(igual.acoes[0].baixaDiferente, undefined)
   assert.equal(igual.acoes[0].tipo_acao, 'baixar_conta')
 })
+caso('"paguei o aluguel, 900, todo dia 10" (hoje é 15): a conta fixa E o pagamento deste mês, no dia 10', () => {
+  const r = conferir('paguei o aluguel do ponto, 900, dia 10 de todo mês', CTX, resp(acao({ tipo_acao: 'recorrente', valor: 900, descricao: 'Aluguel do ponto', dia_do_mes: 10, meio: 'pix' })))
+  assert.equal(r.perguntar, null)
+  assert.deepEqual(r.acoes.map((x) => x.tipo_acao), ['recorrente', 'lancamento'])
+  assert.equal(r.acoes[1].valor, 900)
+  assert.equal(r.acoes[1].data, '2026-11-10', 'o pagamento fica no dia combinado deste mês')
+  assert.equal(r.acoes[1].movimento, 'saida')
+})
+caso('dia que ainda não chegou, ou frase sem "paguei": só a conta fixa', () => {
+  const futuro = conferir('paguei o aluguel, 900, todo dia 20', CTX, resp(acao({ tipo_acao: 'recorrente', valor: 900, descricao: 'Aluguel', dia_do_mes: 20, meio: 'pix' })))
+  assert.deepEqual(futuro.acoes.map((x) => x.tipo_acao), ['recorrente'], 'dia 20 ainda não passou')
+  const semVerbo = conferir('aluguel 900 todo dia 10', CTX, resp(acao({ tipo_acao: 'recorrente', valor: 900, descricao: 'Aluguel', dia_do_mes: 10, meio: 'pix' })))
+  assert.deepEqual(semVerbo.acoes.map((x) => x.tipo_acao), ['recorrente'], 'sem "paguei" é só o cadastro da conta')
+  const hoje = conferir('paguei a internet 100 todo dia 15', CTX, resp(acao({ tipo_acao: 'recorrente', valor: 100, descricao: 'Internet', dia_do_mes: 15, meio: 'pix' })))
+  assert.deepEqual(hoje.acoes.map((x) => x.tipo_acao), ['recorrente', 'lancamento'], 'o dia de hoje já conta')
+})
 caso('gasto pessoal cai na retirada do dono', () => {
   assert.equal(conferir('mercado de casa 230', CTX, resp(acao({ valor: 230, pessoal: true, categoria_id: 'alimentacao' }))).acoes[0].categoria_id, 'retirada')
 })

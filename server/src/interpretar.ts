@@ -191,7 +191,7 @@ REGRAS
 - meio: como a pessoa disse que pagou ou recebeu. "pix" → pix; "transferência", "TED" → transferencia; "débito" → debito; "boleto" → boleto; "dinheiro", "em espécie", "na mão" → dinheiro; "cartão de crédito", "crédito", "no cartão", "passei no cartão" → credito; "maquininha" → maquininha. Sem pista → null. NUNCA adivinhe o meio.
 - carteira_id: SÓ se a pessoa citou o nome de uma carteira da lista ("no Nubank", "do Itaú", "no cartão Inter", "na XP"). Senão null. Não escolha carteira pelo meio: o sistema faz isso.
 - descricao: curta, do jeito que a pessoa diria ("Conta de luz", "Corte · Juliana"). Sem valor na descrição.
-- Várias coisas na mesma mensagem viram várias ações. Mas quantidade vezes preço ("3 cortes de 50", "2 escovas de 60") é UMA ação com o total.
+- Várias coisas na mesma mensagem viram várias ações. Mas quantidade vezes o MESMO preço ("3 cortes de 50", "2 escovas de 60") é UMA ação com o total. Valores DIFERENTES citados um a um ("um de 35, outro de 40 e outro de 50") são uma ação para cada valor, nunca uma soma.
 - Quando a pessoa cita um serviço ou produto que o negócio dela vende, com valor, é dinheiro que ENTROU (ex.: "corte masc 35 pix", "escova 55").
 - Se a mensagem tem o texto original seguido de uma linha "Correção: ...", aplique a correção ao texto original e devolva intencao "acoes" com as ações JÁ CORRIGIDAS (é um registro novo, não outro pedido de correção).
 - Se a mensagem tem o texto original seguido de "(resposta para ...)", junte as duas partes num registro só. Mas se a resposta não tem nada a ver com a pergunta (é outro registro completo, com o próprio valor, ou uma pergunta), registre só a resposta e ignore o texto original.
@@ -331,6 +331,24 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
     r = { ...r, acoes: [{ ...bate[0], movimento: bate[0].tipo_acao === 'baixar_conta' ? bate[0].movimento : d.movimento }] }
   }
   if (!r.acoes.length) return { acoes: [], perguntar: 'Não entendi o que registrar. Me conta de novo, com o valor?' }
+  // "Paguei o aluguel, 900, todo dia 10" é a conta fixa E o pagamento deste mês, quando o dia já passou. Só a fixa só criava os vencimentos
+  // de hoje em diante: o pagamento deste mês não entrava em lugar nenhum. Dia que ainda não chegou fica só como fixa.
+  {
+    const fala = tira(texto)
+    const pagou = /\b(paguei|pago|quitei)\b/.test(fala)
+    const recebeu = /\b(recebi|recebo)\b/.test(fala)
+    const diaHoje = Number(c.hoje.slice(8, 10))
+    const expandidas: AcaoIA[] = []
+    for (const a of r.acoes) {
+      expandidas.push(a)
+      const dia = a.dia_do_mes && a.dia_do_mes >= 1 && a.dia_do_mes <= 31 ? Math.min(a.dia_do_mes, 28) : 0
+      const verbo = (a.movimento ?? 'saida') === 'saida' ? pagou : recebeu
+      if (a.tipo_acao === 'recorrente' && a.valor !== null && a.valor > 0 && dia && dia <= diaHoje && verbo) {
+        expandidas.push({ ...a, tipo_acao: 'lancamento', dia_do_mes: null, parcelas: null, conta_id: null, data: `${c.hoje.slice(0, 7)}-${String(dia).padStart(2, '0')}` })
+      }
+    }
+    r = { ...r, acoes: expandidas }
+  }
   const perguntarMeio = op.perguntarMeio !== false
   const padrao = c.carteiras.find((x) => x.padrao && x.tipo !== 'cartao' && x.tipo !== 'investimento')?.id ?? c.carteiras.find((x) => x.tipo !== 'cartao' && x.tipo !== 'investimento')?.id ?? c.carteiras[0]?.id ?? ''
   const cat = (id: string | null) => c.categorias.find((x) => x.id === id)
