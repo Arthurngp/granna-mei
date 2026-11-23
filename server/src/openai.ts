@@ -1,5 +1,5 @@
 import { env } from './env.ts'
-import { classificarFalhaIA, ErroIA, registrarFalhaIA, registrarOkIA, valeTentarDeNovoIA } from './ia-estado.ts'
+import { classificarFalhaIA, ErroIA, registrarFalhaIA, registrarOkIA, valeTentarDeNovoIA, type TipoFalhaIA } from './ia-estado.ts'
 
 export const MODELO = process.env.OPENAI_MODELO ?? 'gpt-5.4-mini'
 export const MODELO_AUDIO = process.env.OPENAI_MODELO_AUDIO ?? 'gpt-4o-mini-transcribe'
@@ -35,6 +35,36 @@ async function pedir(caminho: string, init: RequestInit, tentativas = 3): Promis
     }
     registrarFalhaIA(tipo, corpo)
     throw new ErroIA(tipo, `OpenAI ${r.status} (${tipo}): ${corpo}`, r.status)
+  }
+}
+
+/**
+ * Chamada mínima só para saber se a IA responde (sonda, ver ia-sonda.ts). NÃO passa por `pedir`: não mexe no estado da IA (quem decide é a sonda,
+ * com confirmação) e não devolve uso para o custo por cliente. Uma mensagem curta e poucos tokens de saída; exige crédito de verdade, ao contrário
+ * de listar modelos, que responderia mesmo com a cota zerada.
+ */
+export async function chamadaMinimaIA(): Promise<{ ok: true; uso: Uso } | { ok: false; tipo: TipoFalhaIA; detalhe: string }> {
+  let chave: string
+  try {
+    chave = env('OPENAI_API_KEY')
+  } catch (e) {
+    return { ok: false, tipo: 'sem_chave', detalhe: (e as Error).message }
+  }
+  try {
+    const r = await fetch(BASE + '/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${chave}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: MODELO, reasoning_effort: 'low', max_completion_tokens: 16, messages: [{ role: 'user', content: 'ok' }] }),
+      signal: AbortSignal.timeout(20_000),
+    })
+    if (r.ok) {
+      const j = (await r.json()) as { usage?: { prompt_tokens: number; completion_tokens: number } }
+      return { ok: true, uso: { entrada: j.usage?.prompt_tokens ?? 0, saida: j.usage?.completion_tokens ?? 0 } }
+    }
+    const corpo = (await r.text()).slice(0, 300)
+    return { ok: false, tipo: classificarFalhaIA(r.status, corpo), detalhe: `OpenAI ${r.status}: ${corpo}` }
+  } catch (e) {
+    return { ok: false, tipo: 'fora', detalhe: (e as Error).message }
   }
 }
 
