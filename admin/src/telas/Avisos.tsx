@@ -6,6 +6,7 @@ import { dataHora, Falha } from './comum'
 import { Cartao, Pagina, type HeadDef } from './visao/layout'
 import { Ausente, n } from './visao/usar'
 import { AvisosAcompanhar } from './AvisosAcompanhar'
+import { cicloParado } from './avisosCiclo'
 
 type Regra = 'nunca_mandou' | 'parou_de_usar'
 type Modo = 'desligado' | 'ensaio' | 'piloto' | 'todos'
@@ -123,7 +124,7 @@ export function Avisos() {
       ]
     : undefined
 
-  const semCiclo = cfg && ligadas > 0 && (!cfg.ciclo_em || Date.now() - new Date(cfg.ciclo_em).getTime() > 5 * 60_000)
+  const semCiclo = cfg ? cicloParado(cfg.regras, cfg.ciclo_em) : false
 
   return (
     <Pagina titulo="Avisos" subtitulo="Lembretes automáticos para quem não está usando a Granninha" heads={heads}>
@@ -149,7 +150,7 @@ export function Avisos() {
       {semCiclo && (
         <div className="vaviso ruim" role="alert" style={{ gridColumn: '1 / -1' }}>
           <TriangleAlert size={20} style={{ flex: 'none' }} />
-          <span>Há regra ligada, mas o servidor não rodou o ciclo nos últimos 5 minutos. Confira se a Granninha está no ar na aba Granninha.</span>
+          <span>Tem regra ligada há mais de 5 minutos, mas a Granninha não avisou que está trabalhando nos lembretes. Confira se ela está no ar na aba Granninha.</span>
         </div>
       )}
 
