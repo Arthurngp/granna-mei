@@ -73,6 +73,15 @@ export function registrarFalhaIA(tipo: TipoFalhaIA, mensagem: string) {
   estado.falhas++
 }
 
+/**
+ * A sonda (ia-sonda.ts) viu a IA responder: encerra o problema, mas NÃO conta como chamada real nem muda `ultimo_ok`, que é o que
+ * diz se há tráfego de verdade provando que a IA responde (e é por ele que a sonda se dispensa).
+ */
+export function registrarOkSonda() {
+  estado.tipo = null
+  estado.desde = null
+}
+
 export function registrarOkIA() {
   estado.ultimoOk = new Date().toISOString()
   estado.chamadasOk++
