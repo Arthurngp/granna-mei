@@ -32,7 +32,7 @@ async function caso(nome: string, fn: () => Promise<void>) {
 const em = (hhmm: string, dia = '2026-11-23') => new Date(`${dia}T${hhmm}:00-03:00`)
 const minAntes = (d: Date, min: number) => new Date(d.getTime() - min * 60_000).toISOString()
 
-const pedido = (n: number): Pedido => ({ id: `p${n}`, user_id: `u${n}`, texto: `Oi, Pessoa${n}! Aqui é da Granninha. Vi que você já conectou seu WhatsApp, mas ainda não mandou o primeiro lançamento.` })
+const pedido = (n: number, frio = false): Pedido => ({ id: `p${n}`, user_id: `u${n}`, contato_frio: frio, texto: `Oi, Pessoa${n}! Aqui é da Granninha. Vi que você já conectou seu WhatsApp, mas ainda não mandou o primeiro lançamento.` })
 
 interface Opt {
   fila?: Pedido[]
@@ -52,7 +52,7 @@ function fake(opt: Opt = {}) {
   const fila = [...(opt.fila ?? [])]
   const enviados: { tel: string; texto: string }[] = []
   const resultados: { id: string; ok: boolean; erro?: string }[] = []
-  const chamadas = { gateway: 0, reservar: 0, enviar: 0, apto: 0 }
+  const chamadas = { gateway: 0, reservar: 0, enviar: 0, apto: 0, forcar: [] as boolean[] }
   let ultimo: string | null = opt.ultimoEnvioEm ?? null
   let relogio = new Date()
   const deps: Deps = {
@@ -61,8 +61,9 @@ function fake(opt: Opt = {}) {
       if (opt.proximoErro) throw new Error('tabela não existe')
       return fila[0] ?? null
     },
-    apto: async (): Promise<Alvo> => {
+    apto: async (_u, forcar): Promise<Alvo> => {
       chamadas.apto++
+      chamadas.forcar.push(forcar)
       return { telefone: opt.recusa ? null : '558199990001', nome: 'Pessoa Silva', recusa: opt.recusa ?? null }
     },
     gatewayConectado: async () => {
@@ -268,6 +269,52 @@ await caso('dois ciclos ao mesmo tempo: o segundo pula, e a pessoa recebe uma ve
   assert.ok([...a, ...b].some((l) => /ainda em andamento/.test(l)))
 })
 
+/* ---------------- contato frio, autorizado pelo admin ---------------- */
+
+await caso('contato frio autorizado: a conferência de última hora usa A MESMA autorização do pedido (senão recusaria o que o admin aprovou)', async () => {
+  const f = fake({ fila: [pedido(1, true)] })
+  await f.rodar(em('10:00'))
+  assert.deepEqual(f.chamadas.forcar, [true])
+  assert.equal(f.enviados.length, 1)
+  assert.ok(f.enviados[0].texto.endsWith(R.RODAPE_SAIR), 'a linha do SAIR continua sendo a última')
+})
+
+await caso('pedido comum NÃO leva autorização: a conferência é a de sempre', async () => {
+  const f = fake({ fila: [pedido(1)] })
+  await f.rodar(em('10:00'))
+  assert.deepEqual(f.chamadas.forcar, [false])
+})
+
+await caso('uma autorização vale só para aquele pedido: o pedido seguinte, comum, é conferido sem ela', async () => {
+  const f = fake({ fila: [pedido(1, true), pedido(2)] })
+  await f.rodar(em('10:00'))
+  await f.rodar(em('10:05'))
+  assert.deepEqual(f.chamadas.forcar, [true, false])
+})
+
+await caso('autorizado ou não, quem respondeu SAIR esperando na fila continua barrado e a fila segue', async () => {
+  const f = fake({ fila: [pedido(1, true)], recusa: 'esta pessoa respondeu SAIR e não quer receber mensagem' })
+  await f.rodar(em('10:00'))
+  assert.equal(f.enviados.length, 0)
+  assert.equal(f.chamadas.reservar, 0)
+  assert.match(f.resultados[0].erro ?? '', /respondeu SAIR/)
+})
+
+await caso('contato frio autorizado respeita as MESMAS travas: espera de 5 minutos, janela e WhatsApp', async () => {
+  const quando = em('10:00')
+  const espera = fake({ fila: [pedido(1, true)], ultimoEnvioEm: minAntes(quando, 3) })
+  await espera.rodar(quando)
+  assert.equal(espera.enviados.length, 0, 'espera')
+  M.zerarEstadoManual()
+  const noite = fake({ fila: [pedido(1, true)] })
+  await noite.rodar(em('20:00'))
+  assert.equal(noite.enviados.length, 0, 'fora da janela')
+  M.zerarEstadoManual()
+  const off = fake({ fila: [pedido(1, true)], conectado: false })
+  await off.rodar(quando)
+  assert.equal(off.enviados.length, 0, 'WhatsApp fora')
+})
+
 /* ---------------- SAIR e falhas ---------------- */
 
 await caso('a pessoa respondeu SAIR esperando na fila: confere de novo na hora, não envia, não reserva e diz o motivo', async () => {
@@ -324,6 +371,13 @@ await casoBanco('banco: proximo devolve o pedido "fila" mais antigo e ignora os 
   assert.equal(p?.id, 'p2')
   E.tabelas.envios_manuais = [linhaPedido(1, { status: 'enviando' })]
   assert.equal(await depsBanco().deps.proximo(), null)
+})
+
+await casoBanco('banco: o pedido lido da fila traz se foi autorizado como contato frio (e, sem a coluna, vale como não autorizado)', async () => {
+  E.tabelas.envios_manuais = [linhaPedido(1, { contato_frio: true })]
+  assert.equal((await depsBanco().deps.proximo())?.contato_frio, true)
+  E.tabelas.envios_manuais = [linhaPedido(2)]
+  assert.equal((await depsBanco().deps.proximo())?.contato_frio, false, 'sem autorização gravada, não é contato frio autorizado')
 })
 
 await casoBanco('banco: reservar é atômico e grava o envio em avisos (tipo retencao_manual) para os lembretes enxergarem', async () => {
@@ -424,13 +478,14 @@ await casoBanco('banco: apto lê pela função SQL, normaliza o telefone e, sem 
     chamadas.push([nome, args])
     return { data: [{ telefone: '+55 (81) 99999-0001', nome: null, recusa: null }], error: null }
   }
-  const a = await depsBanco({ rpc }).deps.apto('u1')
-  assert.deepEqual(chamadas, [['envio_manual_apto', { p_user: 'u1' }]])
+  const a = await depsBanco({ rpc }).deps.apto('u1', false)
+  await depsBanco({ rpc }).deps.apto('u2', true)
+  assert.deepEqual(chamadas, [['envio_manual_apto', { p_user: 'u1', p_forcar: false }], ['envio_manual_apto', { p_user: 'u2', p_forcar: true }]], 'a autorização do pedido vai para a função SQL')
   assert.deepEqual(a, { telefone: '5581999990001', nome: '', recusa: null })
-  const vazio = await depsBanco({ rpc: async () => ({ data: [], error: null }) }).deps.apto('u1')
+  const vazio = await depsBanco({ rpc: async () => ({ data: [], error: null }) }).deps.apto('u1', false)
   assert.equal(vazio.telefone, null)
   assert.match(vazio.recusa ?? '', /não consegui conferir/)
-  await assert.rejects(depsBanco({ rpc: async () => ({ data: null, error: { message: 'boom' } }) }).deps.apto('u1'), /conferir a pessoa/)
+  await assert.rejects(depsBanco({ rpc: async () => ({ data: null, error: { message: 'boom' } }) }).deps.apto('u1', false), /conferir a pessoa/)
 })
 
 await casoBanco('banco: fila fora do ar lança, e por isso o ciclo não envia', async () => {

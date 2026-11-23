@@ -11,6 +11,7 @@
  * - EM DÚVIDA, NÃO ENVIA: qualquer erro de leitura encerra o ciclo sem enviar. Um pedido que falha NÃO é refeito sozinho (a mensagem pode ter
  *   saído): o admin vê "falhou" e decide.
  * - Antes de enviar, confere DE NOVO se a pessoa pode receber (pode ter respondido SAIR esperando na fila). Recusado vira "falhou" com o motivo.
+ *   Contato frio (quem nunca escreveu para o número atual) só sai se o admin autorizou AQUELE pedido (contato_frio); o automático nunca o faz.
  * - A linha do SAIR é acrescentada aqui, sempre (montarTextoRetencao), e cada envio é gravado em `avisos` (tipo retencao_manual) para os
  *   lembretes automáticos enxergarem: contam na espera de 3 minutos e no intervalo de 48 horas por pessoa.
  */
@@ -27,6 +28,8 @@ export interface PedidoManual {
   id: string
   user_id: string
   texto: string
+  /** O admin autorizou, de propósito, o envio para quem nunca escreveu para o número atual. A autorização vale só para este pedido. */
+  contato_frio?: boolean
 }
 export interface AlvoManual {
   telefone: string | null
@@ -41,7 +44,8 @@ export interface DepsManual {
   liberarPresos: () => Promise<void>
   /** O pedido mais antigo da fila, ou null. Lança se não conseguir ler (inclusive migration não aplicada). */
   proximo: () => Promise<PedidoManual | null>
-  apto: (userId: string) => Promise<AlvoManual>
+  /** `forcar`: repete a autorização que o admin deu ao pedir (só libera o contato frio; SAIR, exclusão e o resto continuam recusando). */
+  apto: (userId: string, forcar: boolean) => Promise<AlvoManual>
   gatewayConectado: () => Promise<boolean>
   /** O envio mais recente de QUALQUER tipo e quantos manuais já saíram desde `inicioDoDia`. */
   movimento: (inicioDoDia: string) => Promise<{ ultimoEnvioEm: string | null; manuaisHoje: number }>
@@ -107,7 +111,7 @@ export async function rodarEnvioManual(d: DepsManual, agora = new Date()): Promi
     if (agora.getTime() - Math.max(noBanco, estadoManual.ultimoEnvioMs) < ESPERA_MANUAL_MINUTOS * 60_000) return log
 
     // Confere DE NOVO se a pessoa pode receber: ela pode ter respondido SAIR enquanto esperava.
-    const alvo = await d.apto(pedido.user_id)
+    const alvo = await d.apto(pedido.user_id, !!pedido.contato_frio)
     if (alvo.recusa || !alvo.telefone) {
       const motivo = alvo.recusa ?? 'sem telefone para responder'
       await d.concluir(pedido, { ok: false, erro: `não enviado: ${motivo}` })
@@ -122,7 +126,7 @@ export async function rodarEnvioManual(d: DepsManual, agora = new Date()): Promi
       estadoManual.enviados++
       estadoManual.falhasSeguidas = 0
       estadoManual.ultimoEnvioMs = agora.getTime()
-      log.push(`manual: enviado a ${mascarar(alvo.telefone)}`)
+      log.push(`manual: enviado a ${mascarar(alvo.telefone)}${pedido.contato_frio ? ' (contato frio, autorizado pelo admin)' : ''}`)
     } catch (e) {
       const msg = erroSeguro((e as Error).message)
       await d.concluir(pedido, { ok: false, erro: msg }).catch((e2) => log.push(`não consegui registrar a falha: ${(e2 as Error).message}`))

@@ -37,15 +37,15 @@ export function depsEnvioManualDoBanco(sb: SupabaseClient, enviar: (telefone: st
     },
 
     async proximo() {
-      const { data, error } = await sb.from('envios_manuais').select('id, user_id, texto').eq('status', 'fila').order('pedido_em', { ascending: true }).order('id', { ascending: true }).limit(1)
+      const { data, error } = await sb.from('envios_manuais').select('id, user_id, texto, contato_frio').eq('status', 'fila').order('pedido_em', { ascending: true }).order('id', { ascending: true }).limit(1)
       if (semTabela(error)) return null
       falha('ler a fila', error)
       const l = ((data ?? []) as PedidoManual[])[0]
-      return l ?? null
+      return l ? { id: l.id, user_id: l.user_id, texto: l.texto, contato_frio: !!l.contato_frio } : null
     },
 
-    async apto(userId) {
-      const { data, error } = await sb.rpc('envio_manual_apto', { p_user: userId })
+    async apto(userId, forcar) {
+      const { data, error } = await sb.rpc('envio_manual_apto', { p_user: userId, p_forcar: forcar })
       falha('conferir a pessoa', error)
       const l = ((data ?? []) as { telefone: string | null; nome: string | null; recusa: string | null }[])[0]
       // Sem resposta clara, recusa: em dúvida não envia.
