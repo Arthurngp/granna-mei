@@ -11,14 +11,15 @@
  *   npx tsx test/conversa.ts
  */
 import assert from 'node:assert/strict'
-import { acao, acoes, caso, E, fim, HOJE, ia, lancsU1, msg, msgPdf, NUM, SEM_ACAO, somaDias, U1 } from './_falsos.ts'
+import { acao, acoes, caso, E, fim, HOJE, ia, lancsU1, msg, msgFoto, msgPdf, NUM, SEM_ACAO, somaDias, U1 } from './_falsos.ts'
 
 const { construirHabitos, habitoDeCarteira } = await import('../src/interpretar.ts')
 const { reconhecer } = await import('../src/consultas.ts')
 const { ehApagarTudo, valorSozinho } = await import('../src/atalhos.ts')
 const { ehAssuntoDaConta, MANUAL } = await import('../src/ajuda.ts')
 const { despedidaDe } = await import('../src/despedida.ts')
-const { MSG, ABRE_SAUDACAO } = await import('../src/voz.ts')
+const { MSG, ABRE_SAUDACAO, confirma } = await import('../src/voz.ts')
+const { limparNomeDeDocumento } = await import('../src/midia.ts')
 
 let k = 0
 const hist = (tipo: 'entrada' | 'saida', descricao: string, carteira_id: string, dias: number, categoria_id = 'material', valor = 50) =>
@@ -267,6 +268,37 @@ await caso('fatura com DOIS cartões: pergunta o número, e o "sim" ainda pergun
   const c = await msg('2')
   assert.match(c, /Importei 3 compras no Nubank Cartão/, c)
   assert.equal(lancsU1().filter((l) => l.carteira_id === 'cartao2').length, 3)
+})
+
+/* ---------- nome de comprovante ---------- */
+
+await caso('puro: nome de comprovante sem LTDA/SA e sem GRITAR, e nome normal fica como está', async () => {
+  assert.equal(limparNomeDeDocumento('CEMIG DISTRIBUICAO SA'), 'Cemig Distribuicao')
+  assert.equal(limparNomeDeDocumento('DISTRIBUIDORA SILVA LTDA'), 'Distribuidora Silva')
+  assert.equal(limparNomeDeDocumento('PADARIA DA ESQUINA ME'), 'Padaria da Esquina')
+  assert.equal(limparNomeDeDocumento('COMERCIAL JOSE E FILHOS S/A'), 'Comercial Jose e Filhos')
+  assert.equal(limparNomeDeDocumento('TARIFA PACOTE SERVICOS'), 'Tarifa Pacote Servicos')
+  assert.equal(limparNomeDeDocumento('CEMIG'), 'Cemig', 'sigla longa em maiúsculas também ganha caixa normal')
+  for (const ok of ['Juliana Souza', 'iFood *Restaurante Sabor', 'Posto Shell', 'Amazon Marketplace 2/4', 'Casa', 'BB']) assert.equal(limparNomeDeDocumento(ok), ok, `"${ok}" não é mexido`)
+})
+
+await caso('a dica de categoria não repete razão social: nome longo vira "esse tipo de gasto"', async () => {
+  assert.match(confirma.dicaCategoria('Barbante'), /Quer uma categoria só pra Barbante\? É só responder: criar categoria Barbante/)
+  const longa = confirma.dicaCategoria('Cemig Distribuicao Energia')
+  assert.match(longa, /categoria própria pra esse tipo de gasto/)
+  assert.doesNotMatch(longa, /Cemig/)
+})
+
+await caso('foto de boleto da CEMIG: o cartão mostra "Cemig Distribuicao", não a razão social em maiúsculas', async () => {
+  ia.documento = { tipo: 'comprovante', meio: 'boleto', vencimento: null, resumo: 'Boleto pago', transacoes: [{ descricao: 'CEMIG DISTRIBUICAO SA', valor: 189.9, movimento: 'saida', data: null }] }
+  // A regra só casa se o texto que chegou na IA de interpretação já tem o nome limpo.
+  ia.regras = [[/de Cemig Distribuicao /, acoes(acao({ valor: 189.9, descricao: 'Cemig Distribuicao', categoria_id: null, meio: 'boleto', carteira_id: 'nubank' }))]]
+  const r = await msgFoto('cemig.png')
+  assert.match(r.resposta, /saiu R\$ 189,90/, r.resposta)
+  assert.match(r.resposta, /Cemig Distribuicao · /, r.resposta)
+  assert.doesNotMatch(r.resposta, /CEMIG DISTRIBUICAO SA/)
+  assert.match(r.resposta, /Quer uma categoria só pra Cemig Distribuicao\?/, 'a dica usa o nome limpo (curto o bastante)')
+  assert.doesNotMatch(r.resposta, /CEMIG|SA\?/, 'nenhum rastro da razão social em maiúsculas')
 })
 
 fim()

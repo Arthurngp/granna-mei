@@ -52,7 +52,8 @@ export const confirma = {
   pagouFatura: (v: string) => `Anotei o pagamento da fatura: ${v}.`,
   compraCartao: (v: string) => `Anotei a compra no cartão: ${v}.`,
   contaDoHabito: (conta: string) => `Usei o ${conta}, como das outras vezes. Se foi em outra conta, é só me dizer.`,
-  dicaCategoria: (desc: string) => `Ficou em "Outros". Quer uma categoria só pra ${desc}? É só responder: criar categoria ${desc}`,
+  /** Nome longo (razão social de comprovante) não vira categoria: a dica fala do tipo de gasto em vez de repetir o nome. */
+  dicaCategoria: (desc: string) => (desc.length > 24 ? 'Ficou em "Outros". Quer uma categoria própria pra esse tipo de gasto? É só responder: criar categoria (nome)' : `Ficou em "Outros". Quer uma categoria só pra ${desc}? É só responder: criar categoria ${desc}`),
   conta: (tipo: 'pagar' | 'receber', v: string) => (tipo === 'receber' ? `Guardei a conta: ${v} a receber.` : `Guardei a conta: ${v} a pagar.`),
   baixa: (tipo: 'pagar' | 'receber', v: string) => (tipo === 'receber' ? `Boa, recebeu ${v}.` : `Conta paga: ${v}.`),
 }
