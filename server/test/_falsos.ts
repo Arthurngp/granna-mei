@@ -244,8 +244,15 @@ const iaServer = createServer(async (req, res) => {
 
 /* ---------------- gateway falso (só a mídia recebida) ---------------- */
 
+/** Mídia de verdade para a auditoria com IA real: nome do arquivo → tipo e bytes. Sem isso o gateway devolve bytes falsos. */
+export const midia: Record<string, { tipo: string; dados: Buffer }> = {}
 const gw = createServer((req, res) => {
   const u = req.url ?? ''
+  const real = midia[u.split('/').pop() ?? '']
+  if (real && /^\/api\/media\//.test(u)) {
+    res.writeHead(200, { 'Content-Type': real.tipo })
+    return res.end(real.dados)
+  }
   if (/^\/api\/media\//.test(u)) {
     res.writeHead(200, { 'Content-Type': u.endsWith('.ogg') ? 'audio/ogg' : 'image/jpeg' })
     return res.end(Buffer.from(u.endsWith('.ogg') ? 'audio-falso' : 'imagem-falsa'))
@@ -344,6 +351,14 @@ const evMidia = (tipo: 'AUDIO' | 'IMAGE', arquivo: string, caption = '') => ({
 /** Áudio: o conteúdo vem de `ia.transcricao`. */
 export const msgAudio = async (arquivo = 'a1.ogg') => {
   const r = await processar(evMidia('AUDIO', arquivo) as Parameters<typeof processar>[0])
+  return { resposta: r.resposta ?? '', status: r.status }
+}
+/** PDF (extrato, fatura, boleto): o conteúdo vem de `ia.documento`, ou do arquivo real em `midia`. */
+export const msgPdf = async (arquivo = 'p1.pdf', caption = '') => {
+  const r = await processar({
+    event: 'message.received',
+    data: { key: { id: `P${Date.now()}${++seq}`, remoteJid: `${NUM}@s.whatsapp.net`, fromMe: false }, from: `${NUM}@s.whatsapp.net`, isGroup: false, chatType: 'PERSONAL', type: 'DOCUMENT', fileUrl: `/api/media/${arquivo}`, caption, content: arquivo },
+  } as Parameters<typeof processar>[0])
   return { resposta: r.resposta ?? '', status: r.status }
 }
 /** Foto de comprovante: o conteúdo vem de `ia.documento`. */
