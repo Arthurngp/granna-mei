@@ -56,6 +56,12 @@ export interface DepsResumo extends Pick<DepsAvisos, 'contas' | 'telefoneDe' | '
    * Nunca devolve quem não tem o recurso. Tabela ausente (migration não rodou) = ninguém. Qualquer outro erro lança: o ciclo não envia nada.
    */
   liberados: (hhmm: string) => Promise<PerfilResumo[]>
+  /**
+   * Faturas de cartão em aberto que vencem hoje ou já venceram, com a MESMA conta do "o que vence" do bot (cartao.ts). A fatura não é uma linha da
+   * tabela `contas`: é calculada das compras e pagamentos, então sem isto o dia em que o cartão vence passaria sem aviso. Opcional: sem ela o
+   * resumo só olha as contas. Se lançar, o resumo daquela pessoa NÃO sai nesse minuto (incompleto seria pior que adiar).
+   */
+  faturas?: (userId: string, hoje: string) => Promise<ContaAviso[]>
 }
 
 export const chaveDoResumo = (userId: string, dia: string) => `dia:${userId}:${dia}`
@@ -100,7 +106,8 @@ export function montarResumo(p: Pick<PerfilAviso, 'nome' | 'ocultar'>, doDia: Co
     if (!p.ocultar && atrasOrdenadas.length > 1) linhas.push('', `Total atrasado: ${brl(atrasOrdenadas.reduce((s, c) => s + c.valor, 0))}`)
   }
 
-  const exemplo = (hojeOrdenadas[0] ?? atrasOrdenadas[0]).descricao.trim().toLowerCase()
+  const primeiro = hojeOrdenadas[0] ?? atrasOrdenadas[0]
+  const exemplo = primeiro.id.startsWith('fatura:') ? 'a fatura' : primeiro.descricao.trim().toLowerCase()
   linhas.push('', `Para ver tudo, me pergunte "o que vence". Quando pagar, me avisa. Por exemplo: "paguei ${exemplo.length <= 28 ? exemplo : 'a conta'}".`)
   return linhas.join('\n')
 }
@@ -160,8 +167,20 @@ export async function rodarResumo(d: DepsResumo, cfg: ConfigResumo, agora = new 
         estadoResumo.resolvidoNoDia.set(p.id, hoje)
         continue
       }
-      const doDia = await d.contas(p.id, hoje, hoje)
-      const atrasadas = await d.contas(p.id, '2000-01-01', somaDias(hoje, -1))
+      let doDia = await d.contas(p.id, hoje, hoje)
+      let atrasadas = await d.contas(p.id, '2000-01-01', somaDias(hoje, -1))
+      if (d.faturas) {
+        try {
+          const fat = await d.faturas(p.id, hoje)
+          doDia = [...doDia, ...fat.filter((f) => f.vencimento === hoje)]
+          atrasadas = [...atrasadas, ...fat.filter((f) => f.vencimento < hoje)]
+        } catch (e) {
+          // Sem saber as faturas o resumo sairia incompleto: em dúvida não envia, e tenta de novo daqui a pouco.
+          log.push(`não consegui ler as faturas da conta ${p.id}: ${erroSeguro((e as Error).message)}`)
+          estadoResumo.semNovidadeAte.set(p.id, agora.getTime() + SILENCIO_MS)
+          continue
+        }
+      }
       if (!doDia.length && !atrasadas.length) {
         estadoResumo.semNovidadeAte.set(p.id, agora.getTime() + SILENCIO_MS)
         continue
