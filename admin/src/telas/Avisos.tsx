@@ -6,6 +6,7 @@ import { dataHora, Falha } from './comum'
 import { Cartao, Pagina, type HeadDef } from './visao/layout'
 import { Ausente, n } from './visao/usar'
 import { AvisosAcompanhar } from './AvisosAcompanhar'
+import { cicloParado } from './avisosCiclo'
 
 type Regra = 'nunca_mandou' | 'parou_de_usar'
 type Modo = 'desligado' | 'ensaio' | 'piloto' | 'todos'
@@ -43,10 +44,9 @@ interface Previa {
 
 /**
  * A proteção do número mora no CÓDIGO do servidor (server/src/retencao.ts) e não muda por esta tela, de propósito. Estes valores
- * são só o que a tela mostra; um teste do servidor trava os números do código (15, 3 minutos, 9h às 19h) para os dois não divergirem.
+ * são só o que a tela mostra; um teste do servidor trava o teto do dia contra o código (15) para os dois não divergirem.
  */
 const TETO_DIA = 15
-const ESPERA_MIN = 3
 
 /** `.item-ob` é um grid de coluna `auto`: texto comprido alarga a caixa e come a margem no celular. */
 const CAIXA = { gridTemplateColumns: 'minmax(0, 1fr)' } as const
@@ -54,22 +54,22 @@ const CAIXA = { gridTemplateColumns: 'minmax(0, 1fr)' } as const
 const RODAPE_SAIR = 'Para não receber mais lembretes meus, responda SAIR.'
 
 const MODOS: { v: Modo; rotulo: string; texto: string }[] = [
-  { v: 'desligado', rotulo: 'Desligado', texto: 'Não envia nada.' },
-  { v: 'ensaio', rotulo: 'Ensaio', texto: 'Não envia nada. Só escreve no registro do servidor quem receberia, para você conferir.' },
-  { v: 'piloto', rotulo: 'Piloto', texto: 'Manda UM exemplo por dia para o número do piloto (o seu), com o texto exato e para quem seria. Não envia a nenhum cliente.' },
-  { v: 'todos', rotulo: 'Todos', texto: `Envia de verdade aos clientes elegíveis: no máximo ${TETO_DIA} por dia, um a cada ${ESPERA_MIN} minutos, das 9h às 19h.` },
+  { v: 'desligado', rotulo: 'Desligado', texto: 'não manda nada.' },
+  { v: 'ensaio', rotulo: 'Ensaio', texto: 'não manda nada, só mostra quem receberia, para você conferir.' },
+  { v: 'piloto', rotulo: 'Piloto', texto: 'manda um exemplo só para você, para ver como fica. Não manda para nenhum cliente.' },
+  { v: 'todos', rotulo: 'Todos', texto: 'manda de verdade para os clientes.' },
 ]
 
 const REGRAS: Record<Regra, { titulo: string; desc: string; atraso: string; sumico?: boolean }> = {
   nunca_mandou: {
     titulo: 'Nunca mandou nada',
-    desc: 'Confirmou o WhatsApp e ainda não mandou nenhum lançamento. A conta começa na primeira mensagem dele (o código).',
-    atraso: 'Esperar quantas horas depois da primeira mensagem',
+    desc: 'Pessoas que confirmaram o WhatsApp, mas ainda não lançaram nada.',
+    atraso: 'Quantas horas depois de a pessoa entrar',
   },
   parou_de_usar: {
     titulo: 'Parou de usar',
-    desc: 'Já mandou lançamentos e sumiu. A conta começa na última mensagem dele, e só vale até 30 dias de sumiço.',
-    atraso: 'Esperar quantas horas depois da última mensagem',
+    desc: 'Pessoas que já lançaram e sumiram.',
+    atraso: 'Quantas horas depois da última vez que a pessoa usou',
     sumico: true,
   },
 }
@@ -117,23 +117,25 @@ export function Avisos() {
   const ligadas = cfg ? cfg.regras.filter((r) => r.modo !== 'desligado').length : 0
   const heads: HeadDef[] | undefined = cfg
     ? [
-        { rotulo: 'Enviados hoje', valor: `${n(cfg.enviados_hoje)} de ${TETO_DIA}`, nota: `um a cada ${ESPERA_MIN} minutos, das 9h às 19h` },
+        { rotulo: 'Enviados hoje', valor: `${n(cfg.enviados_hoje)} de ${TETO_DIA}`, nota: 'limite por dia, para proteger o número' },
         { rotulo: 'Último envio', valor: cfg.ultimo_envio ? dataHora(cfg.ultimo_envio) : '–', texto: true, nota: cfg.ultimo_envio ? undefined : 'nenhum ainda' },
-        { rotulo: 'Regras ligadas', valor: `${ligadas} de 2`, nota: ligadas ? 'veja o modo de cada uma abaixo' : 'tudo desligado: nada sai' },
-        { rotulo: 'Número atual no ar desde', valor: cfg.numero_desde ? dataHora(cfg.numero_desde) : '–', texto: true, nota: 'só recebe quem escreveu depois disso' },
+        { rotulo: 'Regras ligadas', valor: `${ligadas} de 2`, nota: ligadas ? 'veja o modo de cada uma abaixo' : 'tudo desligado: nada é enviado' },
+        { rotulo: 'Número atual no ar desde', valor: cfg.numero_desde ? dataHora(cfg.numero_desde) : '–', texto: true, nota: 'só recebe quem falou com ele depois' },
       ]
     : undefined
 
-  const semCiclo = cfg && ligadas > 0 && (!cfg.ciclo_em || Date.now() - new Date(cfg.ciclo_em).getTime() > 5 * 60_000)
+  const semCiclo = cfg ? cicloParado(cfg.regras, cfg.ciclo_em) : false
 
   return (
     <Pagina titulo="Avisos" subtitulo="Lembretes automáticos para quem não está usando a Granninha" heads={heads}>
-      <Cartao g={12} titulo="Como o número fica protegido">
-        <p className="suave" style={{ margin: 0 }}>
-          O número da Granninha não é oficial: se mandar demais ou para quem nunca falou com ele, o WhatsApp bloqueia. Por isso estes limites ficam fixos no servidor e esta tela não os muda.
-          No máximo {TETO_DIA} lembretes por dia, um a cada {ESPERA_MIN} minutos, só das 9h às 19h. Só recebe quem já escreveu para o número atual. Uma mensagem por pessoa por regra,
-          nunca em dobro. Quem responde SAIR nunca mais recebe. Se o WhatsApp cair ou 3 envios falharem seguidos, para sozinho.
-        </p>
+      <Cartao g={12} titulo="Pra que serve esta página">
+        <div className="pilha" style={{ gap: 8 }}>
+          <p className="suave" style={{ margin: 0 }}>A Granninha chama no WhatsApp quem se cadastrou e não está usando, para a pessoa voltar a lançar.</p>
+          <p className="suave" style={{ margin: 0 }}><b>Nunca mandou nada:</b> a pessoa entrou, mas ainda não lançou nada.</p>
+          <p className="suave" style={{ margin: 0 }}><b>Parou de usar:</b> a pessoa já lançou e sumiu.</p>
+          <p className="suave" style={{ margin: 0 }}>Cada uma pode mandar até 3 mensagens, uma depois da outra. Se a pessoa responder ou lançar, as próximas não saem.</p>
+          <p className="suave" style={{ margin: 0 }}>Para não arriscar o número da Granninha, ela manda poucas por dia e nunca de madrugada. Quem responder SAIR não recebe mais.</p>
+        </div>
       </Cartao>
 
       <AvisosAcompanhar />
@@ -148,7 +150,7 @@ export function Avisos() {
       {semCiclo && (
         <div className="vaviso ruim" role="alert" style={{ gridColumn: '1 / -1' }}>
           <TriangleAlert size={20} style={{ flex: 'none' }} />
-          <span>Há regra ligada, mas o servidor não rodou o ciclo nos últimos 5 minutos. Confira se a Granninha está no ar na aba Granninha.</span>
+          <span>Tem regra ligada há mais de 5 minutos, mas a Granninha não avisou que está trabalhando nos lembretes. Confira se ela está no ar na aba Granninha.</span>
         </div>
       )}
 
@@ -219,10 +221,13 @@ function RegraCartao({ r, aoSalvar }: { r: RegraCfg; aoSalvar: () => Promise<voi
     }
   }
 
-  const modoInfo = MODOS.find((m) => m.v === modo)!
   return (
     <Cartao g={6} titulo={info.titulo} nota={`${n(r.enviados_7d)} enviados em 7 dias`}>
-      <p className="suave" style={{ marginBottom: 12 }}>{info.desc}</p>
+      <p className="suave" style={{ marginBottom: 10 }}>{info.desc}</p>
+      <div className="item-ob ligado" style={{ ...CAIXA, marginBottom: 12 }}>
+        <b>Resumo</b>
+        <small className="suave">{resumoDaRegra(r)}</small>
+      </div>
 
       <div className="rotulo" style={{ marginBottom: 6 }}>Modo</div>
       <div className="dupla" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 6 }} role="group" aria-label={`Modo de ${info.titulo}`}>
@@ -232,10 +237,16 @@ function RegraCartao({ r, aoSalvar }: { r: RegraCfg; aoSalvar: () => Promise<voi
           </button>
         ))}
       </div>
-      <p className="suave pq" style={{ marginBottom: 12 }}>{modoInfo.texto}</p>
+      <div className="pilha" style={{ gap: 2, marginBottom: 12 }}>
+        {MODOS.map((m) => (
+          <small key={m.v} className="suave" style={modo === m.v ? { fontWeight: 650, color: 'var(--text)' } : undefined}>
+            <b>{m.rotulo}:</b> {m.texto}
+          </small>
+        ))}
+      </div>
 
       <label className="campo">
-        <span>{info.atraso}</span>
+        <span>{info.atraso}{atrasoOk ? `: ${prazo(atrasoNum)}` : ''}</span>
         <input className="entrada num" inputMode="numeric" value={atraso} onChange={(e) => setAtraso(e.target.value.replace(/\D/g, '').slice(0, 3))} aria-label={`Horas de espera em ${info.titulo}`} />
       </label>
 
@@ -244,8 +255,8 @@ function RegraCartao({ r, aoSalvar }: { r: RegraCfg; aoSalvar: () => Promise<voi
         <div className="item-ob ligado" style={{ ...CAIXA, margin: '8px 0' }}>
           <b>{previa.total === 0 ? 'Ninguém receberia agora' : `${n(previa.total)} ${previa.total === 1 ? 'pessoa receberia' : 'pessoas receberiam'} agora`}</b>
           <small className="suave">
-            Com {n(atrasoNum)} {atrasoNum === 1 ? 'hora' : 'horas'} de espera. Saem aos poucos: no máximo {TETO_DIA} por dia, um a cada {ESPERA_MIN} minutos.
-            {previa.fora_por_numero_antigo > 0 && ` ${n(previa.fora_por_numero_antigo)} ${previa.fora_por_numero_antigo === 1 ? 'fica' : 'ficam'} de fora por ${previa.fora_por_numero_antigo === 1 ? 'ter escrito' : 'terem escrito'} só para o número antigo: seria contato frio.`}
+            Com essa espera. Elas saem aos poucos, não todas de uma vez.
+            {previa.fora_por_numero_antigo > 0 && ` ${n(previa.fora_por_numero_antigo)} ${previa.fora_por_numero_antigo === 1 ? 'fica' : 'ficam'} de fora porque ${previa.fora_por_numero_antigo === 1 ? 'só falou' : 'só falaram'} com o número antigo.`}
           </small>
           {previa.itens.length > 0 && (
             <small className="suave" style={{ display: 'block' }}>
@@ -257,19 +268,19 @@ function RegraCartao({ r, aoSalvar }: { r: RegraCfg; aoSalvar: () => Promise<voi
       )}
 
       <label className="campo">
-        <span>Texto da mensagem (use {'{nome}'} para o primeiro nome)</span>
+        <span>Mensagem que a pessoa recebe</span>
         <textarea className="entrada" rows={5} value={texto} onChange={(e) => setTexto(e.target.value)} aria-label={`Texto de ${info.titulo}`} style={{ resize: 'vertical', minHeight: 110 }} />
       </label>
       <p className="suave pq" style={{ margin: '4px 0 8px' }}>
-        {texto.trim().length} de 600 letras. Sem emoji, sem travessão, sem link. {erroTexto && <b style={{ color: 'var(--out, #b4232c)' }}>{erroTexto}</b>}
+        Use {'{nome}'} para aparecer o primeiro nome da pessoa. {texto.trim().length} de 600 letras. Sem emoji, travessão ou link. {erroTexto && <b style={{ color: 'var(--out, #b4232c)' }}>{erroTexto}</b>}
       </p>
       <div className="item-ob" style={{ ...CAIXA, marginBottom: 10 }}>
-        <small className="suave">Assim chega no WhatsApp (a última linha entra sozinha e você não consegue tirar):</small>
+        <small className="suave">Assim a pessoa vai ver (a última frase entra sozinha):</small>
         <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.45, background: 'var(--card, #fff)', border: '1px solid var(--linha, #dcdcec)', borderRadius: 8, padding: 10 }}>{montarPrevia(texto)}</div>
       </div>
 
       <label className="campo">
-        <span>Motivo (fica na auditoria)</span>
+        <span>Motivo (fica anotado na aba Auditoria)</span>
         <input className="entrada" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ex.: começar o ensaio" />
       </label>
 
@@ -277,7 +288,7 @@ function RegraCartao({ r, aoSalvar }: { r: RegraCfg; aoSalvar: () => Promise<voi
         <div className="item-ob ligado" style={{ ...CAIXA, marginTop: 10 }}>
           <label className="suave" style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
             <input type="checkbox" checked={ciente} onChange={(e) => setCiente(e.target.checked)} style={{ marginTop: 3 }} />
-            Estou ciente de que, a partir de agora, a Granninha manda mensagem sozinha pelo número dela{previa ? ` (hoje seriam ${n(previa.total)} ${previa.total === 1 ? 'pessoa' : 'pessoas'}, no máximo ${TETO_DIA} por dia)` : ''}.
+            Estou ciente de que a Granninha vai mandar mensagem de verdade para os clientes{previa ? ` (hoje seriam ${n(previa.total)} ${previa.total === 1 ? 'pessoa' : 'pessoas'})` : ''}.
           </label>
         </div>
       )}
@@ -288,10 +299,9 @@ function RegraCartao({ r, aoSalvar }: { r: RegraCfg; aoSalvar: () => Promise<voi
 
       {r.etapas && r.etapas.length > 0 && (
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--linha, #dcdcec)' }}>
-          <div className="rotulo" style={{ marginBottom: 4 }}>Se a pessoa não responder: etapas 2 e 3</div>
+          <div className="rotulo" style={{ marginBottom: 4 }}>Se a pessoa não responder: 2ª e 3ª mensagem</div>
           <p className="suave pq" style={{ marginBottom: 10 }}>
-            Só saem para quem NÃO reagiu à mensagem anterior: se responder ou lançar, a sequência para. No máximo 3 mensagens por pessoa, somando as duas regras, e no mínimo 48 horas
-            entre duas mensagens à mesma pessoa. Nascem desligadas.
+            Mandam outra mensagem para quem ignorou a anterior. Se a pessoa responder ou lançar, elas não saem. Cada pessoa recebe no máximo 3 mensagens, somando tudo. Começam desligadas.
           </p>
           <div className="pilha" style={{ gap: 12 }}>
             {r.etapas.map((e) => (
@@ -304,8 +314,21 @@ function RegraCartao({ r, aoSalvar }: { r: RegraCfg; aoSalvar: () => Promise<voi
   )
 }
 
-/** "96 h (4 dias)": horas e o equivalente em dias, que é como o Arthur pensa. */
-const horasEmDias = (h: number) => (h % 24 === 0 ? `${h} h (${h / 24} ${h / 24 === 1 ? 'dia' : 'dias'})` : `${h} h`)
+/** O prazo do jeito que se fala: "1 dia", "4 dias", "36 horas". */
+const prazo = (h: number) => (h === 24 ? '1 dia' : h > 24 && h % 24 === 0 ? `${h / 24} dias` : h === 1 ? '1 hora' : `${h} horas`)
+
+/** Uma frase simples que traduz a configuração de agora: o que esta regra faz hoje e quando manda cada mensagem. */
+function resumoDaRegra(r: RegraCfg): string {
+  const sem = r.regra === 'nunca_mandou' ? 'sem lançar nada' : 'sem usar'
+  const estado = r.modo === 'desligado' ? 'Está desligada, então não manda nada.' : r.modo === 'ensaio' ? 'Está em ensaio: não manda nada, só mostra quem receberia.' : r.modo === 'piloto' ? 'Está em piloto: manda só um exemplo para você.' : 'Está ligada: manda de verdade para os clientes.'
+  const etapas = r.etapas ?? []
+  const ligadas = etapas.filter((e) => e.ativa)
+  const desligadas = etapas.filter((e) => !e.ativa).map((e) => `${e.etapa}ª`)
+  const partes = [`A 1ª mensagem vai depois de ${prazo(r.atraso_horas)} ${sem}.`]
+  for (const e of ligadas) partes.push(`A ${e.etapa}ª vai quando completar ${prazo(e.atraso_horas)} ${sem}, só se a pessoa não respondeu.`)
+  if (desligadas.length) partes.push(`A ${desligadas.join(' e a ')} ${desligadas.length > 1 ? 'estão desligadas' : 'está desligada'}.`)
+  return `${estado} ${partes.join(' ')}`
+}
 
 /** Uma etapa de acompanhamento (2 ou 3): ligar, atraso e texto. As regras de ordem são as mesmas do banco (admin_retencao_etapa_definir). */
 function EtapaForm({ r, e, outra, aoSalvar }: { r: RegraCfg; e: EtapaCfg; outra: EtapaCfg | undefined; aoSalvar: () => Promise<void> }) {
@@ -333,17 +356,17 @@ function EtapaForm({ r, e, outra, aoSalvar }: { r: RegraCfg; e: EtapaCfg; outra:
     ? null
     : n2
       ? atrasoNum <= r.atraso_horas
-        ? `A etapa 2 precisa esperar mais que a etapa 1 (${r.atraso_horas} h).`
+        ? `A 2ª mensagem precisa esperar mais que a 1ª (${r.atraso_horas} h).`
         : outra && atrasoNum >= outra.atraso_horas
-          ? `A etapa 2 precisa esperar menos que a etapa 3 (${outra.atraso_horas} h).`
+          ? `A 2ª mensagem precisa esperar menos que a 3ª (${outra.atraso_horas} h).`
           : null
       : outra && atrasoNum <= outra.atraso_horas
-        ? `A etapa 3 precisa esperar mais que a etapa 2 (${outra.atraso_horas} h).`
+        ? `A 3ª mensagem precisa esperar mais que a 2ª (${outra.atraso_horas} h).`
         : null
   const erroTexto = validarTexto(texto)
   // A 3 só liga com a 2 ligada, e a 2 só desliga com a 3 desligada.
-  const travaLigar = !n2 && !!outra && !outra.ativa ? 'Ligue a etapa 2 primeiro.' : null
-  const travaDesligar = n2 && !!outra && outra.ativa ? 'Desligue a etapa 3 primeiro.' : null
+  const travaLigar = !n2 && !!outra && !outra.ativa ? 'Ligue a 2ª mensagem primeiro.' : null
+  const travaDesligar = n2 && !!outra && outra.ativa ? 'Desligue a 3ª mensagem primeiro.' : null
   const mudou = ativa !== e.ativa || atrasoNum !== e.atraso_horas || texto.trim() !== e.texto.trim()
   const ligando = ativa && !e.ativa
   const precisaCiente = ligando && r.modo === 'todos'
@@ -375,7 +398,7 @@ function EtapaForm({ r, e, outra, aoSalvar }: { r: RegraCfg; e: EtapaCfg; outra:
       setMotivo('')
       setCiente(false)
       await aoSalvar()
-      avisar(ativa ? `Etapa ${e.etapa} ligada. Vale no próximo minuto.` : `Etapa ${e.etapa} desligada.`)
+      avisar(ativa ? `${e.etapa}ª mensagem ligada. Vale no próximo minuto.` : `${e.etapa}ª mensagem desligada.`)
     } catch (x) {
       const m = (x as Error).message
       setErro(m.includes('motivo') ? 'Escreva o motivo (pelo menos 3 letras).' : m)
@@ -387,41 +410,41 @@ function EtapaForm({ r, e, outra, aoSalvar }: { r: RegraCfg; e: EtapaCfg; outra:
   return (
     <div className="item-ob ligado" style={CAIXA}>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 650 }}>
-        <input type="checkbox" checked={ativa} disabled={ativa ? !!travaDesligar : !!travaLigar} onChange={(x) => setAtiva(x.target.checked)} aria-label={`Etapa ${e.etapa} de ${REGRAS[r.regra].titulo} ligada`} />
-        Etapa {e.etapa}: {ativa ? 'ligada' : 'desligada'}
+        <input type="checkbox" checked={ativa} disabled={ativa ? !!travaDesligar : !!travaLigar} onChange={(x) => setAtiva(x.target.checked)} aria-label={`${e.etapa}ª mensagem de ${REGRAS[r.regra].titulo} ligada`} />
+        {e.etapa}ª mensagem: {ativa ? 'ligada' : 'desligada'}
       </label>
       {(ativa ? travaDesligar : travaLigar) && <small className="suave">{ativa ? travaDesligar : travaLigar}</small>}
       <label className="campo">
-        <span>Esperar quantas horas ({r.regra === 'nunca_mandou' ? 'depois da primeira mensagem dele' : 'desde a última atividade dele'}){atrasoOk ? `: ${horasEmDias(atrasoNum)}` : ''}</span>
-        <input className="entrada num" inputMode="numeric" value={atraso} onChange={(x) => setAtraso(x.target.value.replace(/\D/g, '').slice(0, 3))} aria-label={`Horas de espera da etapa ${e.etapa} de ${REGRAS[r.regra].titulo}`} />
+        <span>{r.regra === 'nunca_mandou' ? 'Quantas horas depois de a pessoa entrar' : 'Quantas horas depois da última vez que a pessoa usou'}{atrasoOk ? `: ${prazo(atrasoNum)}` : ''}</span>
+        <input className="entrada num" inputMode="numeric" value={atraso} onChange={(x) => setAtraso(x.target.value.replace(/\D/g, '').slice(0, 3))} aria-label={`Horas de espera da ${e.etapa}ª mensagem de ${REGRAS[r.regra].titulo}`} />
       </label>
       {erroOrdem && <small style={{ color: 'var(--out, #b4232c)', fontWeight: 620 }}>{erroOrdem}</small>}
       {previa && (
         <small className="suave">
-          {previa.total === 0 ? 'Ninguém receberia esta etapa agora.' : `${n(previa.total)} ${previa.total === 1 ? 'pessoa receberia' : 'pessoas receberiam'} esta etapa agora.`}
+          {previa.total === 0 ? 'Ninguém receberia esta mensagem agora.' : `${n(previa.total)} ${previa.total === 1 ? 'pessoa receberia' : 'pessoas receberiam'} esta mensagem agora.`}
         </small>
       )}
       <label className="campo">
-        <span>Texto da etapa {e.etapa} (use {'{nome}'})</span>
-        <textarea className="entrada" rows={4} value={texto} onChange={(x) => setTexto(x.target.value)} aria-label={`Texto da etapa ${e.etapa} de ${REGRAS[r.regra].titulo}`} style={{ resize: 'vertical', minHeight: 90 }} />
+        <span>Texto da {e.etapa}ª mensagem</span>
+        <textarea className="entrada" rows={4} value={texto} onChange={(x) => setTexto(x.target.value)} aria-label={`Texto da ${e.etapa}ª mensagem de ${REGRAS[r.regra].titulo}`} style={{ resize: 'vertical', minHeight: 90 }} />
       </label>
       <small className="suave">
-        {texto.trim().length} de 600 letras. Sem emoji, sem travessão, sem link. {erroTexto && <b style={{ color: 'var(--out, #b4232c)' }}>{erroTexto}</b>}
+        Use {'{nome}'} para o primeiro nome. {texto.trim().length} de 600 letras. Sem emoji, travessão ou link. {erroTexto && <b style={{ color: 'var(--out, #b4232c)' }}>{erroTexto}</b>}
       </small>
       <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.45, background: 'var(--card, #fff)', border: '1px solid var(--linha, #dcdcec)', borderRadius: 8, padding: 10 }}>{montarPrevia(texto)}</div>
       <label className="campo">
-        <span>Motivo (fica na auditoria)</span>
-        <input className="entrada" value={motivo} onChange={(x) => setMotivo(x.target.value)} placeholder={`Ex.: ${ligando ? 'ligar a etapa ' + e.etapa : 'ajustar o texto'}`} />
+        <span>Motivo (fica anotado na aba Auditoria)</span>
+        <input className="entrada" value={motivo} onChange={(x) => setMotivo(x.target.value)} placeholder={`Ex.: ${ligando ? `ligar a ${e.etapa}ª mensagem` : 'ajustar o texto'}`} />
       </label>
       {precisaCiente && (
         <label className="suave" style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
           <input type="checkbox" checked={ciente} onChange={(x) => setCiente(x.target.checked)} style={{ marginTop: 3 }} />
-          Estou ciente de que a regra está em Todos: ligar esta etapa é mais uma mensagem saindo sozinha pelo número, para quem não respondeu à anterior.
+          Estou ciente: a regra já manda de verdade, então esta mensagem também vai para os clientes que não responderam à anterior.
         </label>
       )}
       {erro && <Falha texto={erro} />}
       <button type="button" className={`btn ${precisaCiente ? 'btn-perigo' : 'btn-pri'} btn-bloco`} disabled={ocupado || !pronto} onClick={salvar}>
-        {ocupado ? 'Salvando…' : ligando ? `Ligar a etapa ${e.etapa}` : `Salvar a etapa ${e.etapa}`}
+        {ocupado ? 'Salvando…' : ligando ? `Ligar a ${e.etapa}ª mensagem` : `Salvar a ${e.etapa}ª mensagem`}
       </button>
     </div>
   )

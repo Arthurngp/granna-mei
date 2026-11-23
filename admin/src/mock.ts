@@ -311,7 +311,8 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
       }
     }
     case 'admin_retencao_config':
-      return { regras: lembretes.regras, enviados_hoje: 0, ultimo_envio: null, numero_desde: '2026-11-21T04:04:14+00:00', ciclo_em: lembretes.regras.some((r) => r.modo !== 'desligado') ? new Date().toISOString() : null, erro: null }
+      return { regras: lembretes.regras, enviados_hoje: 0, ultimo_envio: null, numero_desde: '2026-11-21T04:04:14+00:00', ciclo_em: lembretes.regras.some((r) => r.modo !== 'desligado') ? new Date(Date.now() - (localStorage.getItem('mock-ciclo-parado') ? 30 * 60_000 : 0)).toISOString() : null, erro: null }
+    // (dev) localStorage 'mock-ciclo-parado' deixa o carimbo do ciclo velho, para ver o aviso de servidor parado na aba Avisos
     case 'admin_retencao_etapa_definir': {
       if (String(args.p_motivo ?? '').trim().length < 3) throw new Error('motivo obrigatório')
       const r = lembretes.regras.find((x) => x.regra === args.p_regra)
