@@ -7,7 +7,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { estado as estadoAvisos, estadoTeste } from './avisos.ts'
-import { chaveRetencao, REGRAS, TIPO_AVISO, type ConfigRegra, type DepsRetencao, type Elegivel, type ModoRetencao, type RegraRetencao } from './retencao.ts'
+import { chaveRetencao, REGRAS, TIPO_AVISO, type ConfigRegra, type DepsRetencao, type Elegivel, type EtapaCfg, type ModoRetencao, type RegraRetencao } from './retencao.ts'
 
 const MODOS: ModoRetencao[] = ['desligado', 'ensaio', 'piloto', 'todos']
 
@@ -20,19 +20,32 @@ export function depsRetencaoDoBanco(sb: SupabaseClient, enviar: (telefone: strin
     async configs() {
       const { data, error } = await sb.from('config_retencao').select('regra, modo, atraso_horas, texto')
       falha('configuração', error)
+      const passos = await sb.from('config_retencao_etapa').select('regra, etapa, ativa, atraso_horas, texto').eq('ativa', true)
+      falha('etapas', passos.error)
+      const valido = (atraso: unknown, texto: unknown) => Number.isInteger(Number(atraso)) && Number(atraso) >= 1 && Number(atraso) <= 720 && typeof texto === 'string' && texto.trim().length >= 20
       const out: ConfigRegra[] = []
       for (const r of (data ?? []) as { regra: string; modo: string; atraso_horas: number; texto: string }[]) {
         // Linha estranha vale como desligada: some da lista, em vez de arriscar um envio com valor quebrado.
-        const atraso = Number(r.atraso_horas)
-        if (!REGRAS.includes(r.regra as RegraRetencao) || !MODOS.includes(r.modo as ModoRetencao) || !Number.isInteger(atraso) || atraso < 1 || atraso > 720) continue
-        if (typeof r.texto !== 'string' || r.texto.trim().length < 20) continue
-        out.push({ regra: r.regra as RegraRetencao, modo: r.modo as ModoRetencao, atraso_horas: atraso, texto: r.texto })
+        if (!REGRAS.includes(r.regra as RegraRetencao) || !MODOS.includes(r.modo as ModoRetencao) || !valido(r.atraso_horas, r.texto)) continue
+        // As etapas 2 e 3 ligadas. Uma cadeia incoerente (a 3 sem a 2, ou atraso fora de ordem) é descartada daquele ponto em diante:
+        // o banco já recusa isso ao salvar, mas aqui vale o princípio de que em dúvida não envia.
+        const doRegra = ((passos.data ?? []) as { regra: string; etapa: number; atraso_horas: number; texto: string }[])
+          .filter((e) => e.regra === r.regra && (e.etapa === 2 || e.etapa === 3) && valido(e.atraso_horas, e.texto))
+          .sort((a, b2) => a.etapa - b2.etapa)
+        const etapas: EtapaCfg[] = []
+        let anterior = Number(r.atraso_horas)
+        for (const e of doRegra) {
+          if (e.etapa !== etapas.length + 2 || Number(e.atraso_horas) <= anterior) break
+          etapas.push({ etapa: e.etapa as 2 | 3, atraso_horas: Number(e.atraso_horas), texto: e.texto })
+          anterior = Number(e.atraso_horas)
+        }
+        out.push({ regra: r.regra as RegraRetencao, modo: r.modo as ModoRetencao, atraso_horas: Number(r.atraso_horas), texto: r.texto, etapas })
       }
       return out
     },
 
-    async elegiveis(regra, atrasoHoras) {
-      const { data, error } = await sb.rpc('retencao_elegiveis', { p_regra: regra, p_atraso: atrasoHoras, p_ignorar_marco: false })
+    async elegiveis(regra, atrasoHoras, etapa) {
+      const { data, error } = await sb.rpc('retencao_elegiveis', { p_regra: regra, p_atraso: atrasoHoras, p_ignorar_marco: false, p_etapa: etapa })
       falha('elegíveis', error)
       return ((data ?? []) as { user_id: string; nome: string | null; telefone: string | null; whats: string | null; horas: number }[]).map(
         (r): Elegivel => ({ user_id: r.user_id, nome: r.nome ?? '', telefone: String(r.telefone ?? '').replace(/\D/g, '') || null, whats: r.whats ?? '', horas: Number(r.horas) || 0 }),
@@ -54,16 +67,16 @@ export function depsRetencaoDoBanco(sb: SupabaseClient, enviar: (telefone: strin
       return { retencaoHoje: hoje.count, ultimoEnvioEm: l ? (Number.isNaN(t) ? 'invalido' : new Date(t).toISOString()) : null }
     },
 
-    async reservar(userId, regra, telefone) {
-      const linha = { chave: chaveRetencao(regra, userId), user_id: userId, tipo: TIPO_AVISO[regra], referencia: new Date().toISOString().slice(0, 10), para: telefone, status: 'enviando' }
+    async reservar(userId, regra, etapa, telefone) {
+      const linha = { chave: chaveRetencao(regra, userId, etapa), user_id: userId, tipo: TIPO_AVISO[regra], referencia: new Date().toISOString().slice(0, 10), para: telefone, status: 'enviando' }
       // ignoreDuplicates: o insert devolve só a linha que ELE criou. Quem reserva primeiro é quem envia.
       const { data, error } = await sb.from('avisos').upsert([linha], { onConflict: 'chave', ignoreDuplicates: true }).select('chave')
       falha('reservar', error)
       return ((data ?? []) as { chave: string }[]).length > 0
     },
 
-    async concluir(userId, regra, enviado) {
-      const chave = chaveRetencao(regra, userId)
+    async concluir(userId, regra, etapa, enviado) {
+      const chave = chaveRetencao(regra, userId, etapa)
       const q = enviado
         ? await sb.from('avisos').update({ status: 'enviado', enviado_em: new Date().toISOString() }).eq('user_id', userId).eq('chave', chave)
         : await sb.from('avisos').delete().eq('user_id', userId).eq('chave', chave)

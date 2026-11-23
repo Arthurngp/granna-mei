@@ -10,6 +10,8 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
 
   desfazercortesia 20261121173700_admin_desfazer_cortesia.sql   admin_acao ganha a ação "Desfazer cortesia" (devolve a conta ao
           estado de antes, lido da auditoria; recusa se não souber). Sem ela o botão do admin dá erro. Não cria tabela nem coluna.
+  retencaosequencia 20261122150000_retencao_sequencia.sql   sequência de até 3 mensagens por pessoa: etapas 2 e 3 (nascem DESLIGADAS), teto de 3 somando as regras, 48 h entre
+          avisos; troca a assinatura de retencao_elegiveis e admin_retencao_previa. Depende de retencao e retencaoacompanhar.
   retencaoacompanhar 20261122120000_retencao_acompanhar.sql   acompanhamento dos lembretes no admin: uma função de leitura. Não muda nada do que é enviado.
   retencao 20261121210000_retencao.sql           lembretes de retenção (nunca mandou / parou de usar): tabela de configuração, função de
           elegíveis, funções do admin, coluna do SAIR e o marco do número atual. NÃO liga nada (as regras nascem desligadas).
@@ -59,6 +61,7 @@ MIGRATIONS = {
     "limite": "20261121200000_limite_lancamentos.sql",
     "retencao": "20261121210000_retencao.sql",
     "retencaoacompanhar": "20261122120000_retencao_acompanhar.sql",
+    "retencaosequencia": "20261122150000_retencao_sequencia.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
@@ -104,6 +107,29 @@ CONFERE = {
             from public.assinaturas a where a.status='cortesia') x) as voltariam_para,
         -- Cortesia que ainda tem assinatura na Stripe (to_jsonb não quebra se a migration cobranca não rodou).
         (select count(*) from public.assinaturas a where a.status='cortesia' and (to_jsonb(a)->>'stripe_subscription_id') is not null) as cortesias_com_stripe""",
+    # Sequência de lembretes (até 3 mensagens por pessoa): tabela das etapas 2 e 3 (nasce DESLIGADA), a função de elegíveis e a prévia
+    # TROCAM de assinatura. O que importa conferir: cada uma existe UMA vez só (duas versões deixariam o PostgREST em dúvida e, como em
+    # dúvida o servidor não envia, os lembretes parariam sem erro), o service_role executa a de elegíveis (4 argumentos) e o cliente não,
+    # as etapas nascem desligadas, a tabela é fechada ao cliente e as 5 funções do admin existem, fechadas ao anon.
+    "retencaosequencia": """select
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis') as elegiveis_definicoes,
+        (select max(p.pronargs) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis') as elegiveis_argumentos,
+        (select case when count(*) = 0 then null else bool_and(has_function_privilege('service_role', p.oid, 'execute')) end
+           from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis') as service_role_executa_elegiveis,
+        (select case when count(*) = 0 then null else bool_or(has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('anon', p.oid, 'execute')) end
+           from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis') as cliente_executa_elegiveis,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_retencao_previa') as previa_definicoes,
+        (select case when to_regclass('public.config_retencao_etapa') is null then null
+              else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.config_retencao_etapa', false, true, '')))[1]::text end) as etapas,
+        (select case when to_regclass('public.config_retencao_etapa') is null then null
+              else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.config_retencao_etapa where ativa', false, true, '')))[1]::text end) as etapas_ligadas,
+        (select case when to_regclass('public.config_retencao_etapa') is null then null else has_table_privilege('service_role', 'public.config_retencao_etapa', 'select') end) as service_role_le_etapas,
+        (select case when to_regclass('public.config_retencao_etapa') is null then null else has_table_privilege('authenticated', 'public.config_retencao_etapa', 'select') end) as cliente_le_etapas,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname in ('admin_retencao_config','admin_retencao_previa','admin_retencao_definir','admin_retencao_etapa_definir','admin_retencao_acompanhar')) as funcoes_admin_de_5,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname in ('admin_retencao_config','admin_retencao_previa','admin_retencao_definir','admin_retencao_etapa_definir','admin_retencao_acompanhar')
+            and has_function_privilege('anon', p.oid, 'execute')) as funcoes_admin_abertas_ao_anon""",
     # Acompanhamento dos lembretes no admin: UMA função de leitura, nenhuma tabela nem coluna. Confere que existe, que o anon não executa e
     # que o authenticated executa (ela confere eh_admin() lá dentro), e o pré-requisito (a função de elegíveis da migration `retencao`).
     "retencaoacompanhar": """select
