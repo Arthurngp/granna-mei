@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react'
+import { Send } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { custoReais, reais, type Consumo } from '../../custo'
 import { dataHora, Falha } from '../comum'
 import { AreaDia, Anel, Spark } from './graficos'
 import { Cartao, Gaveta, Pagina, VisaoCtx, type HeadDef } from './layout'
+import { rpc } from '../../sb'
 import { usePainel } from './painel'
 import { dataExtensa, diaMes, chegaram, maiorPerda, nome1, waLink } from './util'
 import { hojeSP, n, NOME_PASSO, useRpc } from './usar'
@@ -42,6 +44,47 @@ interface Ativ {
   passos: Record<string, number>
   confirmaram: number
   com_mensagem: number
+}
+/** A fila do envio pelo sistema (função admin_envios_fila). `previsto_em` é calculado no banco: a tela só conta o tempo que falta. */
+interface ItemFila {
+  id: string
+  user_id: string
+  status: 'fila' | 'enviando'
+  pedido_em: string
+  posicao: number
+  previsto_em: string
+}
+interface Recente {
+  id: string
+  user_id: string
+  status: 'enviado' | 'falhou'
+  enviado_em: string | null
+  erro: string | null
+}
+interface Fila {
+  agora: string
+  espera_min: number
+  ultimo_envio_em: string | null
+  whatsapp_ok: boolean
+  itens: ItemFila[]
+  recentes: Recente[]
+}
+type EstadoEnvio =
+  | { tipo: 'fila' | 'enviando'; id: string; previsto: number; posicao: number }
+  | { tipo: 'enviado'; em: number | null }
+  | { tipo: 'falhou'; erro: string }
+
+/** Só estes grupos têm envio pelo sistema: quem parou no passo do WhatsApp nunca escreveu para o número, e quem está sem acesso pede conversa de gente. */
+const COM_ENVIO: Item['grupo'][] = ['nunca', 'sumiu']
+/** A mesma linha que o servidor acrescenta no fim de toda mensagem (RODAPE_SAIR em server/src/retencao.ts). */
+const LINHA_SAIR = 'Para não receber mais lembretes meus, responda SAIR.'
+
+const hhmm = (ms: number) => new Date(ms).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
+const diaSP = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+const mmss = (seg: number) => `${Math.floor(seg / 60)}:${String(seg % 60).padStart(2, '0')}`
+const haQuanto = (ms: number) => {
+  const m = Math.max(0, Math.round(ms / 60_000))
+  return m < 1 ? 'agora há pouco' : m < 60 ? `há ${m} min` : `há ${Math.floor(m / 60)} h`
 }
 
 const GRUPOS: { id: Item['grupo']; nome: string }[] = [
@@ -92,6 +135,74 @@ const IconeWa = () => (
   </svg>
 )
 
+/** O estado do envio ao lado do nome: contagem na fila (só este pedacinho se atualiza a cada segundo), enviado ou falhou. */
+function ChipEnvio({ e, whatsOk, desvio }: { e: EstadoEnvio; whatsOk: boolean; desvio: number }) {
+  const [agora, setAgora] = useState(() => Date.now())
+  const contando = e.tipo === 'fila'
+  useEffect(() => {
+    if (!contando) return
+    const t = setInterval(() => setAgora(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [contando])
+  const servidor = agora + desvio
+  if (e.tipo === 'enviando') return <div className="ac-fila" role="status"><b>Enviando</b>agora</div>
+  if (e.tipo === 'enviado') return <div className="ac-fila ok"><b>Enviado</b>{e.em ? haQuanto(servidor - e.em) : 'pelo sistema'}</div>
+  if (e.tipo === 'falhou') return <div className="ac-fila ruim" title={e.erro}><b>Não saiu</b>abra a ficha</div>
+  const falta = Math.max(0, Math.round((e.previsto - servidor) / 1000))
+  const quem = e.posicao > 1 ? `${e.posicao}º na fila` : 'Na fila'
+  const quando = !whatsOk ? 'WhatsApp desconectado' : falta <= 20 * 60 ? (falta === 0 ? 'sai em instantes' : `sai em ${mmss(falta)}`) : `sai ${diaSP(e.previsto) !== diaSP(servidor) ? 'amanhã ' : ''}às ${hhmm(e.previsto)}`
+  return <div className="ac-fila" role="status"><b>{quem}</b>{quando}</div>
+}
+
+/** O que o admin confere antes de soltar uma mensagem de verdade: o texto exato, por onde sai e quando. */
+function ConfirmarEnvio({ item, fila, desvio, onFechar, onEnviado }: { item: Item; fila: Fila; desvio: number; onFechar: () => void; onEnviado: () => void }) {
+  const [enviando, setEnviando] = useState(false)
+  const [erro, setErro] = useState('')
+  const texto = sugestao(item)
+  const recente = fila.ultimo_envio_em ? Date.now() + desvio - Date.parse(fila.ultimo_envio_em) < fila.espera_min * 60_000 : false
+  const espera = fila.itens.length > 0 || recente
+  async function enviar() {
+    if (enviando) return
+    setEnviando(true)
+    setErro('')
+    try {
+      await rpc('admin_envio_pedir', { p_user: item.user_id, p_grupo: item.grupo, p_texto: texto })
+      onEnviado()
+    } catch (e) {
+      setErro((e as Error).message)
+      setEnviando(false)
+    }
+  }
+  return (
+    <>
+      <span className="k">Confirmar envio</span>
+      <h3>{item.nome || 'Sem nome'}</h3>
+      <div className="sub-g">{item.negocio}</div>
+      <h4>Mensagem que vai sair</h4>
+      <div className="msg">
+        {texto}
+        <span className="sair">{LINHA_SAIR}</span>
+      </div>
+      <p className="texto-ajuda">
+        {espera
+          ? `Já há envio recente ou pedidos na frente: esta entra na fila e sai sozinha, ${fila.espera_min} minutos depois do anterior.`
+          : `Sai em até 1 minuto. Entre um envio e outro o sistema espera ${fila.espera_min} minutos.`}{' '}
+        Sai pelo número da Granninha e só entre 9h e 19h. Dá para cancelar enquanto estiver na fila.
+      </p>
+      {!fila.whatsapp_ok && <div className="por">O WhatsApp da Granninha está desconectado agora. O pedido fica na fila e sai quando reconectar.</div>}
+      {erro && <div className="por" role="alert">{erro}</div>}
+      <div className="acoes-g">
+        <button type="button" onClick={onFechar}>
+          Cancelar
+        </button>
+        <button type="button" className="p" onClick={enviar} disabled={enviando}>
+          {enviando ? 'Enviando…' : 'Enviar mensagem'}
+        </button>
+      </div>
+    </>
+  )
+}
+
 /** Hoje em uma tela: o que pede ação, a retenção, o movimento e a saúde da ferramenta. */
 export function Resumo() {
   const { ir } = useContext(VisaoCtx)
@@ -109,6 +220,36 @@ export function Resumo() {
   const [filtro, setFiltro] = useState<'todos' | Item['grupo']>('todos')
   const [sel, setSel] = useState<Item | null>(null)
   const [errosAbertos, setErrosAbertos] = useState(false)
+  // Envio pelo sistema. Sem a migration (função ausente) ou com erro de leitura, tudo volta ao link do WhatsApp: nunca uma tela quebrada.
+  const [versaoFila, setVersaoFila] = useState(0)
+  const fila = useRpc<Fila>('admin_envios_fila', {}, 10_000, versaoFila)
+  const [confirmar, setConfirmar] = useState<Item | null>(null)
+  const [avisoEnvio, setAvisoEnvio] = useState('')
+  const fecharFicha = useCallback(() => setSel(null), [])
+  const fecharConfirmar = useCallback(() => setConfirmar(null), [])
+  // A diferença entre o relógio do servidor e o deste navegador, para a contagem não depender de o relógio daqui estar certo.
+  const recebidoEm = useMemo(() => Date.now(), [fila.dados])
+  const desvio = fila.dados ? Date.parse(fila.dados.agora) - recebidoEm : 0
+  const podeEnviar = !!fila.dados
+  const envioDe = (i: Item): EstadoEnvio | null => {
+    const f = fila.dados
+    if (!f || !COM_ENVIO.includes(i.grupo)) return null
+    const ativo = f.itens.find((x) => x.user_id === i.user_id)
+    if (ativo) return { tipo: ativo.status, id: ativo.id, previsto: Date.parse(ativo.previsto_em), posicao: ativo.posicao }
+    const rec = f.recentes.find((x) => x.user_id === i.user_id)
+    if (!rec) return null
+    return rec.status === 'enviado' ? { tipo: 'enviado', em: rec.enviado_em ? Date.parse(rec.enviado_em) : null } : { tipo: 'falhou', erro: rec.erro ?? 'o envio falhou' }
+  }
+  async function cancelarEnvio(id: string) {
+    setAvisoEnvio('')
+    try {
+      const r = await rpc<{ ok: boolean; motivo?: string }>('admin_envio_cancelar', { p_id: id })
+      if (!r.ok) setAvisoEnvio(r.motivo ? `Não deu para cancelar: ${r.motivo}.` : 'Não deu para cancelar.')
+    } catch (e) {
+      setAvisoEnvio(`Não deu para cancelar: ${(e as Error).message}`)
+    }
+    setVersaoFila((v) => v + 1)
+  }
 
   const dias = per.dados?.dias ?? []
   const ult30 = dias.slice(-30)
@@ -191,9 +332,12 @@ export function Resumo() {
                 </button>
               ))}
             </div>
+            {avisoEnvio && <p className="texto-ajuda" role="status">{avisoEnvio}</p>}
             <div className="linhas" style={{ marginTop: 6 }}>
               {lista.map((i) => {
                 const mt = motivo(i)
+                const env = envioDe(i)
+                const comEnvio = podeEnviar && COM_ENVIO.includes(i.grupo)
                 return (
                   <div key={i.user_id} className="ac" role="button" tabIndex={0} onClick={() => setSel(i)} onKeyDown={(e) => (e.key === 'Enter' ? setSel(i) : undefined)}>
                     <div className="ac-id">
@@ -203,9 +347,33 @@ export function Resumo() {
                         {mt.m} · {mt.q}
                       </span>
                     </div>
-                    <a className="ac-wa" href={waLink(i.whats, sugestao(i))} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} aria-label={`Chamar ${i.nome} no WhatsApp`}>
-                      <IconeWa />
-                    </a>
+                    {comEnvio ? (
+                      <div className="ac-lado" onClick={(e) => e.stopPropagation()}>
+                        {env && env.tipo !== 'falhou' ? <ChipEnvio e={env} whatsOk={fila.dados?.whatsapp_ok ?? true} desvio={desvio} /> : null}
+                        {env?.tipo === 'fila' && (
+                          <button type="button" className="ac-mini" onClick={() => void cancelarEnvio(env.id)} aria-label={`Cancelar o envio para ${i.nome}`}>
+                            Cancelar
+                          </button>
+                        )}
+                        {env?.tipo === 'falhou' && (
+                          <>
+                            <ChipEnvio e={env} whatsOk desvio={desvio} />
+                            <button type="button" className="ac-mini" onClick={() => setConfirmar(i)} aria-label={`Tentar de novo para ${i.nome}`}>
+                              Tentar de novo
+                            </button>
+                          </>
+                        )}
+                        {!env && (
+                          <button type="button" className="ac-env" onClick={() => setConfirmar(i)} aria-label={`Enviar mensagem para ${i.nome}`}>
+                            <Send aria-hidden="true" />
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <a className="ac-wa" href={waLink(i.whats, sugestao(i))} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} aria-label={`Chamar ${i.nome} no WhatsApp`}>
+                        <IconeWa />
+                      </a>
+                    )}
                   </div>
                 )
               })}
@@ -331,26 +499,63 @@ export function Resumo() {
         )}
       </Cartao>
 
-      <Gaveta aberta={!!sel} onFechar={() => setSel(null)} rotulo="Ficha do cliente">
+      <Gaveta aberta={!!sel} onFechar={fecharFicha} rotulo="Ficha do cliente">
         {sel && (
           <>
             <span className="k">{motivo(sel).m}</span>
             <h3>{sel.nome || 'Sem nome'}</h3>
             <div className="sub-g">{sel.negocio}</div>
             <div className="por">{porque[sel.grupo](sel.dias)}</div>
+            {envioDe(sel)?.tipo === 'falhou' && <div className="por">O último envio pelo sistema não saiu: {(envioDe(sel) as { erro: string }).erro}</div>}
+            {envioDe(sel)?.tipo === 'enviado' && <div className="por ok">Já mandamos uma mensagem pelo sistema nas últimas 24 horas.</div>}
+            {(envioDe(sel)?.tipo === 'fila' || envioDe(sel)?.tipo === 'enviando') && <div className="por ok">Mensagem na fila do sistema. Ela sai sozinha, e dá para cancelar na lista.</div>}
             <div className="fato"><span>WhatsApp</span><b>{sel.whats || 'sem número'}</b></div>
             <div className="fato"><span>Cadastro</span><b>{dataHora(sel.criado_em)}</b></div>
             <div className="fato"><span>Passo das boas-vindas</span><b>{NOME_PASSO[Math.min(7, sel.passo)] ?? sel.passo}</b></div>
             <div className="fato"><span>Última mensagem</span><b>{dataHora(sel.ultima)}</b></div>
             <h4>Mensagem sugerida</h4>
             <div className="msg">{sugestao(sel)}</div>
-            <div className="acoes-g">
-              <a className="p" href={waLink(sel.whats, sugestao(sel))} target="_blank" rel="noopener noreferrer">
-                Abrir conversa no WhatsApp
-              </a>
-            </div>
-            <p className="texto-ajuda">O texto abre pronto na conversa; você revisa e envia.</p>
+            {(() => {
+              const env = envioDe(sel)
+              const podeSistema = podeEnviar && COM_ENVIO.includes(sel.grupo) && (!env || env.tipo === 'falhou')
+              return (
+                <>
+                  <div className="acoes-g">
+                    {podeSistema && (
+                      <button type="button" className="p" onClick={() => { setSel(null); setConfirmar(sel) }}>
+                        {env?.tipo === 'falhou' ? 'Tentar de novo pelo sistema' : 'Enviar pelo sistema'}
+                      </button>
+                    )}
+                    <a className={podeSistema ? '' : 'p'} href={waLink(sel.whats, sugestao(sel))} target="_blank" rel="noopener noreferrer">
+                      Abrir conversa no WhatsApp
+                    </a>
+                  </div>
+                  <p className="texto-ajuda">
+                    {podeSistema
+                      ? 'Enviar pelo sistema usa o número da Granninha, com fila de 5 minutos entre mensagens. O link abre a sua conversa pessoal: você revisa e envia.'
+                      : 'O texto abre pronto na conversa; você revisa e envia.'}
+                  </p>
+                </>
+              )
+            })()}
           </>
+        )}
+      </Gaveta>
+
+      <Gaveta aberta={!!confirmar && !!fila.dados} onFechar={fecharConfirmar} rotulo="Confirmar envio">
+        {confirmar && fila.dados && (
+          <ConfirmarEnvio
+            key={confirmar.user_id}
+            item={confirmar}
+            fila={fila.dados}
+            desvio={desvio}
+            onFechar={fecharConfirmar}
+            onEnviado={() => {
+              setConfirmar(null)
+              setAvisoEnvio('')
+              setVersaoFila((v) => v + 1)
+            }}
+          />
         )}
       </Gaveta>
     </Pagina>

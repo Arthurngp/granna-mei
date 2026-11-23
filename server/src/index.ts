@@ -21,6 +21,8 @@ import { estado as estadoAvisos, estadoTeste, lerConfig as lerConfigAvisos, lerC
 import { depsAvisosDoBanco } from './avisos-banco.ts'
 import { rodarRetencao, estado as estadoRetencao } from './retencao.ts'
 import { depsRetencaoDoBanco } from './retencao-banco.ts'
+import { rodarEnvioManual } from './envio-manual.ts'
+import { depsEnvioManualDoBanco } from './envio-manual-banco.ts'
 import { sincronizarCobrancaDasExclusoes } from './exclusao-cobranca.ts'
 import { estadoResumo, lerConfigResumo, rodarResumo } from './resumo-diario.ts'
 import { estadoReposicao, lerModoRepor, reporContasFixas } from './fixas-repor.ts'
@@ -245,6 +247,8 @@ export function iniciar(porta = PORTA) {
   const depsRepor = depsReporDoBanco(sb)
   // Lembretes de retenção (quem nunca mandou nada e quem parou de usar). Desligados até o Arthur ligar no admin; ver retencao.ts.
   const depsRetencao = depsRetencaoDoBanco(sb, enviarTexto, async () => (await statusSessao()).estado === 'CONNECTED', () => lerConfigAvisos().piloto)
+  // Envio manual pedido pelo admin (botão "enviar" na visão geral): só sai o que o Arthur aprovou, um a cada 5 minutos; ver envio-manual.ts.
+  const depsManual = depsEnvioManualDoBanco(sb, enviarTexto, async () => (await statusSessao()).estado === 'CONNECTED')
   const avisar = async () => {
     try {
       for (const linha of await rodarAvisos(depsAvisos, lerConfigAvisos())) console.log('[avisos]', linha)
@@ -262,6 +266,12 @@ export function iniciar(porta = PORTA) {
       for (const linha of await rodarResumo(depsResumo, lerConfigResumo())) console.log('[resumo]', linha)
     } catch (e) {
       console.error('[resumo]', (e as Error).message)
+    }
+    // Envio manual pedido no admin: antes dos lembretes automáticos, porque alguém clicou e está esperando. Fila vazia não faz nada.
+    try {
+      for (const linha of await rodarEnvioManual(depsManual)) console.log('[envio-manual]', linha)
+    } catch (e) {
+      console.error('[envio-manual]', (e as Error).message)
     }
     // Lembretes de retenção: por último, e só depois de os dois acima terminarem (saem pelo mesmo chip).
     try {

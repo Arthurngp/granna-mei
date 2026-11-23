@@ -15,7 +15,8 @@ export interface Leitura<T> {
 }
 
 /** Lê uma função do banco, repete a cada `cadaMs` (0 = só quando os argumentos mudam). */
-export function useRpc<T>(nome: string, args: Record<string, unknown> = {}, cadaMs = 0): Leitura<T> {
+/** `versao`: mude o número para buscar de novo na hora (depois de uma ação), sem esperar o próximo ciclo. */
+export function useRpc<T>(nome: string, args: Record<string, unknown> = {}, cadaMs = 0, versao = 0): Leitura<T> {
   const chave = JSON.stringify(args)
   const [r, setR] = useState<Leitura<T>>({ dados: null, erro: '', ausente: false, carregando: true })
   useEffect(() => {
@@ -31,7 +32,7 @@ export function useRpc<T>(nome: string, args: Record<string, unknown> = {}, cada
       vivo = false
       if (t) clearInterval(t)
     }
-  }, [nome, chave, cadaMs])
+  }, [nome, chave, cadaMs, versao])
   return r
 }
 
@@ -52,6 +53,9 @@ const MIGRATION_DA_FUNCAO: Record<string, string> = {
   admin_retencao_acompanhar: '20261122120000_retencao_acompanhar.sql',
   admin_recursos_cliente: '20261123030000_recursos_cliente.sql',
   admin_recurso_definir: '20261123030000_recursos_cliente.sql',
+  admin_envios_fila: '20261123120000_envio_manual.sql',
+  admin_envio_pedir: '20261123120000_envio_manual.sql',
+  admin_envio_cancelar: '20261123120000_envio_manual.sql',
 }
 
 export function Ausente({ nome }: { nome: string }) {

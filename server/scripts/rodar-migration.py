@@ -8,6 +8,8 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  enviomanual 20261123120000_envio_manual.sql   botão "enviar" do admin: fila de pedidos de envio (fechada ao cliente), 3 funções do admin com auditoria e o tipo
+          'retencao_manual' em avisos. NÃO envia nada sozinha: só o que o admin aprovar no botão, um por vez, com 5 minutos de espera. Depende de retencaosequencia.
   recursos 20261123030000_recursos_cliente.sql   recursos de plano superior liberados POR CLIENTE, só pelo admin (o primeiro: resumo diário de contas). Tabela fechada ao
           cliente e 2 funções do admin com auditoria. Ninguém ganha nada: sem a migration ninguém está liberado e nada é enviado.
   fixasdia 20261123020000_fixas_dia_ate_31.sql   conta fixa pode vencer até o dia 31 (o banco só aceitava até 28): troca a regra da coluna dia, sem mexer
@@ -68,6 +70,7 @@ MIGRATIONS = {
     "retencaosequencia": "20261122150000_retencao_sequencia.sql",
     "fixasdia": "20261123020000_fixas_dia_ate_31.sql",
     "recursos": "20261123030000_recursos_cliente.sql",
+    "enviomanual": "20261123120000_envio_manual.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
@@ -212,6 +215,22 @@ CONFERE = {
             and has_function_privilege('anon', p.oid, 'execute')) as funcoes_abertas_ao_anon,
         (case when to_regclass('public.recursos_cliente') is null then null
               else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.recursos_cliente', false, true, '')))[1]::text end) as clientes_com_recurso""",
+    # Envio manual pelo admin. Confere o que importa: a fila existe e está FECHADA ao cliente (RLS ligada, sem permissão para anon e authenticated), o serviço lê e
+    # atualiza, as 3 funções do admin existem e o anon não executa nenhuma, a conferência da pessoa NÃO é executável por cliente, avisos aceita o tipo novo sem ter
+    # perdido os antigos, e há 0 pedidos na fila de início (a migration não envia nada sozinha).
+    "enviomanual": """select
+        (select count(*) from information_schema.tables where table_schema='public' and table_name='envios_manuais') as tabela_existe,
+        (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname='envios_manuais' and c.relrowsecurity) as rls_ligada,
+        (select count(*) from information_schema.role_table_grants where table_schema='public' and table_name='envios_manuais' and grantee in ('anon','authenticated')) as permissoes_para_cliente,
+        (case when to_regclass('public.envios_manuais') is null then null else has_table_privilege('service_role', 'public.envios_manuais', 'update') end) as service_role_atualiza,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('admin_envio_pedir','admin_envio_cancelar','admin_envios_fila')) as funcoes_de_3,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('admin_envio_pedir','admin_envio_cancelar','admin_envios_fila')
+            and has_function_privilege('anon', p.oid, 'execute')) as funcoes_abertas_ao_anon,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('envio_manual_apto','envio_manual_na_janela')
+            and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))) as conferencias_abertas_ao_cliente,
+        (select count(*) from pg_constraint where conrelid='public.avisos'::regclass and contype='c' and pg_get_constraintdef(oid) ilike '%retencao_manual%' and pg_get_constraintdef(oid) ilike '%vencimento%' and pg_get_constraintdef(oid) ilike '%retencao_nunca%') as avisos_aceita_os_4_tipos,
+        (case when to_regclass('public.envios_manuais') is null then null
+              else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.envios_manuais', false, true, '')))[1]::text end) as pedidos_na_fila""",
     # Só funções de leitura do admin (custo por período, ativação, receita): confere as 3.
     "adminvisao": """select (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
         where n.nspname='public' and p.proname in ('admin_custo_periodo','admin_ativacao','admin_receita')) as funcoes_de_3""",

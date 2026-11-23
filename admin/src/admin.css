@@ -722,7 +722,7 @@ select.sel {
 /* Ações: lista de quem precisa de contato */
 .ac {
   display: grid;
-  grid-template-columns: 1fr 52px;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -759,6 +759,58 @@ select.sel {
 .ac-wa svg {
   width: 26px;
   height: 26px;
+}
+/* Envio pelo sistema: o botão, o estado na fila e as ações pequenas ao lado */
+.ac-lado {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.ac-env {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: var(--in);
+  color: #fff;
+  display: grid;
+  place-items: center;
+}
+.ac-env svg {
+  width: 24px;
+  height: 24px;
+}
+.ac-fila {
+  min-width: 108px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: #eef0fb;
+  color: #454c83;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ac-fila b {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 800;
+}
+.ac-fila.ok {
+  background: var(--in-bg);
+  color: #0b5c39;
+}
+.ac-fila.ruim {
+  background: #fdecee;
+  color: #8f1f2a;
+}
+.ac-mini {
+  min-height: 36px;
+  padding: 0 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted);
+  text-decoration: underline;
 }
 
 /* Funil e colunas */
@@ -1218,6 +1270,21 @@ select.sel {
 .gav .acoes-g .p {
   background: var(--in);
   color: #fff;
+}
+.gav .acoes-g button:not(.p),
+.gav .acoes-g a:not(.p) {
+  background: var(--line-2);
+}
+.gav .acoes-g button:disabled {
+  opacity: 0.6;
+}
+.gav .msg .sair {
+  display: block;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(11, 92, 57, 0.3);
+  font-size: 13.5px;
+  opacity: 0.85;
 }
 
 /* Alerta de função ausente */
