@@ -91,7 +91,7 @@ await caso('"ok, recebi 50" NÃO é confirmação: segue para a IA e vira lança
 
 await caso('com pergunta em aberto, "ok" não é engolido como confirmação', async () => {
   ia.regras = [[/gastei 6/, acoes(acao({ valor: 6, meio: null }))]]
-  assert.match(await msg('gastei 6 no mercado'), /Pagou como/)
+  assert.match(await msg('gastei 6 no mercado'), /saiu de qual conta\?/)
   const r = await msgCompleta('ok')
   assert.notEqual(r.status, 'ignorada', 'a pergunta aberta é da pessoa, o ok não a descarta no silêncio')
   assert.equal(ia.chamadas.interpretacao, 2)
@@ -106,7 +106,7 @@ await caso('se a IA chamar uma despedida de saudação, a resposta ainda é a de
 
 await caso('saudação de verdade continua sendo saudação', async () => {
   ia.regras = [[/bom dia/, { ...SEM_ACAO, intencao: 'saudacao' }]]
-  assert.match(await msg('bom dia'), /Oi, Arthur!/)
+  assert.match(await msg('bom dia'), /Bom dia, Arthur!/)
 })
 
 await caso('a IA recebe a conversa recente: o lançamento anterior e a resposta da Granninha', async () => {

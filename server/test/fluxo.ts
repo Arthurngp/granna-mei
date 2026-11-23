@@ -214,7 +214,7 @@ try {
   console.log('3. contas, fixas, parcelas, correção e pergunta')
   await caso('"paguei a água" dá baixa na conta aberta e cria o lançamento', async () => {
     const r0 = await mandar(FONE, { content: 'paguei a água' })
-    assert.match(r0.texto, /Pagou como/)
+    assert.match(r0.texto, /saiu de qual conta\?/)
     const r = await mandar(FONE, { content: 'Conta do banco' })
     assert.match(r.texto, /pago R\$ 85,00/)
     const c = (await sb.from('contas').select('status,lancamento_id').eq('user_id', uid).eq('id', 'c-agua').single()).data!
@@ -284,9 +284,9 @@ try {
     assert.ok(tts.ok, 'gerar áudio de teste')
     midias.set('granninha-AUDIO1.mp3', { buf: Buffer.from(await tts.arrayBuffer()), mime: 'audio/mpeg' })
     const r1 = await mandar(FONE, { type: 'AUDIO', content: '', fileUrl: '/api/media/granninha-AUDIO1.mp3' })
-    assert.match(r1.texto, /negócio ou pessoal/)
+    assert.match(r1.texto, /negócio ou da casa/)
     const r2 = await mandar(FONE, { content: '1' })
-    assert.match(r2.texto, /Pagou como/)
+    assert.match(r2.texto, /saiu de qual conta\?/)
     const r = await mandar(FONE, { content: '2' })
     assert.match(r.texto, /saída de R\$ 50,00/)
     assert.match(r.texto, /Dinheiro/)
@@ -483,7 +483,7 @@ try {
     // O banco falso compara `atualizado_em` como texto; aqui é timestamptz de verdade. Se o filtro
     // não casar, a pergunta fica pendurada e um "2" futuro poderia ser aplicado a ela.
     const r = await mandar(FONE, { content: 'gastei 9 no mercado' })
-    assert.match(r.texto, /Pagou como/, 'o cenário depende de a Granninha perguntar a conta')
+    assert.match(r.texto, /saiu de qual conta\?/, 'o cenário depende de a Granninha perguntar a conta')
     const r2 = await mandar(FONE, { content: '1' })
     assert.match(r2.texto, /R\$ 9,00/)
     const c = (await sb.from('conversas').select('pendente').eq('telefone', FONE).maybeSingle()).data as { pendente: unknown } | null

@@ -42,6 +42,7 @@ const escolhe = <T>(l: readonly T[]): T => l[Math.floor(Math.random() * l.length
 /** Aberturas da confirmação. Mais de uma, para a mesma frase não repetir a cada registro. Os testes leem estas listas. */
 export const ABRE_ENTRADA = ['Boa, entrou', 'Anotei, entrou', 'Tá anotado, entrou'] as const
 export const ABRE_SAIDA = ['Anotei, saiu', 'Tá anotado, saiu', 'Feito, saiu'] as const
+export const ABRE_SAUDACAO = ['Oi', 'E aí', 'Opa'] as const
 
 /** A linha de cima da confirmação de um registro. O valor já vem formatado (R$ 1.234,56) do código. */
 export const confirma = {
@@ -50,6 +51,8 @@ export const confirma = {
   transferencia: (v: string) => `Anotei a transferência de ${v}.`,
   pagouFatura: (v: string) => `Anotei o pagamento da fatura: ${v}.`,
   compraCartao: (v: string) => `Anotei a compra no cartão: ${v}.`,
+  contaDoHabito: (conta: string) => `Usei o ${conta}, como das outras vezes. Se foi em outra conta, é só me dizer.`,
+  dicaCategoria: (desc: string) => `Ficou em "Outros". Quer uma categoria só pra ${desc}? É só responder: criar categoria ${desc}`,
   conta: (tipo: 'pagar' | 'receber', v: string) => (tipo === 'receber' ? `Guardei a conta: ${v} a receber.` : `Guardei a conta: ${v} a pagar.`),
   baixa: (tipo: 'pagar' | 'receber', v: string) => (tipo === 'receber' ? `Boa, recebeu ${v}.` : `Conta paga: ${v}.`),
 }
@@ -62,6 +65,17 @@ export const MSG = {
   corrigi: 'Pronto, corrigi.',
   problemaAoAnotar: 'Deu um problema aqui do meu lado e não consegui anotar agora, nada que você fez. Me manda de novo daqui a pouco?',
   foraDoAssunto: 'Isso aí eu não sei te ajudar, eu cuido só do caixa do seu negócio. Mas me conta o que entrou ou saiu que eu anoto, tipo "recebi 150 no pix". Pra ver tudo o que eu faço, é só mandar AJUDA.',
-  saudacao: (nome: string) => `Oi${nome ? `, ${nome}` : ''}! Tô por aqui. Me manda o que entrou ou saiu que eu anoto, em texto, áudio ou foto do comprovante. Se quiser saber tudo o que eu faço, é só pedir ajuda.`,
+  /** Saudação que acompanha a hora que a pessoa disse e não repete o mesmo texto: a dica de ajuda só vai para quem está começando. */
+  saudacao: (nome: string, texto = '', iniciante = true) => {
+    const n = nome ? `, ${nome}` : ''
+    const hora = /bom dia|boa tarde|boa noite/i.exec(texto.normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
+    const abre = hora ? hora[0][0].toUpperCase() + hora[0].slice(1).toLowerCase() : escolhe(ABRE_SAUDACAO)
+    const corpo = iniciante
+      ? 'Me manda o que entrou ou saiu que eu anoto, em texto, áudio ou foto do comprovante. Se quiser saber tudo o que eu faço, é só pedir ajuda.'
+      : escolhe(['Pode mandar.', 'Tô por aqui.', 'O que entrou ou saiu hoje?'])
+    return `${abre}${n}! ${corpo}`
+  },
+  apagarTudo: 'Eu só desfaço o último registro: é só responder DESFAZER. Pra apagar mais de um, é pelo painel, em Lançamentos.',
+  valorSozinho: (v: string) => `${v} de quê? Entrou ou saiu?`,
   numeroConfirmado: (nome: string) => `Pronto${nome ? `, ${nome}` : ''}, seu número tá confirmado e agora a gente tá conectado! Me manda o que entrou ou saiu que eu anoto.\n\nPor exemplo: "recebi 150 no pix" ou "paguei 89 de luz".`,
 }

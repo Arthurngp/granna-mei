@@ -53,10 +53,15 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
   const quando = (d: string) => (d === ctx.hoje ? 'hoje' : diaBR(d))
   const vencCartao = (cid: string) => ctx.carteiras.find((c) => c.id === cid)?.vencimento ?? 10
   let foiParaOutros = false
+  /** Descrição do lançamento que caiu em Outros: a dica de categoria usa o nome do que ela acabou de anotar. */
+  let descOutros = ''
   // Desfaz o que já gravou se uma ação no meio falhar: ou entra tudo, ou nada.
   try {
     for (const a of acoes) {
-      if (a.categoria_id && OUTROS.has(a.categoria_id)) foiParaOutros = true
+      if (a.categoria_id && OUTROS.has(a.categoria_id)) {
+        foiParaOutros = true
+        if (a.tipo_acao === 'lancamento' && !descOutros) descOutros = a.descricao
+      }
       if (a.tipo_acao === 'criar_categoria') {
         const nome = a.descricao
         const tipo = a.movimento === 'entrada' ? 'entrada' : 'saida'
@@ -135,7 +140,7 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         linhas.push(
           transf
             ? `${confirma.transferencia(brl(a.valor!))}\n${nomeCart(a.carteira_id)} para ${nomeCart(a.carteira_destino_id)} · ${quando(a.data)}`
-            : `${confirma.lancamento(a.movimento === 'entrada' ? 'entrada' : a.pessoal ? 'retirada' : 'saida', brl(a.valor!))}\n${[a.descricao, nomeCat(a.categoria_id), nomeCart(a.carteira_id), quando(a.data)].filter(Boolean).join(' · ')}`,
+            : `${confirma.lancamento(a.movimento === 'entrada' ? 'entrada' : a.pessoal ? 'retirada' : 'saida', brl(a.valor!))}\n${[a.descricao, nomeCat(a.categoria_id), nomeCart(a.carteira_id), quando(a.data)].filter(Boolean).join(' · ')}${a.carteiraDoHabito ? `\n${confirma.contaDoHabito(nomeCart(a.carteira_id))}` : ''}`,
         )
       } else if (a.tipo_acao === 'conta') {
         const cid = id('c')
@@ -197,7 +202,8 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
     await reverter(userId, ef)
     throw e
   }
-  if (foiParaOutros) linhas.push('Ficou em "Outros". Para uma categoria própria, responda: criar categoria (nome). Ex.: criar categoria Combustível')
+  // A dica de categoria só aparece para quem está começando e só para o que foi lançado agora (nunca em conta, fixa ou parcela), com o nome do que ela anotou.
+  if (foiParaOutros && descOutros && ctx.poucosRegistros) linhas.push(confirma.dicaCategoria(descOutros))
   return { efeitos: ef, linhas }
 }
 

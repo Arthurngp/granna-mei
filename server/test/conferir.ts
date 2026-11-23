@@ -81,7 +81,7 @@ caso('quem tem uma conta só nunca recebe pergunta de forma de pagamento', () =>
 })
 caso('gasto sem forma de pagamento com várias contas pergunta, com opções numeradas (sem maquininha nem XP)', () => {
   const r = conferir('gastei 100 no almoço', VARIAS, resp(acao({ valor: 100, descricao: 'Almoço' })))
-  assert.ok(r.perguntar?.startsWith('Pagou como'))
+  assert.ok(r.perguntar?.includes('saiu de qual conta?'))
   assert.deepEqual(r.opcoes!.map((o) => o.id), ['nubank', 'itau', 'santander', 'dinheiro', 'cnu', 'cinter'])
 })
 caso('"no pix" com 3 bancos pergunta só entre os bancos', () => {

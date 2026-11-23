@@ -261,8 +261,12 @@ process.env.WA_GATEWAY_API_KEY = 'falsa'
 process.env.WA_SESSAO = 'teste'
 process.env.SUPABASE_URL = `http://127.0.0.1:${(db.address() as AddressInfo).port}`
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'falsa'
-process.env.OPENAI_API_KEY = 'falsa'
-process.env.OPENAI_BASE_URL = `http://127.0.0.1:${(iaServer.address() as AddressInfo).port}`
+// IA_REAL=1 usa a IA verdadeira (chave e modelo vêm do ambiente, nunca do arquivo) com o banco ainda falso:
+// serve para auditar a conversa de ponta a ponta. Sem isso, a IA é a falsa e o teste não custa nada.
+if (process.env.IA_REAL !== '1') {
+  process.env.OPENAI_API_KEY = 'falsa'
+  process.env.OPENAI_BASE_URL = `http://127.0.0.1:${(iaServer.address() as AddressInfo).port}`
+}
 process.env.PAINEL_URL = 'https://granninha.amplasoft.me/painel'
 delete process.env.WA_SOMENTE_NUMEROS
 

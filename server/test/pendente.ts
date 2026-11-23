@@ -19,7 +19,7 @@ const PEDE_CONTA = acoes(acao({ valor: 12, descricao: 'Pão', meio: null }))
 await caso('IA fora no meio: a pergunta em aberto NÃO se perde', async () => {
   ia.regras = [[/pão/, PEDE_CONTA]]
   const r = await msg('paguei 12 de pão')
-  assert.match(r, /Pagou como/)
+  assert.match(r, /saiu de qual conta\?/)
   assert.equal(pendente()?.tipo, 'pergunta')
 
   // A IA cai justamente quando a pessoa responde "2".
@@ -52,7 +52,7 @@ await caso('pergunta nova gravada depois não é apagada por engano', async () =
   await msg('1')
   ia.regras = [[/material/, acoes(acao({ valor: 30, descricao: 'Material', meio: null }))]]
   const r = await msg('comprei 30 de material')
-  assert.match(r, /Pagou como/)
+  assert.match(r, /saiu de qual conta\?/)
   assert.equal(pendente()?.tipo, 'pergunta', 'a pergunta nova sobrevive à limpeza da anterior')
 })
 
@@ -117,12 +117,12 @@ await caso('insistir numa conta que não existe não deixa a pessoa sem saída',
   ia.regras = [[/mercado|C6|debito|débito/i, SEM_CONTA]]
 
   const primeira = await msg('paguei 33,58 no mercado')
-  assert.match(primeira, /Pagou como/, 'ela pergunta a conta, porque há mais de uma')
-  assert.match(primeira, /cadastre em .*\/ajustes/, 'e já diz o caminho para quem usou outra conta')
+  assert.match(primeira, /saiu de qual conta\?/, 'ela pergunta a conta, porque há mais de uma')
+  assert.match(primeira, /Cadastre em .*\/ajustes/, 'e já diz o caminho para quem usou outra conta')
 
   // A pessoa insiste no nome da conta que ela usa de verdade.
   const segunda = await msg('foi no cartão de débito dentro do cartão C6 Bank')
-  assert.match(segunda, /cadastre em .*\/ajustes/, 'a saída continua à vista quando ela insiste')
+  assert.match(segunda, /Cadastre em .*\/ajustes/, 'a saída continua à vista quando ela insiste')
   assert.equal(lancsU1().length, 0, 'nada é gravado enquanto a conta não é escolhida')
 
   // E escolher pelo número continua funcionando.
@@ -134,8 +134,8 @@ await caso('insistir numa conta que não existe não deixa a pessoa sem saída',
 await caso('a saída aparece também quando é entrada de dinheiro', async () => {
   ia.regras = [[/recebi/, acoes(acao({ valor: 80, movimento: 'entrada', categoria_id: 'vendas', descricao: 'Venda', meio: null, carteira_id: null }))]]
   const r = await msg('recebi 80 de venda')
-  assert.match(r, /Onde caiu/)
-  assert.match(r, /cadastre em .*\/ajustes/)
+  assert.match(r, /caiu em qual conta\?/)
+  assert.match(r, /Cadastre em .*\/ajustes/)
 })
 
 fim()
