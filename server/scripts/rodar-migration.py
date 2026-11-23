@@ -8,6 +8,9 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  enviofrio 20261123160000_envio_manual_contato_frio.sql   o admin pode AUTORIZAR, pedido a pedido e de propósito, o envio para quem nunca escreveu para o número atual (texto próprio: pede para salvar o número novo e começar a lançar).
+          Só libera o contato frio: SAIR, exclusão, WhatsApp não confirmado e o resto seguem recusando. Freio próprio de 10 por dia. Troca as 2 funções do envio manual (sem deixar versão
+          antiga). Compatível com o servidor e o admin atuais. Depende de enviomanual.
   custofoto 20261123140000_custo_foto_documento.sql   custo de IA no admin: separa a leitura de FOTO e DOCUMENTO da leitura de texto (2 campos novos, por dia e por cliente, que são PARTE de
           `entrada`: o total não muda). Só leitura, mesma assinatura. Sem ela o admin continua igual, só sem as duas linhas novas. Depende de adminvisao.
   enviomanual 20261123120000_envio_manual.sql   botão "enviar" do admin: fila de pedidos de envio (fechada ao cliente), 3 funções do admin com auditoria e o tipo
@@ -74,6 +77,7 @@ MIGRATIONS = {
     "recursos": "20261123030000_recursos_cliente.sql",
     "enviomanual": "20261123120000_envio_manual.sql",
     "custofoto": "20261123140000_custo_foto_documento.sql",
+    "enviofrio": "20261123160000_envio_manual_contato_frio.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
@@ -218,6 +222,18 @@ CONFERE = {
             and has_function_privilege('anon', p.oid, 'execute')) as funcoes_abertas_ao_anon,
         (case when to_regclass('public.recursos_cliente') is null then null
               else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.recursos_cliente', false, true, '')))[1]::text end) as clientes_com_recurso""",
+    # Envio manual para contato frio. Confere o que importa: a coluna nova existe, cada função é UMA só (sem sobrecarga, que travaria o PostgREST), o pedido tem a assinatura nova
+    # (com p_forcar), a conferência da pessoa só é executável pelo serviço, o anônimo não pede nada, e nenhum pedido existente virou "contato frio".
+    "enviofrio": """select
+        (select count(*) from information_schema.columns where table_schema='public' and table_name='envios_manuais' and column_name='contato_frio') as coluna_contato_frio,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_envio_pedir') as pedir_definicoes,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='envio_manual_apto') as apto_definicoes,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_envios_fila' and pg_get_functiondef(p.oid) like '%frios%') as fila_traz_frios,
+        (case when to_regprocedure('public.admin_envio_pedir(uuid,text,text,boolean)') is null then null else has_function_privilege('anon', 'public.admin_envio_pedir(uuid,text,text,boolean)', 'execute') end) as anon_pede,
+        (case when to_regprocedure('public.envio_manual_apto(uuid,boolean)') is null then null
+              else (has_function_privilege('anon', 'public.envio_manual_apto(uuid,boolean)', 'execute') or has_function_privilege('authenticated', 'public.envio_manual_apto(uuid,boolean)', 'execute')) end) as cliente_confere_pessoa,
+        (case when not exists (select 1 from information_schema.columns where table_schema='public' and table_name='envios_manuais' and column_name='contato_frio') then null
+              else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.envios_manuais where contato_frio', false, true, '')))[1]::text end) as pedidos_marcados_como_frio""",
     # Custo de foto e documento. Só leitura: confere que a função continua UMA só (sem sobrecarga), que já devolve os dois campos novos, que o anônimo
     # não executa e o logado executa (a função confere eh_admin lá dentro).
     "custofoto": """select

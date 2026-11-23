@@ -344,13 +344,15 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
         ultimo_envio_em: new Date(ultimoEnvioMock).toISOString(),
         whatsapp_ok: !new URLSearchParams(window.location.search).has('whatsoff'),
         itens,
+        frios: ['nunca-Larissa Gomes'],
         recentes: enviosMock.filter((e) => e.status === 'enviado' || e.status === 'falhou').map((e) => ({ id: e.id, user_id: e.user_id, status: e.status, enviado_em: e.enviado_em ?? null, erro: e.erro ?? null })),
       }
     }
     case 'admin_envio_pedir': {
       const u = String(args.p_user)
       if (!['nunca', 'sumiu'].includes(String(args.p_grupo))) throw new Error('este grupo não tem envio pelo sistema: use o link do WhatsApp')
-      if (u.includes('Larissa Gomes')) throw new Error('esta pessoa nunca escreveu para o número atual: chamar primeiro pode bloquear o número')
+      ;(window as unknown as { __pedido?: unknown }).__pedido = args // só para o teste de tela conferir o que foi enviado
+      if ((u.includes('Larissa Gomes') || u.includes('Sônia Vaz')) && !args.p_forcar) throw new Error('esta pessoa nunca escreveu para o número atual: chamar primeiro pode bloquear o número')
       if (u.includes('Diego Matos')) throw new Error('esta pessoa respondeu SAIR e não quer receber mensagem')
       if (enviosMock.some((e) => e.user_id === u && e.status === 'fila')) return { ok: true, ja_na_fila: true }
       const id = `mock-${enviosMock.length + 1}`

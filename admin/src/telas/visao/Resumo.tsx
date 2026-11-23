@@ -68,6 +68,8 @@ interface Fila {
   whatsapp_ok: boolean
   itens: ItemFila[]
   recentes: Recente[]
+  /** Clientes que nunca escreveram para o número ATUAL da Granninha (contato frio). Ausente em banco sem a migration enviofrio: vale como "ninguém". */
+  frios?: string[]
 }
 type EstadoEnvio =
   | { tipo: 'fila' | 'enviando'; id: string; previsto: number; posicao: number }
@@ -76,7 +78,7 @@ type EstadoEnvio =
 
 /** Só estes grupos têm envio pelo sistema: quem parou no passo do WhatsApp nunca escreveu para o número, e quem está sem acesso pede conversa de gente. */
 const COM_ENVIO: Item['grupo'][] = ['nunca', 'sumiu']
-/** A recusa do banco para quem só falou com o número ANTIGO (contato frio). Só nesse caso a tela oferece o link do WhatsApp pessoal: quem respondeu SAIR ou pediu exclusão não recebe nada. */
+/** A recusa do banco para quem só falou com o número ANTIGO (contato frio). Só esse caso tem "Enviar mesmo assim", decisão manual do admin: quem respondeu SAIR ou pediu exclusão não recebe nada, autorizado ou não. */
 const RECUSA_FRIA = /nunca escreveu para o número atual/i
 /** A mesma linha que o servidor acrescenta no fim de toda mensagem (RODAPE_SAIR em server/src/retencao.ts). */
 const LINHA_SAIR = 'Para não receber mais lembretes meus, responda SAIR.'
@@ -124,6 +126,19 @@ function sugestao(i: Item) {
   }
 }
 
+/**
+ * A quem nunca escreveu para o número ATUAL da Granninha não se pede lançamento (não existe conversa com este número): pede-se que salve o contato e comece a
+ * lançar. É o texto do contato frio, e só sai com a decisão do admin. Passa por retencao_texto_erro no banco (sem link, emoji, travessão nem a palavra SAIR).
+ */
+function sugestaoFria(i: Item) {
+  const nome = nome1(i.nome, '')
+  const oi = nome ? `Oi, ${nome}!` : 'Oi!'
+  if (i.grupo === 'sumiu') {
+    return `${oi} Aqui é da Granninha. Estou falando por um número novo de WhatsApp. Salve este contato e me mande seu próximo lançamento por aqui, é só escrever como antes. Se eu pedir para confirmar seu número, é só seguir o passo.`
+  }
+  return `${oi} Aqui é da Granninha. Estou falando por um número novo de WhatsApp. Salve este contato e me mande seu primeiro lançamento por aqui, por exemplo: gastei 50 no mercado. Se eu pedir para confirmar seu número, é só seguir o passo.`
+}
+
 const porque: Record<Item['grupo'], (d: number) => string> = {
   nunca: (d) => `Confirmou o WhatsApp há ${d} dias e não mandou nada. Quanto mais cedo a primeira conversa, maior a chance de virar hábito.`,
   whats: (d) => `Fez o cadastro há ${d} dias e travou na confirmação do número. Sem confirmar, a Granninha não responde.`,
@@ -157,27 +172,31 @@ function ChipEnvio({ e, whatsOk, desvio }: { e: EstadoEnvio; whatsOk: boolean; d
 }
 
 /** O que o admin confere antes de soltar uma mensagem de verdade: o texto exato, por onde sai e quando. */
-function ConfirmarEnvio({ item, fila, desvio, onFechar, onEnviado, onRecusaFria }: { item: Item; fila: Fila; desvio: number; onFechar: () => void; onEnviado: () => void; onRecusaFria: () => void }) {
+function ConfirmarEnvio({ item, fila, desvio, jaFria, onFechar, onEnviado, onRecusaFria }: { item: Item; fila: Fila; desvio: number; jaFria: boolean; onFechar: () => void; onEnviado: () => void; onRecusaFria: () => void }) {
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
-  const texto = sugestao(item)
+  // Contato frio: a fila já diz quem é (campo frios), ou o banco recusou agora, ou já recusou antes nesta sessão. Muda o TEXTO (pede para salvar o número novo e
+  // começar a lançar) e a confirmação passa a levar a autorização do admin.
+  const [fria, setFria] = useState(jaFria || !!fila.frios?.includes(item.user_id))
+  const texto = fria ? sugestaoFria(item) : sugestao(item)
   const recente = fila.ultimo_envio_em ? Date.now() + desvio - Date.parse(fila.ultimo_envio_em) < fila.espera_min * 60_000 : false
   const espera = fila.itens.length > 0 || recente
-  async function enviar() {
+  async function enviar(forcar: boolean) {
     if (enviando) return
     setEnviando(true)
     setErro('')
     try {
-      await rpc('admin_envio_pedir', { p_user: item.user_id, p_grupo: item.grupo, p_texto: texto })
+      await rpc('admin_envio_pedir', { p_user: item.user_id, p_grupo: item.grupo, p_texto: texto, p_forcar: forcar })
       onEnviado()
     } catch (e) {
       const msg = (e as Error).message
-      setErro(msg)
       setEnviando(false)
-      if (RECUSA_FRIA.test(msg)) onRecusaFria()
+      if (RECUSA_FRIA.test(msg)) {
+        setFria(true)
+        onRecusaFria()
+      } else setErro(msg)
     }
   }
-  const fria = RECUSA_FRIA.test(erro)
   return (
     <>
       <span className="k">Confirmar envio</span>
@@ -196,21 +215,28 @@ function ConfirmarEnvio({ item, fila, desvio, onFechar, onEnviado, onRecusaFria 
       </p>
       {!fila.whatsapp_ok && <div className="por">O WhatsApp da Granninha está desconectado agora. O pedido fica na fila e sai quando reconectar.</div>}
       {erro && <div className="por" role="alert">{erro}</div>}
-      {fria && <p className="texto-ajuda">Esta pessoa só falou com o número antigo da Granninha. Pelo seu WhatsApp pessoal você pode chamar: o texto abre pronto, você revisa e envia.</p>}
+      {fria && (
+        <div className="por" role="alert">
+          Esta pessoa só falou com o número antigo da Granninha, então a mensagem pede para salvar o número novo e começar a lançar. Mandar do número novo para quem nunca falou com ele tem risco de bloqueio. A decisão é sua.
+        </div>
+      )}
       <div className="acoes-g">
         <button type="button" onClick={onFechar}>
           Cancelar
         </button>
-        {fria ? (
-          <a className="p" href={waLink(item.whats, texto)} target="_blank" rel="noopener noreferrer">
-            Abrir no WhatsApp
-          </a>
-        ) : (
-          <button type="button" className="p" onClick={enviar} disabled={enviando}>
-            {enviando ? 'Enviando…' : 'Enviar mensagem'}
-          </button>
-        )}
+        <button type="button" className="p" onClick={() => void enviar(fria)} disabled={enviando}>
+          {enviando ? 'Enviando…' : 'Enviar mensagem'}
+        </button>
       </div>
+      {fria && (
+        <p className="texto-ajuda">
+          Ou prefira o seu WhatsApp pessoal:{' '}
+          <a href={waLink(item.whats, texto)} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', fontWeight: 700 }}>
+            abrir a conversa
+          </a>
+          . O texto abre pronto, você revisa e envia.
+        </p>
+      )}
     </>
   )
 }
@@ -237,7 +263,7 @@ export function Resumo() {
   const fila = useRpc<Fila>('admin_envios_fila', {}, 10_000, versaoFila)
   const [confirmar, setConfirmar] = useState<Item | null>(null)
   const [avisoEnvio, setAvisoEnvio] = useState('')
-  // Quem o banco recusou por nunca ter escrito para o número atual: a linha volta ao link do WhatsApp em vez de oferecer um botão que sempre falha.
+  // Quem o banco já recusou por só ter falado com o número antigo: na próxima vez a confirmação já abre pedindo "Enviar mesmo assim", sem passar pela recusa de novo.
   const [soAntigo, setSoAntigo] = useState<Record<string, true>>({})
   const fecharFicha = useCallback(() => setSel(null), [])
   const fecharConfirmar = useCallback(() => setConfirmar(null), [])
@@ -245,7 +271,9 @@ export function Resumo() {
   const recebidoEm = useMemo(() => Date.now(), [fila.dados])
   const desvio = fila.dados ? Date.parse(fila.dados.agora) - recebidoEm : 0
   const podeEnviar = !!fila.dados
-  const comEnvioPara = (i: Item) => podeEnviar && COM_ENVIO.includes(i.grupo) && !soAntigo[i.user_id]
+  const comEnvioPara = (i: Item) => podeEnviar && COM_ENVIO.includes(i.grupo)
+  /** O texto certo para esta conta: o do contato frio se ela nunca escreveu para o número atual, o de sempre nos outros casos. */
+  const textoDe = (i: Item) => (COM_ENVIO.includes(i.grupo) && (soAntigo[i.user_id] || fila.dados?.frios?.includes(i.user_id)) ? sugestaoFria(i) : sugestao(i))
   const envioDe = (i: Item): EstadoEnvio | null => {
     const f = fila.dados
     if (!f || !COM_ENVIO.includes(i.grupo)) return null
@@ -529,7 +557,7 @@ export function Resumo() {
             <div className="fato"><span>Passo das boas-vindas</span><b>{NOME_PASSO[Math.min(7, sel.passo)] ?? sel.passo}</b></div>
             <div className="fato"><span>Última mensagem</span><b>{dataHora(sel.ultima)}</b></div>
             <h4>Mensagem sugerida</h4>
-            <div className="msg">{sugestao(sel)}</div>
+            <div className="msg">{textoDe(sel)}</div>
             {(() => {
               const env = envioDe(sel)
               const podeSistema = comEnvioPara(sel) && (!env || env.tipo === 'falhou')
@@ -541,7 +569,7 @@ export function Resumo() {
                         {env?.tipo === 'falhou' ? 'Tentar de novo pelo sistema' : 'Enviar pelo sistema'}
                       </button>
                     )}
-                    <a className={podeSistema ? '' : 'p'} href={waLink(sel.whats, sugestao(sel))} target="_blank" rel="noopener noreferrer">
+                    <a className={podeSistema ? '' : 'p'} href={waLink(sel.whats, textoDe(sel))} target="_blank" rel="noopener noreferrer">
                       Abrir conversa no WhatsApp
                     </a>
                   </div>
@@ -564,6 +592,7 @@ export function Resumo() {
             item={confirmar}
             fila={fila.dados}
             desvio={desvio}
+            jaFria={!!soAntigo[confirmar.user_id]}
             onFechar={fecharConfirmar}
             onRecusaFria={() => setSoAntigo((m) => ({ ...m, [confirmar.user_id]: true }))}
             onEnviado={() => {
