@@ -3,6 +3,7 @@
  * Ordem: registra (sem duplicar) → reconhece o cliente pelo número verificado → confere acesso e uso →
  * transforma áudio, foto ou PDF em texto → entende → grava → responde.
  */
+import { temNumeroDeValor, valorConfere } from './numeros.ts'
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, silenciarLembretes, usoDoMes } from './banco.ts'
 import { ehAssuntoDaConta, ehPedidoDeAjuda, responderAjuda } from './ajuda.ts'
 import { ehApagarTudo, respostaBaixa, valorSozinho } from './atalhos.ts'
@@ -614,7 +615,10 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   // e a pergunta continua em aberto para quando ela responder.
   const pediuAjuda = !documento && !anexo && (ehPedidoDeAjuda(texto) || ehAssuntoDaConta(texto))
   const escolha = pend?.tipo === 'pergunta' && fresco && pend.opcoes?.length ? opcaoEscolhida(texto, pend.opcoes) : null
-  const continua = !pediuAjuda && pend?.tipo === 'pergunta' && fresco && !!pend.texto && (!pend.opcoes?.length || !!escolha || /^\s*\d{1,2}\s*$/.test(texto))
+  // Pergunta aberta sobre um COMPROVANTE ("Li R$ 192,05. O que foi?") e a pessoa manda outra coisa com valor próprio (325,77, 209,85): é um registro novo, não a
+  // resposta. Sem isto o comprovante antigo era herdado por toda mensagem seguinte, o valor nunca batia e a Granninha repetia a mesma pergunta para sempre.
+  const outroValor = !!pend?.documento && !documento && temNumeroDeValor(texto) && !valorConfere(texto, pend.documento.valor, null)
+  const continua = !pediuAjuda && !outroValor && pend?.tipo === 'pergunta' && fresco && !!pend.texto && (!pend.opcoes?.length || !!escolha || /^\s*\d{1,2}\s*$/.test(texto))
   const forcar: { carteira?: string; pessoal?: boolean } = continua ? { ...(pend!.forcar ?? {}) } : {}
   if (continua && pend!.documento && !documento) documento = pend!.documento
   // O lançamento guarda de onde veio a primeira mensagem (áudio, foto, PDF) e o comprovante, mesmo depois das perguntas.

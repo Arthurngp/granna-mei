@@ -17,6 +17,8 @@ export interface Efeitos {
   categorias?: string[]
   /** Lançamentos que trocaram de categoria (para o DESFAZER voltar) */
   recategorizados?: { id: string; de: string | null }[]
+  /** Contas fixas que mudaram de valor: o valor de ANTES da fixa e de cada conta em aberto dela (para o DESFAZER voltar) */
+  valores?: { fixa: string; valor: number; contas: { id: string; valor: number }[] }[]
 }
 export type Origem = 'texto' | 'audio' | 'foto' | 'pdf'
 
@@ -42,7 +44,7 @@ const slug = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCa
 const OUTROS = new Set(['outras-saidas', 'outras-entradas'])
 
 export async function executar(userId: string, ctx: Contexto, acoes: Acao[], origem: Origem, anexo: string | null, anteriores?: Efeitos): Promise<Resultado> {
-  const ef: Efeitos = { lancamentos: [], contas: [], fixas: [], contasPagas: [], categorias: [], recategorizados: [] }
+  const ef: Efeitos = { lancamentos: [], contas: [], fixas: [], contasPagas: [], categorias: [], recategorizados: [], valores: [] }
   const linhas: string[] = []
   const nomeCat = (cid: string | null) => ctx.categorias.find((c) => c.id === cid)?.nome
   const nomeCart = (cid: string | null) => ctx.carteiras.find((c) => c.id === cid)?.nome ?? 'carteira'
@@ -83,6 +85,26 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
           }
         }
         linhas.push(`Criei a categoria "${nome}" (${tipo === 'saida' ? 'gasto' : 'recebimento'}).${movidos ? ` O último lançamento que estava em Outros já foi para ela.` : ''}`)
+        continue
+      }
+      if (a.tipo_acao === 'ajustar_fixa') {
+        // Mesma regra do painel: a conta fixa é a fonte, então as contas em aberto dela (inclusive a vencida) levam o valor novo; as pagas não mudam.
+        const novo = centavos(a.valor!)
+        const fx = await sb.from('fixas').select('id,valor').eq('user_id', userId).eq('id', a.fixa_id!).maybeSingle()
+        falhou(fx.error, 'ajustar fixa: ler')
+        if (!fx.data) throw new Error('ajustar fixa: a conta fixa não existe mais')
+        const ab = await sb.from('contas').select('id,valor').eq('user_id', userId).eq('fixa_id', a.fixa_id!).eq('status', 'aberta')
+        falhou(ab.error, 'ajustar fixa: ler contas')
+        // Guarda o que havia ANTES de gravar: é isso que o DESFAZER, a correção e a falha no meio devolvem.
+        ef.valores!.push({ fixa: a.fixa_id!, valor: Number(fx.data.valor), contas: (ab.data ?? []).map((c) => ({ id: c.id as string, valor: Number(c.valor) })) })
+        const r1 = await sb.from('fixas').update({ valor: novo }).eq('user_id', userId).eq('id', a.fixa_id!)
+        falhou(r1.error, 'ajustar fixa')
+        const n = ab.data?.length ?? 0
+        if (n) {
+          const r2 = await sb.from('contas').update({ valor: novo }).eq('user_id', userId).eq('fixa_id', a.fixa_id!).eq('status', 'aberta')
+          falhou(r2.error, 'ajustar contas da fixa')
+        }
+        linhas.push(`${a.descricao} agora é ${brl(novo)} todo mês.\n${n ? `Ajustei ${n === 1 ? 'a conta em aberto' : `as ${n} contas em aberto`}. As que você já pagou ficam como estão.` : 'Não tinha conta em aberto para ajustar. As próximas já saem com o valor novo.'}`)
         continue
       }
       if (a.tipo_acao === 'pagar_fatura') {
@@ -205,6 +227,11 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
 
 /** Reverte exatamente o que uma mensagem criou. */
 export async function reverter(userId: string, ef: Efeitos) {
+  // Valor de conta fixa: do último ajuste para o primeiro. Conta que já foi paga nesse meio tempo fica como está (o dinheiro já saiu).
+  for (const v of [...(ef.valores ?? [])].reverse()) {
+    falhou((await sb.from('fixas').update({ valor: v.valor }).eq('user_id', userId).eq('id', v.fixa)).error, 'voltar valor da fixa')
+    for (const c of v.contas) falhou((await sb.from('contas').update({ valor: c.valor }).eq('user_id', userId).eq('id', c.id).eq('status', 'aberta')).error, 'voltar valor da conta')
+  }
   for (const r of ef.recategorizados ?? []) falhou((await sb.from('lancamentos').update({ categoria_id: r.de }).eq('user_id', userId).eq('id', r.id)).error, 'voltar categoria')
   if (ef.categorias?.length) falhou((await sb.from('categorias').delete().eq('user_id', userId).in('id', ef.categorias)).error, 'apagar categorias')
   if (ef.contasPagas?.length) falhou((await sb.from('contas').update({ status: 'aberta', pago_em: null, lancamento_id: null }).eq('user_id', userId).in('id', ef.contasPagas)).error, 'reabrir contas')
