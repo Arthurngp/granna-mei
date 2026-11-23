@@ -3,6 +3,7 @@
  * Ordem: registra (sem duplicar) → reconhece o cliente pelo número verificado → confere acesso e uso →
  * transforma áudio, foto ou PDF em texto → entende → grava → responde.
  */
+import { cruzarComprovante } from './cruzar.ts'
 import { temNumeroDeValor, valorConfere } from './numeros.ts'
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, silenciarLembretes, usoDoMes } from './banco.ts'
 import { ehAssuntoDaConta, ehPedidoDeAjuda, responderAjuda } from './ajuda.ts'
@@ -416,7 +417,7 @@ interface Conversa {
   tokens: Uso
 }
 
-async function conversar(cliente: { id: string; nome: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string, saida: { pendenteLida?: string | null } = {}, retomada = false): Promise<Conversa> {
+async function conversar(cliente: { id: string; nome: string; negocio?: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string, saida: { pendenteLida?: string | null } = {}, retomada = false): Promise<Conversa> {
   const tokens: Uso = { entrada: 0, saida: 0, audio: 0 }
   const soma = (u: Uso) => {
     tokens.entrada += u.entrada
@@ -427,6 +428,8 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   let texto = (d.content ?? '').trim()
   let anexo: string | null = null
   let documento: { valor: number; movimento: 'entrada' | 'saida' } | undefined
+  /** Conta do cliente que o comprovante revela (banco de origem ou de destino cruzado com as carteiras dele): evita perguntar "de qual conta?". */
+  let carteiraDoComprovante: string | undefined
   const nome = cliente.nome.split(' ')[0]
 
   // Pergunta em aberto (ex.: "qual foi o valor?") ou importação de extrato esperando um sim.
@@ -487,6 +490,31 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
           ? `Quer que eu importe? Responda com o número da conta deste extrato, ou NÃO:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`
           : 'Quer que eu importe? Responda SIM ou NÃO.'),
         efeitos: {}, intencao: 'extrato', texto: leitura.resumo, tokens,
+      }
+    }
+    // Comprovante: cruza o banco de origem e o de destino com as contas do cliente. Entre duas contas dele é transferência (não é entrada nem saída);
+    // só a origem dele é saída dessa conta; só o destino dele é entrada nessa conta. Sem reconhecer nenhuma, segue como antes.
+    if (leitura.tipo === 'comprovante') {
+      const cx = await contextoDe(cliente.id, hoje)
+      const cruz = cruzarComprovante(leitura, cx.carteiras, [cliente.nome, cliente.negocio])
+      if (cruz?.tipo === 'transferencia') {
+        const t = leitura.transacoes[0]
+        const data = t.data && /^\d{4}-\d{2}-\d{2}$/.test(t.data) && t.data <= hoje ? t.data : hoje
+        const acao: Acao = {
+          tipo_acao: 'transferencia', movimento: null, valor: t.valor, descricao: `Transferência ${cruz.de.nome} para ${cruz.para.nome}`, categoria_id: null,
+          carteira_id: cruz.de.id, carteira_destino_id: cruz.para.id, meio: null, data, pessoal: false, vencimento: null, dia_do_mes: null, parcelas: null,
+          conta_id: null, talvez_pessoal: false, fatura: null, noCartao: false,
+        }
+        const r = await executar(cliente.id, cx, [acao], tipo, anexo)
+        return {
+          status: 'ok',
+          resposta: `${r.linhas.join('\n\n')}\nNão conta como entrada nem saída: o dinheiro só mudou de conta.${await saldoDepois(cliente.id, [acao])}\n\n${ERROU}`,
+          efeitos: r.efeitos, intencao: 'acoes', texto: leitura.resumo, tokens,
+        }
+      }
+      if (cruz) {
+        leitura.transacoes[0].movimento = cruz.tipo
+        carteiraDoComprovante = cruz.carteira.id
       }
     }
     texto = textoDoDocumento(leitura, d.caption ?? '')
@@ -621,6 +649,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   const continua = !pediuAjuda && !outroValor && pend?.tipo === 'pergunta' && fresco && !!pend.texto && (!pend.opcoes?.length || !!escolha || /^\s*\d{1,2}\s*$/.test(texto))
   const forcar: { carteira?: string; pessoal?: boolean } = continua ? { ...(pend!.forcar ?? {}) } : {}
   if (continua && pend!.documento && !documento) documento = pend!.documento
+  if (carteiraDoComprovante && !forcar.carteira) forcar.carteira = carteiraDoComprovante
   // O lançamento guarda de onde veio a primeira mensagem (áudio, foto, PDF) e o comprovante, mesmo depois das perguntas.
   const origemFinal: Origem = continua && pend!.origem ? pend!.origem : tipo
   if (continua && pend!.anexo && !anexo) anexo = pend!.anexo
