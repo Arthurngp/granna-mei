@@ -11,7 +11,7 @@
  *   npx tsx test/conversa.ts
  */
 import assert from 'node:assert/strict'
-import { acao, acoes, caso, E, fim, HOJE, ia, lancsU1, msg, NUM, SEM_ACAO, somaDias, U1 } from './_falsos.ts'
+import { acao, acoes, caso, E, fim, HOJE, ia, lancsU1, msg, msgPdf, NUM, SEM_ACAO, somaDias, U1 } from './_falsos.ts'
 
 const { construirHabitos, habitoDeCarteira } = await import('../src/interpretar.ts')
 const { reconhecer } = await import('../src/consultas.ts')
@@ -226,6 +226,47 @@ await caso('a dica de "Outros" usa o nome do que foi anotado, só para quem est�
   for (let i = 0; i < 6; i++) hist('saida', `Gasto ${i}`, 'nubank', i + 1)
   const b = await msg('barbante 12 no pix')
   assert.doesNotMatch(b, /Ficou em "Outros"/, 'quem já usa não é cutucado')
+})
+
+/* ---------- fatura em PDF ---------- */
+
+const FATURA = { tipo: 'fatura_cartao', meio: null, vencimento: '2026-12-10', resumo: 'Fatura do cartão', transacoes: [
+  { descricao: 'Posto Shell', valor: 180, movimento: 'saida', data: '2026-11-05' }, { descricao: 'Papelaria Central', valor: 64.7, movimento: 'saida', data: '2026-11-12' },
+  { descricao: 'Distribuidora Silva', valor: 245, movimento: 'saida', data: '2026-11-18' },
+] }
+
+await caso('fatura com UM cartão: uma pergunta só, e o "sim" já importa nesse cartão', async () => {
+  ia.documento = FATURA
+  const a = await msgPdf('fatura.pdf')
+  assert.equal(a.status, 'pergunta')
+  assert.match(a.resposta, /Achei 3 compras nessa fatura, somando R\$ 489,70 \(vence 10\/12\)\./)
+  assert.match(a.resposta, /Quer que eu importe no Cartão Inter\? Responda SIM ou NÃO\./)
+  assert.doesNotMatch(a.resposta, /número do cartão/, 'com um cartão só não pede número')
+  const b = await msg('sim')
+  assert.match(b, /Importei 3 compras no Cartão Inter, somando R\$ 489,70/, b)
+  assert.doesNotMatch(b, /Em qual cartão/)
+  assert.equal(lancsU1().filter((l) => l.tipo === 'compra_cartao').length, 3)
+})
+
+await caso('fatura com um cartão: "não" não importa nada, e o número "1" também continua valendo', async () => {
+  ia.documento = FATURA
+  await msgPdf('fatura.pdf')
+  assert.match(await msg('não'), /Tudo bem, não importei a fatura/)
+  assert.equal(lancsU1().length, 0)
+  await msgPdf('fatura.pdf')
+  assert.match(await msg('1'), /Importei 3 compras no Cartão Inter/)
+})
+
+await caso('fatura com DOIS cartões: pergunta o número, e o "sim" ainda pergunta qual', async () => {
+  E.tabelas.carteiras.push({ user_id: U1, id: 'cartao2', nome: 'Nubank Cartão', tipo: 'cartao', saldo_inicial: 0, padrao: false, fechamento: 5, vencimento: 12, conta_pagamento_id: 'nubank' })
+  ia.documento = FATURA
+  const a = await msgPdf('fatura.pdf')
+  assert.match(a.resposta, /Responda com o número do cartão, ou NÃO:\n1\. Cartão Inter\n2\. Nubank Cartão/, a.resposta)
+  const b = await msg('sim')
+  assert.match(b, /Em qual cartão\? Responda com o número:\n1\. Cartão Inter\n2\. Nubank Cartão/, b)
+  const c = await msg('2')
+  assert.match(c, /Importei 3 compras no Nubank Cartão/, c)
+  assert.equal(lancsU1().filter((l) => l.carteira_id === 'cartao2').length, 3)
 })
 
 fim()
