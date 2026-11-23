@@ -87,6 +87,25 @@ export function textoSaldo(b: Base): string {
   return linhas.join('\n')
 }
 
+/**
+ * Aviso de conta que ficou NEGATIVA por causa do que acabou de ser anotado ("Dinheiro: -R$ 450,00" depois de tirar 500 de quem
+ * tinha 50). Só avisa quando ESTA mensagem foi o que a deixou negativa: quem já começou no negativo (saldo inicial zerado, por
+ * exemplo) não é cutucado a cada registro. Só conta de dinheiro (banco, dinheiro, maquininha); cartão e investimento ficam de fora.
+ * `saidas` = quanto saiu de cada conta nesta mensagem.
+ */
+export function contasQueFicaramNegativas(b: Base, saidas: Map<string, number>): { nome: string; saldo: number }[] {
+  const sal = saldosDaBase(b)
+  const out: { nome: string; saldo: number }[] = []
+  for (const [id, saiu] of saidas) {
+    const c = b.carteiras.find((x) => x.id === id)
+    if (!c || foraDoDisponivel(c.tipo)) continue
+    const depois = sal[id] ?? 0
+    // Antes da mensagem: depois + o que saiu. Se já era negativo, não é novidade.
+    if (depois < 0 && depois + saiu >= 0) out.push({ nome: c.nome, saldo: depois })
+  }
+  return out
+}
+
 /** As linhas que fecham a confirmação de um lançamento: onde ficou o saldo e quanto há disponível. */
 export function linhasDeSaldoDepois(b: Base, carteiraIds: (string | null | undefined)[]): string {
   const sal = saldosDaBase(b)

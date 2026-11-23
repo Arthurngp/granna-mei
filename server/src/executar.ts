@@ -182,7 +182,7 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         const conta = ctx.contasAbertas.find((c) => c.id === a.conta_id)!
         const lid = id('l')
         const r1 = await sb.from('lancamentos').insert({
-          user_id: userId, id: lid, tipo: conta.tipo === 'receber' ? 'entrada' : a.noCartao ? 'compra_cartao' : 'saida', valor: conta.valor, descricao: conta.descricao,
+          user_id: userId, id: lid, tipo: conta.tipo === 'receber' ? 'entrada' : a.noCartao ? 'compra_cartao' : 'saida', valor: centavos(a.valor ?? conta.valor), descricao: conta.descricao,
           categoria_id: a.categoria_id, carteira_id: a.carteira_id, data: a.data, hora: agora(), origem, anexo_path: anexo, fatura: a.noCartao ? a.fatura : null,
         })
         falhou(r1.error, 'baixa: lançamento')
@@ -191,7 +191,7 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         const r2 = await sb.from('contas').update({ status: 'paga', pago_em: a.data, lancamento_id: lid }).eq('user_id', userId).eq('id', conta.id).eq('status', 'aberta').select('id')
         falhou(r2.error, 'baixa: conta')
         if (r2.data?.length) ef.contasPagas!.push(conta.id)
-        linhas.push(`${confirma.baixa(conta.tipo === 'receber' ? 'receber' : 'pagar', brl(conta.valor))}\n${conta.descricao} · ${nomeCart(a.carteira_id)} · ${quando(a.data)}`)
+        linhas.push(`${confirma.baixa(conta.tipo === 'receber' ? 'receber' : 'pagar', brl(a.valor ?? conta.valor))}\n${conta.descricao} · ${nomeCart(a.carteira_id)} · ${quando(a.data)}`)
       }
     }
   } catch (e) {

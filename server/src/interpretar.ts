@@ -99,6 +99,12 @@ export interface Acao extends AcaoIA {
   noCartao: boolean
   /** A conta foi escolhida pelo histórico do cliente (e não dita nem perguntada): a confirmação avisa. */
   carteiraDoHabito?: boolean
+  /**
+   * O valor dito é diferente do da conta em aberto que a frase nomeia ("paguei 140 de luz", conta de luz de 150). Pode ser a mesma conta
+   * paga a menos ou a mais, ou outro gasto: o fluxo pergunta antes de gravar, porque só lançar deixa a conta aberta (em dobro) e só dar baixa
+   * pode ser a conta errada.
+   */
+  baixaDiferente?: { contaId: string; descricao: string; valorConta: number; vencimento: string; tipo: 'pagar' | 'receber' }
 }
 
 /** Opção de uma pergunta de forma de pagamento. O id especial BOLETO quer dizer "boleto ou carnê". */
@@ -255,6 +261,16 @@ function esquema(c: Contexto) {
 
 const tira = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 const VAZIAS = new Set(['conta', 'contas', 'de', 'da', 'do', 'das', 'dos', 'para', 'pra', 'com', 'pacote', 'parcela'])
+/**
+ * A descrição do lançamento e a da conta em aberto falam da mesma coisa? Compara só as palavras que dizem O QUE é (luz, aluguel, Joana),
+ * sem as que descrevem como foi pago ou o tipo de papel (boleto, pix, fatura): "Cemig no boleto" não é a conta "Boleto velho".
+ */
+const GENERICAS = new Set([...VAZIAS, 'boleto', 'pix', 'fatura', 'cartao', 'debito', 'credito', 'pagamento', 'recebimento', 'mensalidade'])
+function mesmaCoisa(a: string, b: string) {
+  const pal = (s: string) => tira(s).split(/[^a-z0-9]+/).filter((p) => p.length >= 3 && !GENERICAS.has(p))
+  const pb = pal(b)
+  return pal(a).some((p) => pb.includes(p))
+}
 /** A frase cita a conta? Alguma palavra significativa da descrição aparece na mensagem. */
 function nomeada(texto: string, descricao: string) {
   const t = tira(texto)
@@ -384,8 +400,24 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
     if (a.valor !== null && temNumeroDeValor(texto) && !valorConfere(texto, a.valor, a.parcelas)) {
       return { acoes: [], perguntar: `Só para conferir: o valor de "${a.descricao}" é quanto?` }
     }
-    const conta = c.contasAbertas.find((x) => x.id === a.conta_id)
-    if (a.tipo_acao === 'baixar_conta' && (!conta || !nomeada(texto, conta.descricao) || (a.valor !== null && Math.abs(a.valor - conta.valor) > 0.01))) {
+    let conta = c.contasAbertas.find((x) => x.id === a.conta_id)
+    // Valor diferente do da conta em aberto que a frase nomeia: não decide sozinha, o fluxo pergunta (dar baixa ou lançar como outro gasto).
+    let baixaDif: Acao['baixaDiferente']
+    if (a.valor !== null && a.valor > 0) {
+      const alvo = a.tipo_acao === 'baixar_conta'
+        ? conta
+        : a.tipo_acao === 'lancamento' && a.movimento && a.meio !== 'credito'
+          ? c.contasAbertas.find((x) => x.tipo === (a.movimento === 'entrada' ? 'receber' : 'pagar') && mesmaCoisa(a.descricao, x.descricao))
+          : undefined
+      if (alvo && Math.abs(a.valor - alvo.valor) > 0.01 && (a.tipo_acao !== 'baixar_conta' || nomeada(texto, alvo.descricao))) {
+        baixaDif = { contaId: alvo.id, descricao: alvo.descricao, valorConta: alvo.valor, vencimento: alvo.vencimento, tipo: alvo.tipo }
+        a.tipo_acao = 'baixar_conta'
+        a.conta_id = alvo.id
+        a.movimento = alvo.tipo === 'receber' ? 'entrada' : 'saida'
+        conta = alvo
+      }
+    }
+    if (a.tipo_acao === 'baixar_conta' && !baixaDif && (!conta || !nomeada(texto, conta.descricao) || (a.valor !== null && Math.abs(a.valor - conta.valor) > 0.01))) {
       // Conta não nomeada ou valor diferente: não dá baixa em conta errada. Com valor, vira lançamento; sem valor, pergunta.
       if (a.valor !== null && a.valor > 0 && conta) {
         a.tipo_acao = 'lancamento'
@@ -484,6 +516,7 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
       dia_do_mes: a.dia_do_mes ? Math.min(31, a.dia_do_mes) : null,
       noCartao,
       carteiraDoHabito: doHabito || undefined,
+      baixaDiferente: baixaDif,
       fatura: noCartao && ccart ? faturaDe(data, ccart.fechamento ?? 1, ccart.vencimento ?? 10) : null,
     })
   }

@@ -45,9 +45,23 @@ caso('data no futuro para algo que já aconteceu vira hoje', () => {
 caso('baixa de conta que a pessoa não nomeou vira pergunta', () => {
   assert.ok(conferir('paguei a luz', CTX, resp(acao({ tipo_acao: 'baixar_conta', valor: null, conta_id: 'c-agua' }))).perguntar)
 })
-caso('baixa com valor diferente da conta vira lançamento novo', () => {
+caso('baixa com valor diferente da conta não decide sozinha: marca para o fluxo perguntar', () => {
   const r = conferir('paguei 40 da água', CTX, resp(acao({ tipo_acao: 'baixar_conta', valor: 40, conta_id: 'c-agua' })))
-  assert.equal(r.acoes[0].tipo_acao, 'lancamento')
+  assert.equal(r.acoes[0].tipo_acao, 'baixar_conta')
+  assert.deepEqual(r.acoes[0].baixaDiferente, { contaId: 'c-agua', descricao: 'Conta de água', valorConta: 85, vencimento: '2026-11-18', tipo: 'pagar' })
+  assert.equal(r.acoes[0].valor, 40, 'guarda o valor que a pessoa disse')
+})
+caso('lançamento com o nome de uma conta em aberto e valor diferente também vira pergunta de baixa', () => {
+  const r = conferir('paguei 40 de água', CTX, resp(acao({ valor: 40, descricao: 'Água' })))
+  assert.equal(r.acoes[0].tipo_acao, 'baixar_conta')
+  assert.equal(r.acoes[0].baixaDiferente?.valorConta, 85)
+  assert.equal(r.acoes[0].conta_id, 'c-agua')
+})
+caso('sem nome de conta em aberto, ou com o mesmo valor, nada muda', () => {
+  assert.equal(conferir('paguei 40 de gasolina', CTX, resp(acao({ valor: 40, descricao: 'Gasolina' }))).acoes[0].baixaDiferente, undefined)
+  const igual = conferir('paguei 85 da água', CTX, resp(acao({ tipo_acao: 'baixar_conta', valor: 85, conta_id: 'c-agua' })))
+  assert.equal(igual.acoes[0].baixaDiferente, undefined)
+  assert.equal(igual.acoes[0].tipo_acao, 'baixar_conta')
 })
 caso('gasto pessoal cai na retirada do dono', () => {
   assert.equal(conferir('mercado de casa 230', CTX, resp(acao({ valor: 230, pessoal: true, categoria_id: 'alimentacao' }))).acoes[0].categoria_id, 'retirada')

@@ -165,7 +165,7 @@ await caso('gastos por dia, contas fixas e próximos dias saem do banco', async 
   const prox = await msg('o que vence nos próximos dias')
   assert.match(prox, /Boleto velho R\$ 70,00/)
   assert.match(prox, /Joana R\$ 300,00 \(a receber\)/)
-  assert.match(prox, /Luz R\$ 150,00/)
+  assert.match(prox, /Energia R\$ 150,00/)
   assert.match(prox, /Total: a pagar R\$ 220,00, a receber R\$ 300,00/)
 })
 

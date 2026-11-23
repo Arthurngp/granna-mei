@@ -19,6 +19,14 @@ export function ehApagarTudo(texto: string): boolean {
   return re.test(t)
 }
 
+/** Resposta à pergunta "dar baixa na conta ou anotar como outro gasto?": 1 dá baixa, 2 anota à parte. */
+export function respostaBaixa(texto: string): 'baixa' | 'novo' | null {
+  const t = norm(texto)
+  if (/^(1|sim|s|dar baixa|baixa|pode|a conta|e a conta)$/.test(t)) return 'baixa'
+  if (/^(2|nao|n|outro|outro gasto|outro recebimento|novo|deixa aberta|deixa a conta aberta)$/.test(t)) return 'novo'
+  return null
+}
+
 /** Mensagem que é só um valor ("150", "R$ 1.250,50", "20 reais", "50 conto"): devolve o número, ou null. */
 export function valorSozinho(texto: string): number | null {
   const t = texto.trim().toLowerCase().replace(/\s+/g, ' ')
