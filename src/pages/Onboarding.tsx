@@ -6,7 +6,7 @@ import { CampoDinheiro, Chave, Mascote, Seg, type Pose } from '../components/ui'
 import { FAIXAS_FATURAMENTO, FAIXAS_RENDA, linkWhats, OCUPACAO_MIN, RAMOS, UFS } from '../lib/config'
 import { evento } from '../lib/eventos'
 import { salvarPerfilPublico, type PerfilPublico } from '../lib/remoto'
-import { documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaMeses } from '../lib/format'
+import { documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaMeses, vencimentoNoMes } from '../lib/format'
 import { categoriasPadrao } from '../lib/seed'
 import { novoId, useApp } from '../lib/store'
 import type { Carteira, Conta, Fixa, TipoCarteira } from '../lib/tipos'
@@ -209,7 +209,7 @@ export default function Onboarding() {
       const contas: Conta[] = []
       for (const f of fx) {
         for (let k = 0; k < 3; k++) {
-          const venc = `${somaMeses(mesAtual(), k)}-${String(Math.min(f.dia, 28)).padStart(2, '0')}`
+          const venc = vencimentoNoMes(somaMeses(mesAtual(), k), f.dia)
           if (venc < h) continue
           contas.push({ id: novoId('c'), tipo: 'pagar', descricao: f.descricao, valor: f.valor, vencimento: venc, status: 'aberta', categoriaId: f.categoriaId, fixaId: f.id, das: f.das })
         }
@@ -593,7 +593,7 @@ export default function Onboarding() {
                     <label className="campo">
                       <span>Vence todo dia</span>
                       <select className="entrada num" value={f.dia} onChange={(e) => mudaFixa(f.id, { dia: Number(e.target.value) })}>
-                        {Array.from({ length: 28 }, (_, i) => (
+                        {Array.from({ length: 31 }, (_, i) => (
                           <option key={i} value={i + 1}>
                             {i + 1}
                           </option>

@@ -481,7 +481,7 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
       carteira_id: carteira,
       pessoal,
       data,
-      dia_do_mes: a.dia_do_mes ? Math.min(28, a.dia_do_mes) : null,
+      dia_do_mes: a.dia_do_mes ? Math.min(31, a.dia_do_mes) : null,
       noCartao,
       carteiraDoHabito: doHabito || undefined,
       fatura: noCartao && ccart ? faturaDe(data, ccart.fechamento ?? 1, ccart.vencimento ?? 10) : null,
