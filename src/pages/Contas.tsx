@@ -1,10 +1,11 @@
 import { Check, ChevronDown, CreditCard, MessageCircle, Repeat } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { BotaoZap, FaixaAssinatura, Topo } from '../components/Shell'
-import { Folha, Seg, useAviso, Vazio } from '../components/ui'
+import { CampoDinheiroSalvo, Folha, Seg, useAviso, Vazio } from '../components/ui'
 import { linkWhats } from '../lib/config'
 import { faturas, type FaturaResumo } from '../lib/cartao'
 import { brl, capitaliza, centavosDe, diaCurto, diaExtenso, difDias, dinheiroCampo, hoje, prazo, somaDias } from '../lib/format'
+import { mudarFixa, mudarValorConta } from '../lib/fixas'
 import { novoId, useApp } from '../lib/store'
 import type { Conta, Lancamento } from '../lib/tipos'
 
@@ -45,6 +46,23 @@ export default function Contas() {
     mut((a) => ({ ...a, lancamentos: [l, ...a.lancamentos] }))
     avisar(`Pagamento de ${brl(l.valor)} anotado na fatura de ${mesBR(faturaSel.fatura)}`, { rotulo: 'Desfazer', fn: () => mut((a) => ({ ...a, lancamentos: a.lancamentos.filter((x) => x.id !== l.id) })) })
     setFaturaSel(null)
+  }
+
+  // Valor de uma conta em aberto. Conta de conta fixa muda a fixa inteira (e as outras em aberto dela); conta avulsa muda só ela.
+  const mudarValor = (c: Conta, novo: number) => {
+    const fixa = c.fixaId ? s.fixas.find((f) => f.id === c.fixaId) : undefined
+    if (fixa) {
+      const contasAntes = s.contas.filter((x) => x.fixaId === fixa.id && x.status === 'aberta')
+      mut((a) => mudarFixa(a, fixa.id, { valor: novo }))
+      avisar(`${fixa.descricao} agora é ${brl(novo)} todo mês`, {
+        rotulo: 'Desfazer',
+        fn: () => mut((a) => ({ ...a, fixas: a.fixas.map((f) => (f.id === fixa.id ? fixa : f)), contas: a.contas.map((x) => contasAntes.find((y) => y.id === x.id) ?? x) })),
+      })
+      return
+    }
+    const antes = c.valor
+    mut((a) => mudarValorConta(a, c.id, novo))
+    avisar(`${c.descricao} agora é ${brl(novo)}`, { rotulo: 'Desfazer', fn: () => mut((a) => mudarValorConta(a, c.id, antes)) })
   }
 
   const doTipo = useMemo(() => s.contas.filter((c) => c.tipo === tipo).sort((a, b) => (a.vencimento < b.vencimento ? -1 : 1)), [s.contas, tipo])
@@ -238,10 +256,6 @@ export default function Contas() {
               >
                 {aberta.status === 'paga' ? 'Voltar para em aberto' : aberta.tipo === 'pagar' ? 'Marcar como paga' : 'Marcar como recebida'}
               </button>
-              <a className="btn btn-txt" href={linkWhats(`Quero mudar a conta "${aberta.descricao}" de ${brl(aberta.valor)}`)} target="_blank" rel="noopener noreferrer">
-                <MessageCircle size={17} />
-                Mudar valor ou data pelo WhatsApp
-              </a>
             </>
           )
         }
@@ -253,6 +267,12 @@ export default function Contas() {
               <span className="suave">{aberta.descricao}</span>
             </div>
             <div className="fatos">
+              {aberta.status === 'aberta' && (
+                <div>
+                  <span>{aberta.fixaId && s.fixas.some((f) => f.id === aberta.fixaId) ? 'Valor todo mês' : 'Valor'}</span>
+                  <CampoDinheiroSalvo key={aberta.id} valor={aberta.valor} rotulo={`Valor de ${aberta.descricao}`} estilo={{ width: 156 }} onSalvar={(v) => mudarValor(aberta, v)} />
+                </div>
+              )}
               <div>
                 <span>Vencimento</span>
                 <span>{capitaliza(diaExtenso(aberta.vencimento))}</span>
@@ -300,6 +320,11 @@ export default function Contas() {
                 </div>
               )}
             </div>
+            {aberta.status === 'aberta' && aberta.fixaId && s.fixas.some((f) => f.id === aberta.fixaId) && (
+              <p className="suave" style={{ margin: '12px 2px 0', fontSize: 13.5 }}>
+                Mudar o valor aqui muda também as outras contas em aberto desta conta fixa. As que já foram pagas ficam como estão.
+              </p>
+            )}
           </>
         )}
       </Folha>
