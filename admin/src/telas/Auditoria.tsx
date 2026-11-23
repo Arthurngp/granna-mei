@@ -17,6 +17,7 @@ const ROTULO_ACAO: Record<string, string> = {
   limite_global: 'padrão do limite de lançamentos',
   limite_cliente: 'limite de lançamentos',
   retencao_regra: 'regra de lembrete automático',
+  recurso_cliente: 'recurso de plano superior (liberar ou retirar)',
 }
 /** Ações que não têm um cliente alvo: o nome do alvo no lugar do "(removido)" que a listagem devolve. */
 const ALVO_GERAL: Record<string, string> = { limite_global: 'todos os clientes', retencao_regra: 'lembretes automáticos' }

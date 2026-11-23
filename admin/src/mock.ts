@@ -8,6 +8,8 @@ const hojeSP = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America
 /** Uso do mês de cada cliente do exemplo (igual às mensagens do mês da lista) e o limite configurável, para olhar as telas do limite. */
 const USO_EXEMPLO: Record<string, number> = { c1: 41, c2: 33, c3: 27, c4: 12, c5: 9, c6: 0 }
 const limites = { padrao: 300, proprio: { c5: 80 } as Record<string, number> }
+/** Recursos de plano superior liberados (só para olhar a tela). Um cliente de exemplo já vem com o resumo diário liberado. */
+const recursosMock: Record<string, { motivo: string; desde: string }> = { c2: { motivo: 'plano superior combinado', desde: '2026-11-20T15:00:00Z' } }
 
 /** Lembretes de retenção (só para olhar a tela; a regra de verdade é do banco). Os textos e as faixas são os que a migration semeia. */
 const lembretes = {
@@ -288,6 +290,19 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
       }
       const proprio = args.p_user ? (limites.proprio[String(args.p_user)] ?? null) : null
       return { ok: true, padrao: limites.padrao, proprio, efetivo: proprio ?? limites.padrao }
+    }
+    // Recursos de plano superior por cliente (só para olhar a tela; a regra de verdade é do banco).
+    case 'admin_recursos_cliente': {
+      const r = recursosMock[String(args.p_user)]
+      return { liberados: r ? [{ recurso: 'resumo_diario_contas', motivo: r.motivo, desde: r.desde }] : [] }
+    }
+    case 'admin_recurso_definir': {
+      if (String(args.p_motivo ?? '').trim().length < 3) throw new Error('motivo obrigatório')
+      if (args.p_recurso !== 'resumo_diario_contas') throw new Error('recurso desconhecido')
+      const u = String(args.p_user)
+      if (args.p_ativo) recursosMock[u] = recursosMock[u] ?? { motivo: String(args.p_motivo).trim(), desde: new Date().toISOString() }
+      else delete recursosMock[u]
+      return { ok: true, recurso: args.p_recurso, liberado: !!args.p_ativo }
     }
     case 'admin_retencao_acompanhar': {
       const ha = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString()

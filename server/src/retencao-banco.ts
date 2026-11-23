@@ -7,6 +7,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { estado as estadoAvisos, estadoTeste } from './avisos.ts'
+import { estadoResumo } from './resumo-diario.ts'
 import { chaveRetencao, REGRAS, TIPO_AVISO, type ConfigRegra, type DepsRetencao, type Elegivel, type EtapaCfg, type ModoRetencao, type RegraRetencao } from './retencao.ts'
 
 const MODOS: ModoRetencao[] = ['desligado', 'ensaio', 'piloto', 'todos']
@@ -84,7 +85,7 @@ export function depsRetencaoDoBanco(sb: SupabaseClient, enviar: (telefone: strin
     },
 
     enviar,
-    outroCicloAndando: () => estadoAvisos.rodando || estadoTeste.rodando,
+    outroCicloAndando: () => estadoAvisos.rodando || estadoTeste.rodando || estadoResumo.rodando,
     get piloto() {
       return piloto()
     },
