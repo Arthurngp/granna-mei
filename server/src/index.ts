@@ -21,6 +21,8 @@ import { estado as estadoAvisos, estadoTeste, lerConfig as lerConfigAvisos, lerC
 import { depsAvisosDoBanco } from './avisos-banco.ts'
 import { rodarRetencao, estado as estadoRetencao } from './retencao.ts'
 import { depsRetencaoDoBanco } from './retencao-banco.ts'
+import { sincronizarCobrancaDasExclusoes } from './exclusao-cobranca.ts'
+import { estadoSonda, sondarIA } from './ia-sonda.ts'
 
 const PORTA = Number(process.env.PORT ?? 3000)
 let ultimaMensagem: string | null = null
@@ -216,7 +218,7 @@ export function iniciar(porta = PORTA) {
           sb.from('mensagens').select('id', { count: 'exact', head: true }).gte('criado_em', desde).eq('status', 'erro'),
         ])
         res.writeHead(200, { 'Content-Type': 'application/json' }).end(
-          JSON.stringify({ ok: true, whatsapp: wa, ia: estadoIA(), mensagens_24h: hoje.count ?? null, erros_24h: falhas.count ?? null, erros_envio_desde_inicio: erros, ultima_mensagem: ultimaMensagem, fila: filas.size,
+          JSON.stringify({ ok: true, whatsapp: wa, ia: { ...estadoIA(), sonda: estadoSonda() }, mensagens_24h: hoje.count ?? null, erros_24h: falhas.count ?? null, erros_envio_desde_inicio: erros, ultima_mensagem: ultimaMensagem, fila: filas.size,
             avisos: { modo: estadoAvisos.modo, ultimo_ciclo: estadoAvisos.ultimoCiclo, enviados_desde_inicio: estadoAvisos.enviados, falhas_desde_inicio: estadoAvisos.falhas, ultimo_erro: estadoAvisos.ultimoErro,
               fim_do_teste: { modo: estadoTeste.modo, ultimo_ciclo: estadoTeste.ultimoCiclo, enviados_desde_inicio: estadoTeste.enviados, falhas_desde_inicio: estadoTeste.falhas, ultimo_erro: estadoTeste.ultimoErro },
               retencao: { ultimo_ciclo: estadoRetencao.ultimoCiclo, enviados_desde_inicio: estadoRetencao.enviados, falhas_desde_inicio: estadoRetencao.falhas, parado_ate: estadoRetencao.pausaAte > Date.now() ? new Date(estadoRetencao.pausaAte).toISOString() : null, ultimo_erro: estadoRetencao.ultimoErro } } }),
@@ -259,6 +261,13 @@ export function iniciar(porta = PORTA) {
     try {
       const wa = await statusSessao().catch((e) => ({ estado: 'gateway fora: ' + (e as Error).message.slice(0, 80), numero: null }))
       await sb.from('granninha_saude').upsert({ id: 1, whatsapp_estado: wa.estado, whatsapp_numero: wa.numero, fila: filas.size, atualizado_em: new Date().toISOString() })
+      // Antes do alerta, para ele já enxergar o que a sonda descobriu neste minuto (IA sem crédito sem ninguém ter escrito).
+      try {
+        const s = await sondarIA()
+        if (s !== 'pulou' && s !== 'dispensada' && s !== 'ok') console.error('[ia] sonda:', s)
+      } catch (e) {
+        console.error('[ia] sonda:', (e as Error).message)
+      }
       await avisarDono(wa.estado)
     } catch (e) {
       console.error('[saude]', (e as Error).message)
@@ -269,6 +278,14 @@ export function iniciar(porta = PORTA) {
       if (soltos) console.log('[excluir] números soltos de contas em exclusão:', soltos)
     } catch (e) {
       console.error('[excluir] soltar números:', (e as Error).message)
+    }
+    // Quem pediu a exclusão não segue sendo cobrado nos 30 dias (a cobrança para no fim do período); quem desistiu volta a renovar.
+    try {
+      const c = await sincronizarCobrancaDasExclusoes(sb)
+      if (c.paradas || c.religadas) console.log(`[excluir] cobrança: ${c.paradas} parada(s) no fim do período, ${c.religadas} religada(s) por desistência`)
+      for (const e of c.erros) console.error('[excluir] cobrança:', e)
+    } catch (e) {
+      console.error('[excluir] cobrança:', (e as Error).message)
     }
     try {
       for (const linha of await varrerPresas(varredura)) console.log('[presas]', linha)
