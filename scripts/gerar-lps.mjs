@@ -44,7 +44,7 @@ function montarLp(lp) {
   s = troca(s, 'font-size:clamp(52px,7.4vw,104px);line-height:.92', 'font-size:clamp(40px,5.4vw,78px);line-height:.96')
   s = troca(s, '>Você manda uma mensagem e a Granninha anota. Entradas, gastos, contas a pagar e o limite do MEI, sem planilha e sem aplicativo novo.</p>', `>${esc(lp.sub)}</p>`)
   s = troca(s, 'max-width:84%">Recebi 150 da Juliana no pix</div>', `max-width:84%">${esc(lp.chat[0])}</div>`)
-  s = troca(s, 'white-space:pre-line">Anotado: entrada de R$ 150,00\nServiços · Conta do banco · hoje\n\nErrou? Responda DESFAZER.</div>', `white-space:pre-line">${esc(lp.chat[1])}</div>`)
+  s = troca(s, 'white-space:pre-line">Boa, entrou R$ 150,00.\nServiços · Conta do banco · hoje\n\nErrou? É só responder DESFAZER.</div>', `white-space:pre-line">${esc(lp.chat[1])}</div>`)
   s = troca(s, 'max-width:84%">Quanto sobrou esse mês?</div>', `max-width:84%">${esc(lp.chat[2])}</div>`)
   s = troca(s, 'max-width:88%">Entrou R$ 4.280,00 e saiu R$ 1.930,00. Sobrou R$ 2.350,00. Está indo bem!</div>', `max-width:88%;white-space:pre-line">${esc(lp.chat[3])}</div>`)
   // faixa em duas etapas, para uma frase nova igual a uma antiga não ser trocada de novo
