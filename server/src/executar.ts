@@ -18,7 +18,11 @@ export interface Efeitos {
   /** Lançamentos que trocaram de categoria (para o DESFAZER voltar) */
   recategorizados?: { id: string; de: string | null }[]
   /** Contas fixas que mudaram de valor: o valor de ANTES da fixa e de cada conta em aberto dela (para o DESFAZER voltar) */
-  valores?: { fixa: string; valor: number; contas: { id: string; valor: number }[] }[]
+  valores?: { fixa: string; valor: number; dia?: number; contas: { id: string; valor: number; vencimento?: string }[] }[]
+  /** Contas em aberto que mudaram de valor ou de data, uma a uma (para o DESFAZER voltar) */
+  contasAjustadas?: { id: string; valor: number; vencimento: string }[]
+  /** Contas fixas encerradas: a linha da fixa e as contas em aberto que saíram com ela, inteiras (para o DESFAZER recolocar) */
+  removidos?: { fixa: Record<string, unknown>; contas: Record<string, unknown>[] }[]
 }
 export type Origem = 'texto' | 'audio' | 'foto' | 'pdf'
 
@@ -44,7 +48,7 @@ const slug = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCa
 const OUTROS = new Set(['outras-saidas', 'outras-entradas'])
 
 export async function executar(userId: string, ctx: Contexto, acoes: Acao[], origem: Origem, anexo: string | null, anteriores?: Efeitos): Promise<Resultado> {
-  const ef: Efeitos = { lancamentos: [], contas: [], fixas: [], contasPagas: [], categorias: [], recategorizados: [], valores: [] }
+  const ef: Efeitos = { lancamentos: [], contas: [], fixas: [], contasPagas: [], categorias: [], recategorizados: [], valores: [], contasAjustadas: [], removidos: [] }
   const linhas: string[] = []
   const nomeCat = (cid: string | null) => ctx.categorias.find((c) => c.id === cid)?.nome
   const nomeCart = (cid: string | null) => ctx.carteiras.find((c) => c.id === cid)?.nome ?? 'carteira'
@@ -88,23 +92,60 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         continue
       }
       if (a.tipo_acao === 'ajustar_fixa') {
-        // Mesma regra do painel: a conta fixa é a fonte, então as contas em aberto dela (inclusive a vencida) levam o valor novo; as pagas não mudam.
-        const novo = centavos(a.valor!)
-        const fx = await sb.from('fixas').select('id,valor').eq('user_id', userId).eq('id', a.fixa_id!).maybeSingle()
+        // Mesma regra do painel: a conta fixa é a fonte, então as contas em aberto dela (inclusive a vencida) levam o valor e o dia novos; as pagas não mudam.
+        const novo = a.valor !== null && a.valor > 0 ? centavos(a.valor) : null
+        const diaNovo = a.dia_do_mes ?? null
+        const fx = await sb.from('fixas').select('id,valor,dia').eq('user_id', userId).eq('id', a.fixa_id!).maybeSingle()
         falhou(fx.error, 'ajustar fixa: ler')
         if (!fx.data) throw new Error('ajustar fixa: a conta fixa não existe mais')
-        const ab = await sb.from('contas').select('id,valor').eq('user_id', userId).eq('fixa_id', a.fixa_id!).eq('status', 'aberta')
+        const ab = await sb.from('contas').select('id,valor,vencimento').eq('user_id', userId).eq('fixa_id', a.fixa_id!).eq('status', 'aberta')
         falhou(ab.error, 'ajustar fixa: ler contas')
+        const abertas = (ab.data ?? []) as { id: string; valor: number; vencimento: string }[]
         // Guarda o que havia ANTES de gravar: é isso que o DESFAZER, a correção e a falha no meio devolvem.
-        ef.valores!.push({ fixa: a.fixa_id!, valor: Number(fx.data.valor), contas: (ab.data ?? []).map((c) => ({ id: c.id as string, valor: Number(c.valor) })) })
-        const r1 = await sb.from('fixas').update({ valor: novo }).eq('user_id', userId).eq('id', a.fixa_id!)
+        ef.valores!.push({ fixa: a.fixa_id!, valor: Number(fx.data.valor), dia: Number(fx.data.dia), contas: abertas.map((c) => ({ id: c.id, valor: Number(c.valor), vencimento: c.vencimento })) })
+        const r1 = await sb.from('fixas').update({ ...(novo !== null ? { valor: novo } : {}), ...(diaNovo !== null ? { dia: diaNovo } : {}) }).eq('user_id', userId).eq('id', a.fixa_id!)
         falhou(r1.error, 'ajustar fixa')
-        const n = ab.data?.length ?? 0
-        if (n) {
+        if (novo !== null && abertas.length) {
           const r2 = await sb.from('contas').update({ valor: novo }).eq('user_id', userId).eq('fixa_id', a.fixa_id!).eq('status', 'aberta')
           falhou(r2.error, 'ajustar contas da fixa')
         }
-        linhas.push(`${a.descricao} agora é ${brl(novo)} todo mês.\n${n ? `Ajustei ${n === 1 ? 'a conta em aberto' : `as ${n} contas em aberto`}. As que você já pagou ficam como estão.` : 'Não tinha conta em aberto para ajustar. As próximas já saem com o valor novo.'}`)
+        if (diaNovo !== null) {
+          for (const c of abertas) {
+            const r3 = await sb.from('contas').update({ vencimento: vencimentoNoMes(c.vencimento.slice(0, 7), diaNovo) }).eq('user_id', userId).eq('id', c.id).eq('status', 'aberta')
+            falhou(r3.error, 'ajustar dia das contas da fixa')
+          }
+        }
+        const o = abertas.length
+        const quando = [novo !== null ? `é ${brl(novo)} todo mês` : '', diaNovo !== null ? `vence todo dia ${diaNovo}` : ''].filter(Boolean).join(' e ')
+        linhas.push(`${a.descricao} agora ${quando}.\n${o ? `Ajustei ${o === 1 ? 'a conta em aberto' : `as ${o} contas em aberto`}. As que você já pagou ficam como estão.` : 'Não tinha conta em aberto para ajustar. As próximas já saem com o valor e o dia novos.'}`)
+        continue
+      }
+      if (a.tipo_acao === 'ajustar_conta') {
+        // Só ESTA conta (valor e/ou data). A conta fixa de onde ela veio, se veio, não muda.
+        const cc = await sb.from('contas').select('id,valor,vencimento').eq('user_id', userId).eq('id', a.conta_id!).eq('status', 'aberta').maybeSingle()
+        falhou(cc.error, 'ajustar conta: ler')
+        if (!cc.data) throw new Error('ajustar conta: a conta não está mais em aberto')
+        ef.contasAjustadas!.push({ id: a.conta_id!, valor: Number(cc.data.valor), vencimento: cc.data.vencimento as string })
+        const r = await sb.from('contas').update({ ...(a.valor !== null ? { valor: centavos(a.valor) } : {}), ...(a.vencimento ? { vencimento: a.vencimento } : {}) }).eq('user_id', userId).eq('id', a.conta_id!).eq('status', 'aberta')
+        falhou(r.error, 'ajustar conta')
+        const partes = [a.valor !== null ? `agora é ${brl(a.valor)}` : '', a.vencimento ? `vence ${diaBR(a.vencimento)}` : ''].filter(Boolean).join(' e ')
+        linhas.push(`${a.descricao} ${partes}.\nMudei só essa conta. Para mudar todo mês, é só dizer, por exemplo, "a ${a.descricao.toLowerCase()} agora é tanto todo mês".`)
+        continue
+      }
+      if (a.tipo_acao === 'encerrar_fixa') {
+        // Tira a conta fixa e as contas em aberto dela (as pagas ficam no histórico). Tudo guardado inteiro: o DESFAZER recoloca.
+        const fx = await sb.from('fixas').select('*').eq('user_id', userId).eq('id', a.fixa_id!).maybeSingle()
+        falhou(fx.error, 'encerrar fixa: ler')
+        if (!fx.data) throw new Error('encerrar fixa: a conta fixa não existe mais')
+        const ab = await sb.from('contas').select('*').eq('user_id', userId).eq('fixa_id', a.fixa_id!).eq('status', 'aberta')
+        falhou(ab.error, 'encerrar fixa: ler contas')
+        ef.removidos!.push({ fixa: fx.data as Record<string, unknown>, contas: (ab.data ?? []) as Record<string, unknown>[] })
+        const r1 = await sb.from('contas').delete().eq('user_id', userId).eq('fixa_id', a.fixa_id!).eq('status', 'aberta')
+        falhou(r1.error, 'encerrar fixa: apagar contas')
+        const r2 = await sb.from('fixas').delete().eq('user_id', userId).eq('id', a.fixa_id!)
+        falhou(r2.error, 'encerrar fixa')
+        const o = ab.data?.length ?? 0
+        linhas.push(`Tirei ${a.descricao} das contas fixas${o ? ` e as ${o === 1 ? 'conta' : `${o} contas`} em aberto dela` : ''}. O que você já pagou fica no histórico.\nFoi sem querer? Responda DESFAZER.`)
         continue
       }
       if (a.tipo_acao === 'pagar_fatura') {
@@ -229,8 +270,14 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
 export async function reverter(userId: string, ef: Efeitos) {
   // Valor de conta fixa: do último ajuste para o primeiro. Conta que já foi paga nesse meio tempo fica como está (o dinheiro já saiu).
   for (const v of [...(ef.valores ?? [])].reverse()) {
-    falhou((await sb.from('fixas').update({ valor: v.valor }).eq('user_id', userId).eq('id', v.fixa)).error, 'voltar valor da fixa')
-    for (const c of v.contas) falhou((await sb.from('contas').update({ valor: c.valor }).eq('user_id', userId).eq('id', c.id).eq('status', 'aberta')).error, 'voltar valor da conta')
+    falhou((await sb.from('fixas').update({ valor: v.valor, ...(v.dia !== undefined ? { dia: v.dia } : {}) }).eq('user_id', userId).eq('id', v.fixa)).error, 'voltar valor da fixa')
+    for (const c of v.contas) falhou((await sb.from('contas').update({ valor: c.valor, ...(c.vencimento ? { vencimento: c.vencimento } : {}) }).eq('user_id', userId).eq('id', c.id).eq('status', 'aberta')).error, 'voltar valor da conta')
+  }
+  for (const c of [...(ef.contasAjustadas ?? [])].reverse()) falhou((await sb.from('contas').update({ valor: c.valor, vencimento: c.vencimento }).eq('user_id', userId).eq('id', c.id).eq('status', 'aberta')).error, 'voltar conta ajustada')
+  // Conta fixa encerrada: a linha volta primeiro e depois as contas em aberto que saíram com ela.
+  for (const r of [...(ef.removidos ?? [])].reverse()) {
+    falhou((await sb.from('fixas').upsert(r.fixa, { onConflict: 'user_id,id' })).error, 'recolocar conta fixa')
+    if (r.contas.length) falhou((await sb.from('contas').upsert(r.contas, { onConflict: 'user_id,id' })).error, 'recolocar contas da fixa')
   }
   for (const r of ef.recategorizados ?? []) falhou((await sb.from('lancamentos').update({ categoria_id: r.de }).eq('user_id', userId).eq('id', r.id)).error, 'voltar categoria')
   if (ef.categorias?.length) falhou((await sb.from('categorias').delete().eq('user_id', userId).in('id', ef.categorias)).error, 'apagar categorias')

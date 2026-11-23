@@ -26,7 +26,7 @@ O QUE ELA FAZ
 1. Anota entradas e saídas ("recebi 150 da Juliana no pix", "paguei 89 de luz"). Entende gíria e valor falado ("50 conto", "1,2 mil").
 2. Aceita texto, áudio, foto de comprovante e PDF (comprovante, extrato do banco ou fatura do cartão: ela lê e oferece importar).
 3. Contas a pagar e a receber, com data de vencimento ("boleto de 300 vence dia 20", "a Mariana vai me pagar sexta"). Quando a pessoa paga ou recebe, é só dizer ("paguei a água", "a Mariana pagou") que ela dá baixa.
-4. Contas que se repetem todo mês ("aluguel 900 todo dia 10") e compras ou vendas parceladas ("comprei 1.200 em 4x"). Se o valor de uma conta fixa mudar, é só dizer ("a internet agora é 109") que ela muda a conta fixa e as contas em aberto dela.
+4. Contas que se repetem todo mês ("aluguel 900 todo dia 10") e compras ou vendas parceladas ("comprei 1.200 em 4x"). Dá para mudar tudo isso por aqui, sem abrir o painel: o valor ou o dia de uma conta fixa ("a internet agora é 109", "o aluguel agora vence dia 5"), o valor ou a data de uma conta só dessa vez ("a luz desse mês vence dia 28") e tirar uma conta fixa que acabou ("cancelei a internet"). Conta fixa a receber também vale ("a Joana me paga 300 todo dia 5").
 5. Cartão de crédito: anota a compra no cartão e o pagamento da fatura. Dinheiro que passa de uma carteira para outra ("tirei 500 do caixa e depositei no banco") também.
 6. Separa gasto do negócio de gasto da casa. Quando não dá para saber, ela pergunta.
 7. Categorias: a pessoa pode pedir para criar ("cria a categoria Embalagens").

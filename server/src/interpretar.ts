@@ -57,7 +57,7 @@ export interface Contexto {
   historico?: { cliente: string; granninha: string }[]
 }
 
-export type TipoAcao = 'lancamento' | 'conta' | 'recorrente' | 'parcelado' | 'baixar_conta' | 'transferencia' | 'pagar_fatura' | 'criar_categoria' | 'ajustar_fixa'
+export type TipoAcao = 'lancamento' | 'conta' | 'recorrente' | 'parcelado' | 'baixar_conta' | 'transferencia' | 'pagar_fatura' | 'criar_categoria' | 'ajustar_fixa' | 'ajustar_conta' | 'encerrar_fixa'
 export type Intencao = 'acoes' | 'pergunta' | 'desfazer' | 'corrigir' | 'saudacao' | 'ajuda' | 'outro'
 export type Meio = 'pix' | 'dinheiro' | 'debito' | 'credito' | 'boleto' | 'transferencia' | 'maquininha'
 
@@ -180,8 +180,10 @@ INTENÇÃO
 TIPOS DE AÇÃO
 - "lancamento": dinheiro que JÁ entrou ou saiu, inclusive compra no cartão de crédito à vista. movimento entrada/saida.
 - "conta": dinheiro que VAI entrar ou sair numa data (boleto, fiado, "me deve", "vou receber", "vence dia"). movimento entrada = a receber, saida = a pagar. Preencha "vencimento".
-- "recorrente": conta que se repete todo mês ("aluguel 900 todo dia 10"). Preencha "dia_do_mes".
-- "ajustar_fixa": a pessoa diz que o valor de uma conta fixa que JÁ está na lista CONTAS FIXAS abaixo mudou ("a internet agora é 109", "o aluguel subiu para 1000", "a luz passou a ser 150 todo mês", "muda a internet para 109"). Preencha "fixa_id" (o id da lista) e "valor" (o valor NOVO, exatamente o que ela disse). NÃO é "recorrente" (esse é conta fixa nova, que não está na lista) e NÃO é pagamento: se a pessoa PAGOU ("paguei 109 de internet", "a internet veio 109"), é baixa ou lançamento, nunca ajuste. Se a conta não está na lista, não é ajuste.
+- "recorrente": conta que se repete todo mês, a pagar ("aluguel 900 todo dia 10") ou a receber ("a Joana me paga 300 todo dia 5", movimento entrada). Preencha "dia_do_mes".
+- "ajustar_fixa": a pessoa muda o VALOR e/ou o DIA de vencimento de uma conta fixa que JÁ está na lista CONTAS FIXAS abaixo, daqui para a frente ("a internet agora é 109", "o aluguel subiu para 1000", "a luz passou a ser 150 todo mês", "a internet agora vence dia 25", "muda o aluguel para dia 5 e 1100"). Preencha "fixa_id" (o id da lista), "valor" (o valor NOVO, só se ela disse) e "dia_do_mes" (o dia NOVO, só se ela disse). NÃO é "recorrente" (conta fixa NOVA, que não está na lista) e NÃO é pagamento: se a pessoa PAGOU ("paguei 109 de internet", "a internet veio 109"), é baixa ou lançamento, nunca ajuste.
+- "ajustar_conta": a pessoa muda o valor ou a data de UMA conta em aberto da lista CONTAS EM ABERTO, só dessa vez ("a luz desse mês vence dia 28", "adia a conta do João para sexta", "a conta de luz veio 180 e não 150", "muda o vencimento da Santander para 30"). Preencha "conta_id" (da lista; se há várias do mesmo nome, a de vencimento mais próximo), "valor" (o valor NOVO, só se ela disse) e "vencimento" (a data NOVA em AAAA-MM-DD, só se ela disse). Se ela diz que passa a ser assim TODO MÊS, é "ajustar_fixa". Não é pagamento.
+- "encerrar_fixa": a pessoa não paga ou não recebe mais uma conta fixa da lista CONTAS FIXAS ("cancelei a internet", "não pago mais o aluguel da sala", "tira a internet das contas fixas"). Preencha "fixa_id". Só quando ela deixa claro que acabou; "paguei" nunca é encerrar.
 - "parcelado": compra ou venda em parcelas ("em 4x", "4 vezes de 300"). "valor" = TOTAL; "parcelas" = quantidade. Se foi no cartão, meio = "credito".
 - "baixar_conta": pagou ou recebeu uma conta que JÁ está na lista abaixo e que a pessoa NOMEOU ("paguei a água", "a Mariana pagou"). Preencha "conta_id"; "valor" só se a pessoa disse um valor. Se nenhuma conta da lista tem o nome do que a pessoa disse, NÃO é baixa: é lançamento (e se faltar o valor, pergunte). Se o valor dito é diferente do valor da conta, é lançamento novo, não baixa. Baixa de conta sem valor dito NÃO precisa perguntar o valor: usa o valor da conta.
 - "transferencia": dinheiro passando de uma carteira do próprio dono para outra ("depositei o dinheiro do caixa no banco", "a maquininha caiu no banco", "guardei 500 na XP"). Use carteira_id (origem) e carteira_destino_id.
@@ -238,7 +240,7 @@ function esquema(c: Contexto) {
     type: 'object',
     additionalProperties: false,
     properties: {
-      tipo_acao: { type: 'string', enum: ['lancamento', 'conta', 'recorrente', 'parcelado', 'baixar_conta', 'transferencia', 'pagar_fatura', 'criar_categoria', 'ajustar_fixa'] },
+      tipo_acao: { type: 'string', enum: ['lancamento', 'conta', 'recorrente', 'parcelado', 'baixar_conta', 'transferencia', 'pagar_fatura', 'criar_categoria', 'ajustar_fixa', 'ajustar_conta', 'encerrar_fixa'] },
       movimento: enumNulo(['entrada', 'saida']),
       valor: nulo('number'),
       descricao: { type: 'string' },
@@ -288,6 +290,9 @@ function nomeada(texto: string, descricao: string) {
   const t = tira(texto)
   return tira(descricao).split(/[^a-z0-9]+/).some((p) => p.length >= 3 && !VAZIAS.has(p) && t.includes(p))
 }
+
+/** Data que existe de verdade: 2026-02-31 não (o Date do JavaScript "rola" para março e a `dataValida` acima deixa passar). */
+const dataReal = (s: string | null) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(s + 'T12:00:00Z').toISOString().slice(0, 10) === s
 
 const dataValida = (s: string | null) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(new Date(s + 'T12:00:00').getTime())
 
@@ -355,7 +360,7 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
         return a
       }),
     }
-    const bate = r.acoes.filter((a) => a.tipo_acao !== 'criar_categoria' && a.tipo_acao !== 'transferencia' && a.tipo_acao !== 'ajustar_fixa'
+    const bate = r.acoes.filter((a) => a.tipo_acao !== 'criar_categoria' && a.tipo_acao !== 'transferencia' && a.tipo_acao !== 'ajustar_fixa' && a.tipo_acao !== 'ajustar_conta' && a.tipo_acao !== 'encerrar_fixa'
       && (a.valor === null ? a.tipo_acao === 'baixar_conta' && c.contasAbertas.some((x) => x.id === a.conta_id && Math.abs(x.valor - d.valor) < 0.01) : Math.abs(a.valor - d.valor) < 0.01))
     if (!bate.length) return { acoes: [], perguntar: `Li R$ ${d.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} nesse comprovante. O que foi? Me conta em uma frase.` }
     r = { ...r, acoes: [{ ...bate[0], movimento: bate[0].tipo_acao === 'baixar_conta' ? bate[0].movimento : d.movimento }] }
@@ -424,24 +429,62 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
       continue
     }
 
-    if (a.tipo_acao === 'ajustar_fixa') {
+    if (a.tipo_acao === 'ajustar_fixa' || a.tipo_acao === 'encerrar_fixa') {
       if (c.fixas === undefined) return { acoes: [], perguntar: 'Não consegui ver suas contas fixas agora. Me manda de novo daqui a pouco?' }
       const fixas = c.fixas
       const nomeDe = (x: { descricao: string }) => limparTextoCliente(x.descricao, 60)
+      const encerrar = a.tipo_acao === 'encerrar_fixa'
       if (!fixas.length) return { acoes: [], perguntar: 'Você não tem conta fixa cadastrada. Para cadastrar, me diga: "aluguel de 1200 todo dia 5".' }
       const fixa = fixas.find((x) => x.id === a.fixa_id)
-      if (!fixa) return { acoes: [], perguntar: `Qual conta fixa mudou de valor? Você tem: ${fixas.map(nomeDe).join(', ')}.` }
+      if (!fixa) return { acoes: [], perguntar: `Qual conta fixa ${encerrar ? 'acabou' : 'mudou'}? Você tem: ${fixas.map(nomeDe).join(', ')}.` }
       // A conta tem que estar na frase: "muda ela para 109" com a IA adivinhando qual seria mexer na conta errada.
-      if (!nomeada(texto, fixa.descricao)) return { acoes: [], perguntar: `Você quer mudar o valor de "${nomeDe(fixa)}"? Me diga o nome da conta e o valor novo.` }
+      if (!nomeada(texto, fixa.descricao)) return { acoes: [], perguntar: `Você quer ${encerrar ? 'encerrar' : 'mudar'} a conta fixa "${nomeDe(fixa)}"? Me diga o nome da conta${encerrar ? '' : ' e o que mudou'}.` }
       // Duas contas fixas com a mesma palavra ("Aluguel da loja", "Aluguel da sala"): só segue se a frase traz o nome inteiro da escolhida.
       const citadas = fixas.filter((x) => nomeada(texto, x.descricao))
       if (citadas.length > 1 && !tira(texto).includes(tira(fixa.descricao).trim())) {
-        return { acoes: [], perguntar: `Qual delas: ${citadas.map((x) => `"${nomeDe(x)}"`).join(' ou ')}? Me diga o nome completo e o valor novo.` }
+        return { acoes: [], perguntar: `Qual delas: ${citadas.map((x) => `"${nomeDe(x)}"`).join(' ou ')}? Me diga o nome completo.` }
       }
-      if (a.valor === null || !(a.valor > 0)) return { acoes: [], perguntar: `Qual o valor novo de "${nomeDe(fixa)}"?` }
-      if (temNumeroDeValor(texto) && !valorConfere(texto, a.valor, null)) return { acoes: [], perguntar: `Só para conferir: o valor novo de "${nomeDe(fixa)}" é quanto?` }
-      if (Math.abs(a.valor - fixa.valor) < 0.005) return { acoes: [], perguntar: `"${nomeDe(fixa)}" já está em ${brlSimples(fixa.valor)} todo mês. Não mudei nada.` }
-      out.push({ ...a, descricao: fixa.descricao, fixa_id: fixa.id, movimento: null, categoria_id: null, carteira_id: '', carteira_destino_id: null, data: c.hoje, fatura: null, noCartao: false })
+      const base = { ...a, descricao: fixa.descricao, fixa_id: fixa.id, movimento: null, categoria_id: null, carteira_id: '', carteira_destino_id: null, data: c.hoje, fatura: null, noCartao: false }
+      if (encerrar) {
+        out.push({ ...base, valor: null, dia_do_mes: null })
+        continue
+      }
+      let valor = a.valor !== null && a.valor > 0 ? a.valor : null
+      const dia = a.dia_do_mes && Number.isInteger(a.dia_do_mes) && a.dia_do_mes >= 1 && a.dia_do_mes <= 31 ? a.dia_do_mes : null
+      if (valor === null && dia === null) return { acoes: [], perguntar: `O que mudou em "${nomeDe(fixa)}": o valor ou o dia do vencimento?` }
+      // O valor tem que estar na frase. Quando só o dia mudou ("agora vence dia 25") não há valor a conferir.
+      if (valor !== null && temNumeroDeValor(texto) && !valorConfere(texto, valor, null)) return { acoes: [], perguntar: `Só para conferir: o valor novo de "${nomeDe(fixa)}" é quanto?` }
+      // O dia também: o número tem que aparecer na frase, senão a IA pode ter chutado.
+      if (dia !== null && !new RegExp(`(^|[^0-9])${dia}([^0-9]|$)`).test(texto)) return { acoes: [], perguntar: `Em que dia do mês vence "${nomeDe(fixa)}"?` }
+      // O que já está assim não muda: se só sobra o que é igual, avisa em vez de dizer que mudou.
+      if (valor !== null && Math.abs(valor - fixa.valor) < 0.005) valor = null
+      const diaNovo = dia !== null && dia !== fixa.dia ? dia : null
+      if (valor === null && diaNovo === null) {
+        return { acoes: [], perguntar: `"${nomeDe(fixa)}" já está em ${brlSimples(fixa.valor)} todo dia ${fixa.dia}. Não mudei nada.` }
+      }
+      out.push({ ...base, valor, dia_do_mes: diaNovo })
+      continue
+    }
+
+    if (a.tipo_acao === 'ajustar_conta') {
+      const nomeDe = (x: { descricao: string }) => limparTextoCliente(x.descricao, 60)
+      const conta = c.contasAbertas.find((x) => x.id === a.conta_id)
+      if (!conta) return { acoes: [], perguntar: 'Não achei essa conta em aberto. Qual conta você quer mudar? Me diga o nome.' }
+      if (!nomeada(texto, conta.descricao)) return { acoes: [], perguntar: `Você quer mudar a conta "${nomeDe(conta)}"? Me diga o nome da conta e o que mudou.` }
+      const ddmm = (v: string) => v.split('-').reverse().slice(0, 2).join('/')
+      // Várias contas em aberto com o mesmo nome (uma por mês, de conta fixa): se a IA não pegou a mais próxima, a frase tem que citar a data dela.
+      const mesmas = c.contasAbertas.filter((x) => tira(x.descricao).trim() === tira(conta.descricao).trim() && x.tipo === conta.tipo)
+      if (mesmas.length > 1 && mesmas[0].id !== conta.id && !texto.includes(ddmm(conta.vencimento))) {
+        return { acoes: [], perguntar: `Você tem mais de uma conta "${nomeDe(conta)}" em aberto (vencem ${mesmas.slice(0, 4).map((x) => ddmm(x.vencimento)).join(', ')}). Qual delas? Me diga a data de vencimento atual.` }
+      }
+      let valor = a.valor !== null && a.valor > 0 ? a.valor : null
+      let venc = dataReal(a.vencimento) && a.vencimento! >= c.hoje.slice(0, 4) + '-01-01' && a.vencimento! <= `${Number(c.hoje.slice(0, 4)) + 3}-12-31` ? a.vencimento : null
+      if (valor === null && venc === null) return { acoes: [], perguntar: `O que mudou na conta "${nomeDe(conta)}": o valor ou a data de vencimento?` }
+      if (valor !== null && temNumeroDeValor(texto) && !valorConfere(texto, valor, null)) return { acoes: [], perguntar: `Só para conferir: o valor novo de "${nomeDe(conta)}" é quanto?` }
+      if (valor !== null && Math.abs(valor - conta.valor) < 0.005) valor = null
+      if (venc === conta.vencimento) venc = null
+      if (valor === null && venc === null) return { acoes: [], perguntar: `"${nomeDe(conta)}" já está em ${brlSimples(conta.valor)} e vence ${ddmm(conta.vencimento)}. Não mudei nada.` }
+      out.push({ ...a, descricao: conta.descricao, conta_id: conta.id, valor, vencimento: venc, movimento: conta.tipo === 'receber' ? 'entrada' : 'saida', categoria_id: null, carteira_id: '', carteira_destino_id: null, data: c.hoje, fatura: null, noCartao: false })
       continue
     }
 

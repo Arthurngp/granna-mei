@@ -6,7 +6,7 @@
  *   npx tsx test/comprovante-cruzado.ts
  */
 import assert from 'node:assert/strict'
-import { acao, acoes, caso, E, fim, ia, lancsU1, msg, msgFoto, semear, U1 } from './_falsos.ts'
+import { acao, acoes, caso, E, fim, ia, lancsU1, msgFoto, semear, U1 } from './_falsos.ts'
 
 const doc = (x: Record<string, unknown>) => ({ tipo: 'comprovante', meio: 'pix', vencimento: null, resumo: 'Comprovante', transacoes: [{ descricao: 'Destino', valor: 500, movimento: 'saida', data: null }], banco_origem: null, titular_origem: null, banco_destino: null, titular_destino: null, ...x })
 const DONO = 'Arthur Teste' // nome do perfil no cenário semeado

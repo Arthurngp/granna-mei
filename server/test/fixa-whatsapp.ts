@@ -99,7 +99,7 @@ await caso('a conta não está na frase: pergunta e não muda nada ("muda pra 10
   semearInternet()
   ia.regras = [[/muda pra 109/, acoes(ajuste({ fixa_id: 'f1', descricao: 'Aluguel' }))]]
   const r = await msg('muda pra 109')
-  assert.match(r, /Você quer mudar o valor de "Aluguel"\?/)
+  assert.match(r, /Você quer mudar a conta fixa "Aluguel"\?/)
   assert.equal(fixa('f1').valor, 900)
   assert.equal(conta('n-1').valor, 95)
 })
@@ -116,7 +116,7 @@ await caso('mesmo valor que já está: avisa que não mudou nada', async () => {
   semearInternet()
   ia.regras = [[/internet/, acoes(ajuste({ valor: 100 }))]]
   const r = await msg('a internet é 100')
-  assert.match(r, /"Internet" já está em R\$ 100,00 todo mês\. Não mudei nada\./)
+  assert.match(r, /"Internet" já está em R\$ 100,00 todo dia 20\. Não mudei nada\./)
   assert.equal(conta('n-1').valor, 95, 'nenhuma conta foi mexida')
 })
 
@@ -144,7 +144,7 @@ await caso('a IA devolve a conta fixa de OUTRO cliente: não está na lista dele
   semearInternet()
   ia.regras = [[/internet agora/, acoes(ajuste({ fixa_id: 'fx-u2' }))]]
   const r = await msg('a internet agora é 109')
-  assert.match(r, /Qual conta fixa mudou de valor\? Você tem: Aluguel, Internet\./)
+  assert.match(r, /Qual conta fixa mudou\? Você tem: Aluguel, Internet\./)
   assert.equal(fixa('fx-u2', U2).valor, 500)
   assert.equal(conta('u2-c').valor, 500)
 })
@@ -216,7 +216,7 @@ await caso('conta fixa sem conta em aberto: muda a fixa e diz que as próximas j
   semear() // f2 sem nenhuma conta ligada
   ia.regras = [[/internet agora/, acoes(ajuste())]]
   const r = await msg('a internet agora é 109')
-  assert.match(r, /Não tinha conta em aberto para ajustar\. As próximas já saem com o valor novo\./)
+  assert.match(r, /Não tinha conta em aberto para ajustar\. As próximas já saem com o valor e o dia novos\./)
   assert.equal(fixa('f2').valor, 109)
 })
 
@@ -225,6 +225,162 @@ await caso('cliente sem nenhuma conta fixa: explica como cadastrar, não inventa
   E.tabelas.fixas = []
   ia.regras = [[/internet agora/, acoes(ajuste())]]
   assert.match(await msg('a internet agora é 109'), /Você não tem conta fixa cadastrada/)
+})
+
+/* ---------- dia, conta avulsa, encerrar, fixa a receber (pedido do Arthur, 23/11: tudo do painel dentro do WhatsApp) ---------- */
+
+const contasF2 = () => E.tabelas.contas.filter((c) => c.fixa_id === 'f2')
+const dataDia = (ym: string, dia: number) => `${ym}-${String(dia).padStart(2, '0')}`
+
+await caso('"a internet agora vence dia 25": muda o dia da fixa e o vencimento das contas em aberto, no mês de cada uma; a paga e o valor ficam', async () => {
+  semearInternet()
+  ia.regras = [[/vence dia 25/, acoes(ajuste({ valor: null, dia_do_mes: 25 }))]]
+  const r = await msg('a internet agora vence dia 25')
+  assert.match(r, /Internet agora vence todo dia 25/)
+  assert.equal(fixa('f2').dia, 25)
+  assert.equal(fixa('f2').valor, 100, 'o valor não mudou')
+  for (const id of ['n-venc', 'n-1', 'n-2']) assert.equal(String(conta(id).vencimento).slice(8, 10), '25', id)
+  const mes = (id: string) => String(conta(id).vencimento).slice(0, 7)
+  assert.equal(conta('n-venc').vencimento, dataDia(mes('n-venc'), 25), 'continua no mesmo mês')
+  assert.equal(String(conta('n-paga').vencimento).slice(8, 10) === '25', false, 'a paga não muda de dia')
+  assert.deepEqual(['n-venc', 'n-1', 'n-2'].map((id) => conta(id).valor), [100, 95, 100], 'valores intactos')
+})
+
+await caso('valor e dia na mesma frase: muda os dois', async () => {
+  semearInternet()
+  ia.regras = [[/109 e dia 25/, acoes(ajuste({ valor: 109, dia_do_mes: 25 }))]]
+  const r = await msg('a internet agora é 109 e dia 25')
+  assert.match(r, /Internet agora é R\$ 109,00 todo mês e vence todo dia 25/)
+  assert.equal(fixa('f2').valor, 109)
+  assert.equal(fixa('f2').dia, 25)
+})
+
+await caso('DESFAZER do ajuste de dia devolve o dia da fixa e o vencimento exato de cada conta', async () => {
+  semearInternet()
+  const antes = contasF2().map((c) => [c.id, c.vencimento, c.valor])
+  ia.regras = [[/vence dia 25/, acoes(ajuste({ valor: null, dia_do_mes: 25 }))], DESFAZER]
+  await msg('a internet agora vence dia 25')
+  await msg('desfazer')
+  assert.equal(fixa('f2').dia, 20)
+  assert.deepEqual(contasF2().map((c) => [c.id, c.vencimento, c.valor]), antes)
+})
+
+await caso('o dia não está na frase: a IA chutou, pergunta e não muda nada', async () => {
+  semearInternet()
+  ia.regras = [[/internet/, acoes(ajuste({ valor: null, dia_do_mes: 25 }))]]
+  const r = await msg('mudei a internet de dia')
+  assert.match(r, /Em que dia do mês vence "Internet"\?/)
+  assert.equal(fixa('f2').dia, 20)
+})
+
+await caso('ajustar_conta: "a internet desse mês vence dia 28" muda SÓ a conta mais próxima; a fixa e as outras ficam', async () => {
+  semearInternet()
+  const alvo = conta('n-1') // a de 95, próxima não vencida
+  const nova = somaDias(HOJE, 40)
+  ia.regras = [[/desse mês vence/, acoes(acao({ tipo_acao: 'ajustar_conta', movimento: null, conta_id: 'n-venc', descricao: 'Internet', valor: null, vencimento: nova, categoria_id: null, meio: null }))]]
+  const r = await msg('a internet desse mês vence dia 28')
+  assert.match(r, /Mudei só essa conta/)
+  assert.equal(conta('n-venc').vencimento, nova)
+  assert.equal(fixa('f2').dia, 20, 'a conta fixa não mudou')
+  assert.equal(alvo.valor, 95)
+  assert.equal(conta('n-2').vencimento, somaDias(HOJE, 57))
+  void alvo
+})
+
+await caso('ajustar_conta: valor novo de uma conta avulsa ("a luz veio 180 e não 150")', async () => {
+  semearInternet()
+  ia.regras = [[/energia veio 180/, acoes(acao({ tipo_acao: 'ajustar_conta', movimento: null, conta_id: 'c1', descricao: 'Energia', valor: 180, vencimento: null, categoria_id: null, meio: null }))]]
+  const r = await msg('a energia veio 180 e não 150')
+  assert.match(r, /Energia agora é R\$ 180,00/)
+  assert.equal(conta('c1').valor, 180)
+  assert.equal(conta('c3').valor, 70, 'as outras contas não mudam')
+})
+
+await caso('ajustar_conta: DESFAZER devolve valor e data', async () => {
+  semearInternet()
+  const antes = [conta('c1').valor, conta('c1').vencimento]
+  ia.regras = [[/energia veio/, acoes(acao({ tipo_acao: 'ajustar_conta', movimento: null, conta_id: 'c1', descricao: 'Energia', valor: 180, vencimento: somaDias(HOJE, 9), categoria_id: null, meio: null }))], DESFAZER]
+  await msg('a energia veio 180 e vence mais tarde')
+  assert.equal(conta('c1').valor, 180)
+  await msg('desfazer')
+  assert.deepEqual([conta('c1').valor, conta('c1').vencimento], antes)
+})
+
+await caso('ajustar_conta: conta paga não é mexida, conta que não está na frase pergunta, data inválida pergunta', async () => {
+  semearInternet()
+  ia.regras = [[/chute/, acoes(acao({ tipo_acao: 'ajustar_conta', movimento: null, conta_id: 'c2', descricao: 'Joana', valor: 10, categoria_id: null, meio: null }))]]
+  assert.match(await msg('chute 10'), /Você quer mudar a conta "Joana"\?/)
+  ia.regras = [[/energia vence/, acoes(acao({ tipo_acao: 'ajustar_conta', movimento: null, conta_id: 'c1', descricao: 'Energia', valor: null, vencimento: '2026-02-31', categoria_id: null, meio: null }))]]
+  assert.match(await msg('a energia vence 31 de fevereiro'), /O que mudou na conta "Energia"/)
+  assert.equal(conta('c1').valor, 150)
+  assert.equal(conta('c2').valor, 300)
+})
+
+await caso('ajustar_conta: três contas Internet em aberto e a IA pegou a mais distante sem a frase citar a data: pergunta qual', async () => {
+  semearInternet()
+  ia.regras = [[/internet vence/, acoes(acao({ tipo_acao: 'ajustar_conta', movimento: null, conta_id: 'n-2', descricao: 'Internet', valor: null, vencimento: somaDias(HOJE, 80), categoria_id: null, meio: null }))]]
+  const r = await msg('a internet vence dia 28')
+  assert.match(r, /mais de uma conta "Internet" em aberto/)
+  assert.equal(conta('n-2').vencimento, somaDias(HOJE, 57))
+})
+
+await caso('encerrar_fixa: "cancelei a internet" tira a fixa e as contas em aberto; a paga fica no histórico', async () => {
+  semearInternet()
+  ia.regras = [[/cancelei a internet/, acoes(acao({ tipo_acao: 'encerrar_fixa', movimento: null, fixa_id: 'f2', descricao: 'Internet', valor: null, categoria_id: null, meio: null }))]]
+  const r = await msg('cancelei a internet')
+  assert.match(r, /Tirei Internet das contas fixas e as 3 contas em aberto dela/)
+  assert.match(r, /DESFAZER/)
+  assert.equal(fixasU1().some((f) => f.id === 'f2'), false)
+  assert.deepEqual(contasF2().map((c) => c.id), ['n-paga'], 'só a paga sobrou')
+  assert.equal(fixa('f1').valor, 900, 'o aluguel segue')
+  assert.equal(fixa('fx-u2', U2).valor, 500, 'a fixa de outro cliente segue')
+  assert.equal(conta('u2-c').valor, 500)
+})
+
+await caso('encerrar_fixa + DESFAZER: a fixa e as contas voltam idênticas (valor, vencimento, ligação)', async () => {
+  semearInternet()
+  const sem = (o: Record<string, unknown>) => JSON.stringify({ ...o, criado_em: undefined }) // o banco falso carimba criado_em ao reinserir
+  const fixaAntes = sem(fixa('f2'))
+  const contasAntes = JSON.stringify(contasF2().sort((a, b) => String(a.id).localeCompare(String(b.id))).map((c) => JSON.parse(sem(c))))
+  ia.regras = [[/cancelei a internet/, acoes(acao({ tipo_acao: 'encerrar_fixa', movimento: null, fixa_id: 'f2', descricao: 'Internet', valor: null, categoria_id: null, meio: null }))], DESFAZER]
+  await msg('cancelei a internet')
+  const r = await msg('desfazer')
+  assert.match(r, /Pronto, desfiz/)
+  assert.equal(sem(fixa('f2')), fixaAntes)
+  assert.equal(JSON.stringify(contasF2().sort((a, b) => String(a.id).localeCompare(String(b.id))).map((c) => JSON.parse(sem(c)))), contasAntes)
+})
+
+await caso('encerrar_fixa: conta que não está na frase ou fixa de outro cliente: pergunta e não apaga nada', async () => {
+  semearInternet()
+  ia.regras = [[/acabou/, acoes(acao({ tipo_acao: 'encerrar_fixa', movimento: null, fixa_id: 'f1', descricao: 'Aluguel', valor: null, categoria_id: null, meio: null }))]]
+  assert.match(await msg('acabou aquilo'), /Você quer encerrar a conta fixa "Aluguel"\?/)
+  ia.regras = [[/internet acabou/, acoes(acao({ tipo_acao: 'encerrar_fixa', movimento: null, fixa_id: 'fx-u2', descricao: 'Internet', valor: null, categoria_id: null, meio: null }))]]
+  assert.match(await msg('a internet acabou'), /Qual conta fixa acabou\?/)
+  assert.equal(fixasU1().length, 2)
+  assert.equal(fixa('fx-u2', U2).valor, 500)
+})
+
+await caso('falha ao encerrar no meio: a fixa e as contas voltam (nada some pela metade)', async () => {
+  semearInternet()
+  const antes = JSON.stringify(contasF2().sort((a, b) => String(a.id).localeCompare(String(b.id))))
+  ia.regras = [[/cancelei e gastei/, acoes(acao({ tipo_acao: 'encerrar_fixa', movimento: null, fixa_id: 'f2', descricao: 'Internet', valor: null, categoria_id: null, meio: null }), acao({ valor: 6 }))]]
+  E.falharEscritaEm = 'lancamentos'
+  await msg('cancelei e gastei 6 no pix')
+  E.falharEscritaEm = null
+  assert.ok(fixasU1().some((f) => f.id === 'f2'), 'a fixa voltou')
+  assert.equal(JSON.stringify(contasF2().sort((a, b) => String(a.id).localeCompare(String(b.id)))), antes)
+})
+
+await caso('fixa a RECEBER: "a Joana me paga 300 todo dia 5" cria a fixa e as contas a receber', async () => {
+  semear()
+  ia.regras = [[/Joana me paga/, acoes(acao({ tipo_acao: 'recorrente', movimento: 'entrada', descricao: 'Joana', valor: 300, dia_do_mes: 5, categoria_id: 'vendas', meio: null }))]]
+  const r = await msg('a Joana me paga 300 todo dia 5')
+  assert.match(r, /Anotei a conta fixa: Joana de R\$ 300,00 todo dia 5/)
+  const nova = fixasU1().find((f) => f.descricao === 'Joana')!
+  assert.equal(Number(nova.valor), 300)
+  const cs = E.tabelas.contas.filter((c) => c.fixa_id === nova.id)
+  assert.equal(cs.length, 3)
+  assert.ok(cs.every((c) => c.tipo === 'receber'), 'todas a receber')
 })
 
 fim()
