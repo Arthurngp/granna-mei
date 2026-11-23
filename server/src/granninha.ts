@@ -470,7 +470,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
       await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'importar_fatura', transacoes: leitura.transacoes, anexo, opcoes, vencimento: venc }, atualizado_em: new Date().toISOString() })
       return {
         status: 'pergunta',
-        resposta: `Achei ${leitura.transacoes.length} compras nessa fatura, somando ${brl(total)}${venc ? ` (vence ${venc.split('-').reverse().slice(0, 2).join('/')})` : ''}.\n\nQuer que eu importe? Responda com o número do cartão, ou NÃO:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`,
+        resposta: `Achei ${leitura.transacoes.length} compras nessa fatura, somando ${brl(total)}${venc ? ` (vence ${venc.split('-').reverse().slice(0, 2).join('/')})` : ''}.\n\n${opcoes.length === 1 ? `Quer que eu importe no ${opcoes[0].nome}? Responda SIM ou NÃO.` : `Quer que eu importe? Responda com o número do cartão, ou NÃO:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`}`,
         efeitos: {}, intencao: 'fatura', texto: leitura.resumo, tokens,
       }
     }
@@ -572,6 +572,10 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei a fatura.', efeitos: {}, intencao: 'fatura', texto, tokens }
     const esc = opcaoEscolhida(texto, pend.opcoes ?? [])
     if (esc) return importarFatura(cliente.id, ctx, pend.transacoes ?? [], esc.id, (pend as { vencimento?: string | null }).vencimento ?? null, tipo, pend.anexo ?? null, tokens)
+    // Um cartão só: o "sim" já escolhe esse cartão. Perguntar "em qual cartão?" de novo era a mesma pergunta duas vezes.
+    if (pend.opcoes?.length === 1 && /^\s*(sim|s|pode|importa|ok|isso|manda)\b/i.test(texto)) {
+      return importarFatura(cliente.id, ctx, pend.transacoes ?? [], pend.opcoes[0].id, (pend as { vencimento?: string | null }).vencimento ?? null, tipo, pend.anexo ?? null, tokens)
+    }
     if (/^\s*(sim|s|pode|importa|ok|isso|manda|\d+)\b/i.test(texto)) {
       await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
       return { status: 'pergunta', resposta: `Em qual cartão? Responda com o número:\n${(pend.opcoes ?? []).map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, efeitos: {}, intencao: 'fatura', texto, tokens }
