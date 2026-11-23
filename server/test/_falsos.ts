@@ -327,7 +327,7 @@ export function semear() {
   E.tabelas.lancamentos = [{ user_id: U2, id: 'x', tipo: 'entrada', valor: 5000, data: HOJE, carteira_id: 'nubank', descricao: 'do outro', pessoal: false }]
   E.tabelas.fixas = [{ user_id: U1, id: 'f1', descricao: 'Aluguel', valor: 900, dia: 10 }, { user_id: U1, id: 'f2', descricao: 'Internet', valor: 100, dia: 20 }]
   E.tabelas.contas = [
-    { user_id: U1, id: 'c1', tipo: 'pagar', descricao: 'Luz', valor: 150, vencimento: somaDias(HOJE, 2), status: 'aberta' },
+    { user_id: U1, id: 'c1', tipo: 'pagar', descricao: 'Energia', valor: 150, vencimento: somaDias(HOJE, 2), status: 'aberta' },
     { user_id: U1, id: 'c2', tipo: 'receber', descricao: 'Joana', valor: 300, vencimento: somaDias(HOJE, 1), status: 'aberta' },
     { user_id: U1, id: 'c3', tipo: 'pagar', descricao: 'Boleto velho', valor: 70, vencimento: somaDias(HOJE, -3), status: 'aberta' },
   ]

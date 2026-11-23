@@ -51,6 +51,8 @@ export const confirma = {
   transferencia: (v: string) => `Anotei a transferência de ${v}.`,
   pagouFatura: (v: string) => `Anotei o pagamento da fatura: ${v}.`,
   compraCartao: (v: string) => `Anotei a compra no cartão: ${v}.`,
+  /** Conta de dinheiro que ficou negativa por causa do que acabou de ser anotado. */
+  contaNegativa: (nome: string, valor: string) => `Atenção: ${nome} ficou negativo, ${valor}. Se foi engano de valor ou de conta, é só me dizer.`,
   contaDoHabito: (conta: string) => `Usei o ${conta}, como das outras vezes. Se foi em outra conta, é só me dizer.`,
   /** Nome longo (razão social de comprovante) não vira categoria: a dica fala do tipo de gasto em vez de repetir o nome. */
   dicaCategoria: (desc: string) => (desc.length > 24 ? 'Ficou em "Outros". Quer uma categoria própria pra esse tipo de gasto? É só responder: criar categoria (nome)' : `Ficou em "Outros". Quer uma categoria só pra ${desc}? É só responder: criar categoria ${desc}`),
@@ -83,6 +85,9 @@ export const MSG = {
       : tipo === 'pdf'
         ? 'Não consegui ler o valor nesse PDF. Me diz o que foi e quanto que eu anoto.'
         : 'Não consegui ler o valor nessa foto. Tenta mandar de mais perto, ou me diz o que foi e quanto.',
+  /** O valor dito é diferente do da conta em aberto: o jeito de a pessoa escolher entre dar baixa na conta e anotar como outro lançamento. */
+  baixaDiferente: (tipo: 'pagar' | 'receber', desc: string, valorConta: string, vencimento: string, valorDito: string) =>
+    `A conta de ${desc} está em ${valorConta} (vence ${vencimento}), e você disse ${valorDito}.\n1. Dar baixa na conta, ${tipo === 'receber' ? 'recebendo' : 'pagando'} ${valorDito}\n2. Anotar como ${tipo === 'receber' ? 'outro recebimento' : 'outro gasto'} e deixar a conta aberta\n\nResponda com o número.`,
   apagarTudo: 'Eu só desfaço o último registro: é só responder DESFAZER. Pra apagar mais de um, é pelo painel, em Lançamentos.',
   valorSozinho: (v: string) => `${v} de quê? Entrou ou saiu?`,
   numeroConfirmado: (nome: string) => `Pronto${nome ? `, ${nome}` : ''}, seu número tá confirmado e agora a gente tá conectado! Me manda o que entrou ou saiu que eu anoto.\n\nPor exemplo: "recebi 150 no pix" ou "paguei 89 de luz".`,

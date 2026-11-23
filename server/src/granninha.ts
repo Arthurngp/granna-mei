@@ -5,7 +5,7 @@
  */
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, silenciarLembretes, usoDoMes } from './banco.ts'
 import { ehAssuntoDaConta, ehPedidoDeAjuda, responderAjuda } from './ajuda.ts'
-import { ehApagarTudo, valorSozinho } from './atalhos.ts'
+import { ehApagarTudo, respostaBaixa, valorSozinho } from './atalhos.ts'
 import { despedidaDe, RESPOSTA_DESPEDIDA } from './despedida.ts'
 import { AVISO_PERTO_DO_LIMITE, limiteDeMidias, limiteDoCliente, TEXTO_LIMITE_LANCAMENTOS, TEXTO_LIMITE_MIDIAS } from './limite.ts'
 import { ehSair, TEXTO_SAIR } from './retencao.ts'
@@ -20,9 +20,9 @@ import { transcrever, type Uso } from './openai.ts'
 import { responderPergunta } from './perguntas.ts'
 import { carregarBase } from './base.ts'
 import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, pareceReenvio, perguntaDuplicata, perguntaReenvio, respostaDuplicata, respostaSimNao, type LancAntigo } from './duplicata.ts'
-import { ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta } from './consultas.ts'
+import { brl as brlComSinal, contasQueFicaramNegativas, ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta } from './consultas.ts'
 import { foraDoDisponivel } from './cartao.ts'
-import { ERROU, MSG } from './voz.ts'
+import { confirma, ERROU, MSG } from './voz.ts'
 
 const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.com.br/painel').replace(/\/+$/, '')
 
@@ -510,6 +510,20 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
 
   // Resposta à pergunta "esse é o mesmo lançamento?": 1 corrige o anterior, 2 lança como outro. Outra mensagem qualquer
   // deixa a pergunta de lado (nada foi gravado) e vale sozinha.
+  // Valor diferente do da conta em aberto: 1 dá baixa na conta (pagando o valor dito), 2 anota à parte e deixa a conta aberta.
+  // Outra coisa que não 1 ou 2 deixa a pergunta de lado (nada foi gravado) e a mensagem vale sozinha.
+  if (pend?.tipo === 'baixa_diferente' && fresco && pend.acoes?.length) {
+    const r = respostaBaixa(texto)
+    if (r) {
+      const final = pend.acoes.map((a): Acao => {
+        if (!a.baixaDiferente) return a
+        const { baixaDiferente: _b, ...resto } = a
+        return r === 'baixa' ? resto : { ...resto, tipo_acao: 'lancamento', conta_id: null }
+      })
+      const ex = await executar(cliente.id, ctx, final, pend.origem ?? tipo, pend.anexo ?? null)
+      return { status: 'ok', resposta: `${ex.linhas.join('\n\n')}${await saldoDepois(cliente.id, final)}\n\n${ERROU}`, efeitos: ex.efeitos, intencao: 'acoes', texto, tokens }
+    }
+  }
   if (pend?.tipo === 'duplicata' && fresco && pend.acoes?.length) {
     const r = respostaDuplicata(texto)
     if (r) return resolverDuplicata(cliente.id, ctx, pend.acoes, pend.anteriorMsg ?? '', r, pend.origem ?? tipo, pend.anexo ?? null, texto, tokens)
@@ -664,6 +678,14 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     if (it.perguntar) {
       await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta: it.perguntar, opcoes: it.opcoes, forcar, documento, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
       return { status: 'pergunta', resposta: it.perguntar, efeitos: {}, intencao: 'acoes', texto, tokens }
+    }
+    // O valor dito não bate com a conta em aberto que a frase nomeia: pergunta antes de gravar (nada é gravado ainda).
+    const diferente = it.acoes.find((a) => a.baixaDiferente)
+    if (diferente?.baixaDiferente) {
+      const b = diferente.baixaDiferente
+      const venc = b.vencimento.split('-').reverse().slice(0, 2).join('/')
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'baixa_diferente', acoes: it.acoes, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
+      return { status: 'pergunta', resposta: MSG.baixaDiferente(b.tipo, b.descricao, brlComSinal(b.valorConta), venc, brlComSinal(diferente.valor!)), efeitos: {}, intencao: 'acoes', texto, tokens }
     }
     // Travas contra lançar duas vezes a mesma coisa. Nada é gravado antes de a pessoa responder.
     const ultima = await ultimaComEfeito(cliente.id)
@@ -875,7 +897,16 @@ async function saldoDepois(userId: string, acoes: Acao[] | null): Promise<string
       ? acoes.filter((a) => MEXE_NO_SALDO.has(a.tipo_acao) || (a.tipo_acao === 'parcelado' && a.noCartao)).flatMap((a) => [a.carteira_id, a.carteira_destino_id])
       : b.carteiras.filter((c) => !foraDoDisponivel(c.tipo)).map((c) => c.id)
     const linhas = linhasDeSaldoDepois(b, ids)
-    return linhas ? `\n\n${linhas}` : ''
+    // Quanto saiu de cada conta de dinheiro nesta mensagem, para avisar se foi ela que deixou a conta negativa.
+    const saidas = new Map<string, number>()
+    for (const a of acoes ?? []) {
+      const v = a.valor ?? 0
+      const sai = (a.tipo_acao === 'lancamento' && a.movimento === 'saida' && !a.noCartao) || a.tipo_acao === 'transferencia' || a.tipo_acao === 'pagar_fatura'
+      if (sai && v > 0 && a.carteira_id) saidas.set(a.carteira_id, (saidas.get(a.carteira_id) ?? 0) + v)
+    }
+    const negativas = contasQueFicaramNegativas(b, saidas).map((c) => confirma.contaNegativa(c.nome, brlComSinal(c.saldo)))
+    const texto = [linhas, ...negativas].filter(Boolean).join('\n')
+    return texto ? `\n\n${texto}` : ''
   } catch (e) {
     console.error('[saldo] não consegui calcular o saldo depois de gravar:', (e as Error).message)
     return ''

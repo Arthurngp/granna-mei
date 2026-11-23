@@ -11,7 +11,7 @@
  *   npx tsx test/conversa.ts
  */
 import assert from 'node:assert/strict'
-import { acao, acoes, caso, E, fim, HOJE, ia, lancsU1, msg, msgFoto, msgPdf, NUM, SEM_ACAO, somaDias, U1 } from './_falsos.ts'
+import { acao, acoes, caso, E, fim, HOJE, ia, lancsU1, msg, msgCompleta, msgFoto, msgPdf, NUM, SEM_ACAO, somaDias, U1 } from './_falsos.ts'
 
 const { construirHabitos, habitoDeCarteira } = await import('../src/interpretar.ts')
 const { reconhecer } = await import('../src/consultas.ts')
@@ -328,6 +328,96 @@ await caso('depois da foto sem valor, a pessoa responde em texto e o registro fe
   const r = await msg('paguei 80 de material no pix')
   assert.match(r, /saiu R\$ 80,00/, r)
   assert.equal(lancsU1().length, 1)
+})
+
+/* ---------- valor diferente da conta em aberto ---------- */
+
+const contaDe = (id: string) => (E.tabelas.contas ?? []).find((c) => c.user_id === U1 && c.id === id)
+const ENERGIA_140 = [[/energia/, acoes(acao({ valor: 140, descricao: 'Energia', meio: 'pix' }))]] as [RegExp, unknown][]
+
+await caso('"paguei 140 de energia" com a conta de 150 em aberto: pergunta antes de gravar', async () => {
+  ia.regras = ENERGIA_140
+  const r = await msgCompleta('paguei 140 de energia no pix')
+  assert.equal(r.status, 'pergunta')
+  assert.match(r.resposta, /^A conta de Energia está em R\$ 150,00 \(vence \d\d\/\d\d\), e você disse R\$ 140,00\.\n1\. Dar baixa na conta, pagando R\$ 140,00\n2\. Anotar como outro gasto e deixar a conta aberta\n\nResponda com o número\.$/, r.resposta)
+  assert.equal(lancsU1().length, 0, 'nada gravado até ela escolher')
+  assert.equal(contaDe('c1')?.status, 'aberta')
+})
+
+await caso('resposta 1: dá baixa na conta pagando o valor dito (R$ 140, não R$ 150)', async () => {
+  ia.regras = ENERGIA_140
+  await msg('paguei 140 de energia no pix')
+  const r = await msg('1')
+  assert.match(r, /Conta paga: R\$ 140,00\./, r)
+  assert.equal(contaDe('c1')?.status, 'paga', 'a conta fecha')
+  const l = lancsU1()
+  assert.equal(l.length, 1)
+  assert.equal(Number(l[0].valor), 140, 'o lançamento é o que ela pagou de verdade')
+})
+
+await caso('resposta 2: anota à parte e deixa a conta aberta', async () => {
+  ia.regras = ENERGIA_140
+  await msg('paguei 140 de energia no pix')
+  const r = await msg('2')
+  assert.match(r, /saiu R\$ 140,00/, r)
+  assert.equal(contaDe('c1')?.status, 'aberta', 'a conta de 150 segue aberta')
+  assert.equal(lancsU1().length, 1)
+})
+
+await caso('conta a receber: "recebendo" e "outro recebimento"; 1 dá baixa', async () => {
+  ia.regras = [[/Joana/, acoes(acao({ valor: 250, descricao: 'Joana', movimento: 'entrada', categoria_id: 'vendas', meio: 'pix' }))]]
+  const r = await msgCompleta('a Joana me pagou 250 no pix')
+  assert.match(r.resposta, /^A conta de Joana está em R\$ 300,00 .*\n1\. Dar baixa na conta, recebendo R\$ 250,00\n2\. Anotar como outro recebimento e deixar a conta aberta/s, r.resposta)
+  const ok = await msg('1')
+  assert.match(ok, /Boa, recebeu R\$ 250,00\./, ok)
+  assert.equal(contaDe('c2')?.status, 'paga')
+})
+
+await caso('mesmo valor da conta, outro nome ou o "boleto" do meio de pagamento: não pergunta nada', async () => {
+  ia.regras = [
+    [/energia/, acoes(acao({ tipo_acao: 'baixar_conta', valor: 150, descricao: 'Energia', conta_id: 'c1', meio: 'pix' }))],
+    [/gasolina/, acoes(acao({ valor: 140, descricao: 'Gasolina', meio: 'pix' }))],
+    [/fornecedor/, acoes(acao({ valor: 200, descricao: 'Fornecedor', meio: 'boleto' }))],
+  ]
+  assert.match(await msg('paguei 150 de energia'), /Conta paga: R\$ 150,00\./)
+  assert.match(await msg('paguei 140 de gasolina no pix'), /saiu R\$ 140,00/)
+  assert.match(await msg('paguei 200 do fornecedor no boleto'), /saiu R\$ 200,00/, 'a conta "Boleto velho" não conta só porque a frase diz boleto')
+})
+
+await caso('outra coisa no lugar de 1 ou 2: a pergunta fica de lado e nada é gravado', async () => {
+  ia.regras = ENERGIA_140
+  await msg('paguei 140 de energia no pix')
+  const r = await msg('quanto sobrou esse mês?')
+  assert.doesNotMatch(r, /Dar baixa/)
+  assert.equal(lancsU1().length, 0)
+  assert.equal(contaDe('c1')?.status, 'aberta')
+})
+
+/* ---------- conta que ficou negativa ---------- */
+
+await caso('transferir mais do que tem no caixa: avisa que a conta ficou negativa, com o número', async () => {
+  ia.regras = [[/caixa/, acoes(acao({ tipo_acao: 'transferencia', valor: 500, descricao: 'Caixa para Nubank', movimento: null, carteira_id: 'dinheiro', carteira_destino_id: 'nubank', meio: null }))]]
+  const r = await msg('transferi 500 do caixa pro nubank')
+  assert.match(r, /Atenção: Dinheiro ficou negativo, -R\$ 450,00\. Se foi engano de valor ou de conta, é só me dizer\./, r)
+  assert.match(r, /Errou\? É só responder DESFAZER\.$/)
+})
+
+await caso('saída que mantém a conta positiva não avisa nada', async () => {
+  ia.regras = [[/lanche/, acoes(acao({ valor: 20, descricao: 'Lanche', meio: 'dinheiro', carteira_id: 'dinheiro' }))]]
+  const r = await msg('lanche 20 no dinheiro')
+  assert.match(r, /saiu R\$ 20,00/)
+  assert.doesNotMatch(r, /negativo/)
+})
+
+await caso('quem já estava negativo não é avisado de novo a cada registro', async () => {
+  ia.regras = [
+    [/caixa/, acoes(acao({ tipo_acao: 'transferencia', valor: 500, descricao: 'Caixa para Nubank', movimento: null, carteira_id: 'dinheiro', carteira_destino_id: 'nubank', meio: null }))],
+    [/lanche/, acoes(acao({ valor: 30, descricao: 'Lanche', meio: 'dinheiro', carteira_id: 'dinheiro' }))],
+  ]
+  assert.match(await msg('transferi 500 do caixa pro nubank'), /ficou negativo/)
+  const r = await msg('lanche 30 no dinheiro')
+  assert.match(r, /saiu R\$ 30,00/)
+  assert.doesNotMatch(r, /negativo/, 'já era negativo antes desta mensagem')
 })
 
 fim()
