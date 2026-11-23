@@ -15,7 +15,7 @@ const { executar } = await import('../src/executar.ts')
 
 /* ---------- o painel ---------- */
 
-await caso('painel: no mês que não tem o dia, o vencimento vai para o último dia do mês', () => {
+await caso('painel: no mês que não tem o dia, o vencimento vai para o último dia do mês', async () => {
   const tabela: [string, number, string][] = [
     ['2027-01', 31, '2027-01-31'],
     ['2027-02', 31, '2027-02-28'], // fevereiro comum
@@ -34,12 +34,12 @@ await caso('painel: no mês que não tem o dia, o vencimento vai para o último 
   for (const [ym, dia, esperado] of tabela) assert.equal(vencimentoNoMes(ym, dia), esperado, `${ym} dia ${dia}`)
 })
 
-await caso('painel: cada mês sai do dia configurado, então o 31 de março volta a ser 31 depois do 28 de fevereiro', () => {
+await caso('painel: cada mês sai do dia configurado, então o 31 de março volta a ser 31 depois do 28 de fevereiro', async () => {
   const meses = ['2027-01', '2027-02', '2027-03', '2027-04', '2027-05', '2027-06']
   assert.deepEqual(meses.map((ym) => vencimentoNoMes(ym, 31)), ['2027-01-31', '2027-02-28', '2027-03-31', '2027-04-30', '2027-05-31', '2027-06-30'])
 })
 
-await caso('painel: todo vencimento é uma data que existe (nunca 2027-02-31)', () => {
+await caso('painel: todo vencimento é uma data que existe (nunca 2027-02-31)', async () => {
   for (let ano = 2027; ano <= 2029; ano++) {
     for (let mes = 1; mes <= 12; mes++) {
       for (const dia of [28, 29, 30, 31]) {
