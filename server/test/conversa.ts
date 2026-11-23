@@ -301,4 +301,33 @@ await caso('foto de boleto da CEMIG: o cartão mostra "Cemig Distribuicao", não
   assert.doesNotMatch(r.resposta, /CEMIG|SA\?/, 'nenhum rastro da razão social em maiúsculas')
 })
 
+/* ---------- foto sem valor ---------- */
+
+await caso('imagem que não é comprovante: diz que não parece comprovante, sem a palavra "arquivo"', async () => {
+  ia.documento = { tipo: 'outro', meio: null, vencimento: null, resumo: 'Receita de bolo', transacoes: [] }
+  const r = await msgFoto('bolo.png')
+  assert.equal(r.status, 'pergunta')
+  assert.equal(r.resposta, 'Isso não parece um comprovante. Se foi um gasto ou uma venda, me diz o que foi e quanto.')
+  assert.doesNotMatch(r.resposta, /arquivo/)
+  assert.equal(lancsU1().length, 0)
+})
+
+await caso('comprovante que não deu para ler: foto pede de mais perto, PDF pede o valor', async () => {
+  ia.documento = { tipo: 'comprovante', meio: null, vencimento: null, resumo: 'Comprovante borrado', transacoes: [] }
+  const f = await msgFoto('borrada.png')
+  assert.match(f.resposta, /Não consegui ler o valor nessa foto\. Tenta mandar de mais perto, ou me diz o que foi e quanto\./)
+  const p = await msgPdf('doc.pdf')
+  assert.match(p.resposta, /Não consegui ler o valor nesse PDF\. Me diz o que foi e quanto que eu anoto\./)
+  assert.doesNotMatch(f.resposta + p.resposta, /arquivo/)
+})
+
+await caso('depois da foto sem valor, a pessoa responde em texto e o registro fecha normal', async () => {
+  ia.documento = { tipo: 'outro', meio: null, vencimento: null, resumo: 'Imagem', transacoes: [] }
+  await msgFoto('qualquer.png')
+  ia.regras = [[/paguei 80 de material/, acoes(acao({ valor: 80, descricao: 'Material', meio: 'pix' }))]]
+  const r = await msg('paguei 80 de material no pix')
+  assert.match(r, /saiu R\$ 80,00/, r)
+  assert.equal(lancsU1().length, 1)
+})
+
 fim()

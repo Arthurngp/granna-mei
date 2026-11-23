@@ -20,6 +20,7 @@ const ABRE_S = `(${ABRE_SAIDA.join('|')})`
 const FIXAS = (): string[] => [
   MSG.nadaParaDesfazer, MSG.corrigi, MSG.problemaAoAnotar, MSG.foraDoAssunto, MSG.saudacao('Arthur'), MSG.saudacao(''), MSG.numeroConfirmado('Arthur'),
   ERROU, ajudaFixa('Arthur'), ajudaFixa(null),
+  MSG.semValorNoArquivo('foto', true), MSG.semValorNoArquivo('foto', false), MSG.semValorNoArquivo('pdf', false),
   ...ABRE_ENTRADA.map((a) => `${a} R$ 150,00.`), ...ABRE_SAIDA.map((a) => `${a} R$ 89,00.`),
   confirma.transferencia('R$ 10,00'), confirma.pagouFatura('R$ 10,00'), confirma.compraCartao('R$ 10,00'),
   confirma.conta('pagar', 'R$ 10,00'), confirma.conta('receber', 'R$ 10,00'), confirma.baixa('pagar', 'R$ 10,00'), confirma.baixa('receber', 'R$ 10,00'),

@@ -456,7 +456,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     const { leitura, uso } = await lerDocumento(m.buffer, tipo === 'pdf' ? 'application/pdf' : m.mime, d.caption ?? '')
     soma(uso)
     if (!leitura.transacoes.length) {
-      return { status: 'pergunta', resposta: 'Não consegui ver um valor nesse arquivo. Me diz o que foi e o valor?', efeitos: {}, intencao: 'documento', texto: leitura.resumo, tokens }
+      return { status: 'pergunta', resposta: MSG.semValorNoArquivo(tipo === 'pdf' ? 'pdf' : 'foto', leitura.tipo === 'outro'), efeitos: {}, intencao: 'documento', texto: leitura.resumo, tokens }
     }
     if (leitura.tipo === 'fatura_cartao' && leitura.transacoes.length) {
       // Fatura do cartão: as compras entram no cartão escolhido, na fatura que o documento diz.
