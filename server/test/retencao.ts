@@ -44,6 +44,8 @@ const pessoa = (n: number, extra: Partial<Elegivel> = {}): Elegivel => ({ user_i
 interface Opt {
   configs?: Config[] | Error
   lista?: Partial<Record<Regra, Elegivel[]>>
+  /** Elegíveis das etapas 2 e 3, por "regra:etapa". */
+  listaEtapa?: Record<string, Elegivel[]>
   conectado?: boolean | Error
   hoje?: number
   ultimoEnvioEm?: string | null
@@ -57,16 +59,17 @@ interface Opt {
 function fake(opt: Opt = {}) {
   const enviados: { tel: string; texto: string }[] = []
   const ledger = new Set<string>()
-  const chamadas = { elegiveis: 0, reservar: 0, enviar: 0, ciclos: [] as { em: string; erro: string | null }[] }
+  const chamadas = { elegiveis: 0, reservar: 0, enviar: 0, ciclos: [] as { em: string; erro: string | null }[], pedidos: [] as [string, number, number][] }
   const deps: Deps = {
     configs: async () => {
       if (opt.configs instanceof Error) throw opt.configs
       return opt.configs ?? []
     },
-    elegiveis: async (regra) => {
+    elegiveis: async (regra, atraso, etapa) => {
       chamadas.elegiveis++
+      chamadas.pedidos.push([regra, atraso, etapa])
       if (opt.elegiveisErro) throw new Error('banco fora')
-      return opt.lista?.[regra] ?? []
+      return etapa === 1 ? (opt.lista?.[regra] ?? []) : (opt.listaEtapa?.[`${regra}:${etapa}`] ?? [])
     },
     gatewayConectado: async () => {
       if (opt.conectado instanceof Error) throw opt.conectado
@@ -76,15 +79,15 @@ function fake(opt: Opt = {}) {
       if (opt.movimentoErro) throw new Error('não consegui contar')
       return { retencaoHoje: opt.hoje ?? 0, ultimoEnvioEm: opt.ultimoEnvioEm ?? null }
     },
-    reservar: async (u, r) => {
+    reservar: async (u, r, et) => {
       chamadas.reservar++
-      const k = R.chaveRetencao(r, u)
+      const k = R.chaveRetencao(r, u, et)
       if (ledger.has(k)) return false
       ledger.add(k)
       return true
     },
-    concluir: async (u, r, enviado) => {
-      if (!enviado) ledger.delete(R.chaveRetencao(r, u))
+    concluir: async (u, r, et, enviado) => {
+      if (!enviado) ledger.delete(R.chaveRetencao(r, u, et))
     },
     enviar: async (tel, texto) => {
       chamadas.enviar++
@@ -99,6 +102,15 @@ function fake(opt: Opt = {}) {
 }
 
 const TODOS = [cfg('nunca_mandou', 'todos'), cfg('parou_de_usar', 'desligado')]
+const COM_ETAPAS = (modo: Config['modo'] = 'todos'): Config[] => [
+  cfg('nunca_mandou', modo, {
+    etapas: [
+      { etapa: 2, atraso_horas: 96, texto: 'Oi, {nome}! Etapa dois: me manda o que entrou ou saiu, que eu anoto por aqui.' },
+      { etapa: 3, atraso_horas: 240, texto: 'Oi, {nome}! Etapa três, a última: quando quiser, é só me mandar um gasto.' },
+    ],
+  }),
+  cfg('parou_de_usar', 'desligado'),
+]
 
 /* ---------------- as travas ---------------- */
 
@@ -236,6 +248,86 @@ await caso('candidato sem telefone é pulado, nunca recebe no número cadastrado
   await R.rodarRetencao(f.deps, em('10:00'))
   assert.equal(f.enviados.length, 1)
   assert.equal(f.enviados[0].tel, '5581999990002')
+})
+
+/* ---------------- a sequência: etapas 2 e 3 ---------------- */
+
+await caso('só a etapa 1 é consultada quando as etapas 2 e 3 estão desligadas, mesmo que haja gente "elegível" nelas (nada muda no que sai)', async () => {
+  // Ninguém na etapa 1 para o ciclo não parar nela; e as etapas 2 e 3 têm candidatos que NUNCA podem receber, porque estão desligadas.
+  const f = fake({ configs: TODOS, lista: { nunca_mandou: [] }, listaEtapa: { 'nunca_mandou:2': [pessoa(5)], 'nunca_mandou:3': [pessoa(6)] } })
+  await R.rodarRetencao(f.deps, em('10:00'))
+  assert.deepEqual(f.chamadas.pedidos, [['nunca_mandou', 24, 1]], 'nem pergunta pelas etapas 2 e 3')
+  assert.equal(f.enviados.length, 0, 'e ninguém recebe')
+  const g = fake({ configs: TODOS, lista: { nunca_mandou: [pessoa(1)] } })
+  await R.rodarRetencao(g.deps, em('10:00'))
+  assert.equal(g.enviados.length, 1, 'a etapa 1 segue saindo como sempre')
+})
+
+await caso('com a etapa 1 sem ninguém, sai a etapa 2 com o texto DELA e a chave ":2" (a 1 tem prioridade quando há gente nela)', async () => {
+  const f = fake({ configs: COM_ETAPAS(), lista: { nunca_mandou: [] }, listaEtapa: { 'nunca_mandou:2': [pessoa(5)], 'nunca_mandou:3': [pessoa(6)] } })
+  await R.rodarRetencao(f.deps, em('10:00'))
+  assert.equal(f.enviados.length, 1)
+  assert.equal(f.enviados[0].tel, '5581999990005')
+  assert.match(f.enviados[0].texto, /^Oi, Pessoa5! Etapa dois:/, 'o texto da etapa 2, não o da etapa 1')
+  assert.ok(f.ledger.has('ret:nunca_mandou:u5:2'), 'a reserva leva o sufixo da etapa')
+  assert.ok(!f.ledger.has('ret:nunca_mandou:u5'), 'e NÃO ocupa a chave da etapa 1')
+  assert.deepEqual(f.chamadas.pedidos.map((x) => x[2]), [1, 2], 'parou na etapa 2: um envio por ciclo')
+})
+
+await caso('a etapa 1 vem antes das etapas de acompanhamento: quem nunca foi chamado sai primeiro', async () => {
+  const f = fake({ configs: COM_ETAPAS(), lista: { nunca_mandou: [pessoa(1)] }, listaEtapa: { 'nunca_mandou:2': [pessoa(5)] } })
+  await R.rodarRetencao(f.deps, em('10:00'))
+  assert.equal(f.enviados[0].tel, '5581999990001')
+  assert.match(f.enviados[0].texto, /^Oi, Pessoa1! Aqui é a Granninha/)
+  assert.ok(f.ledger.has('ret:nunca_mandou:u1'))
+  await R.rodarRetencao(f.deps, em('10:04'))
+  assert.equal(f.enviados[1].tel, '5581999990005', 'três minutos depois, ninguém mais na etapa 1 (o reservado já tem a chave), sai a etapa 2')
+})
+
+await caso('a etapa 3 sai com o texto dela e a chave ":3"', async () => {
+  const f = fake({ configs: COM_ETAPAS(), listaEtapa: { 'nunca_mandou:3': [pessoa(6)] } })
+  await R.rodarRetencao(f.deps, em('10:00'))
+  assert.match(f.enviados[0].texto, /^Oi, Pessoa6! Etapa três/)
+  assert.ok(f.ledger.has('ret:nunca_mandou:u6:3'))
+})
+
+await caso('cada etapa recebe o ATRASO dela (24 h, 96 h e 240 h) ao pedir quem é elegível', async () => {
+  const f = fake({ configs: COM_ETAPAS(), lista: {}, listaEtapa: {} })
+  await R.rodarRetencao(f.deps, em('10:00'))
+  assert.deepEqual(f.chamadas.pedidos, [['nunca_mandou', 24, 1], ['nunca_mandou', 96, 2], ['nunca_mandou', 240, 3]])
+})
+
+await caso('a mesma pessoa pode estar na etapa 1 e na 2 com chaves diferentes (a chave da etapa 1 não segura a 2)', async () => {
+  const f = fake({ configs: COM_ETAPAS(), listaEtapa: { 'nunca_mandou:2': [pessoa(7)] } })
+  f.ledger.add(R.chaveRetencao('nunca_mandou', 'u7', 1))
+  await R.rodarRetencao(f.deps, em('10:00'))
+  assert.equal(f.enviados.length, 1, 'a etapa 1 já foi enviada a ela; a 2 é outra chave')
+})
+
+await caso('chaves: etapa 1 sem sufixo (compatível com o que já foi enviado), etapas 2 e 3 com sufixo', async () => {
+  assert.equal(R.chaveRetencao('nunca_mandou', 'u1'), 'ret:nunca_mandou:u1')
+  assert.equal(R.chaveRetencao('nunca_mandou', 'u1', 1), 'ret:nunca_mandou:u1')
+  assert.equal(R.chaveRetencao('parou_de_usar', 'u1', 2), 'ret:parou_de_usar:u1:2')
+  assert.equal(R.chaveRetencao('parou_de_usar', 'u1', 3), 'ret:parou_de_usar:u1:3')
+})
+
+await caso('ensaio rotula a etapa no registro; piloto manda UM exemplo por etapa por dia, com o texto da etapa', async () => {
+  const f = fake({ configs: COM_ETAPAS('ensaio'), lista: { nunca_mandou: [pessoa(1)] }, listaEtapa: { 'nunca_mandou:2': [pessoa(5)] } })
+  const log = (await R.rodarRetencao(f.deps, em('10:00'))).join('\n')
+  assert.match(log, /ensaio \(nunca_mandou\): enviaria a 55\*+0001/)
+  assert.match(log, /ensaio \(nunca_mandou, etapa 2\): enviaria a 55\*+0005/)
+  assert.equal(f.enviados.length, 0)
+  R.zerarEstado()
+  const g = fake({ configs: COM_ETAPAS('piloto'), lista: { nunca_mandou: [pessoa(1)] }, listaEtapa: { 'nunca_mandou:2': [pessoa(5)] }, piloto: ['(81) 98888-7777'] })
+  await R.rodarRetencao(g.deps, em('10:00'))
+  await R.rodarRetencao(g.deps, em('10:04'))
+  await R.rodarRetencao(g.deps, em('10:08'))
+  assert.equal(g.enviados.length, 2, 'um exemplo da etapa 1 e um da etapa 2; nada de repetir')
+  assert.ok(g.enviados.every((x) => x.tel === '81988887777'), 'só ao piloto')
+  assert.match(g.enviados[0].texto, /^\[PILOTO\] Este lembrete iria para Pessoa1/)
+  assert.match(g.enviados[1].texto, /^\[PILOTO\] Este lembrete \(etapa 2\) iria para Pessoa5/)
+  assert.match(g.enviados[1].texto, /Etapa dois:/)
+  assert.equal(g.chamadas.reservar, 0)
 })
 
 /* ---------------- falha de envio ---------------- */
@@ -395,6 +487,30 @@ await casoBanco('banco: configs devolve só linhas válidas (linha estranha vale
   assert.deepEqual(c.map((x) => `${x.regra}:${x.modo}:${x.atraso_horas}`), ['nunca_mandou:todos:24'])
 })
 
+await casoBanco('banco: configs traz as etapas 2 e 3 LIGADAS, em ordem, e descarta cadeia incoerente (em dúvida não envia)', async () => {
+  const txt = 'Oi, {nome}! Aqui é a Granninha, me manda seus lançamentos.'
+  E.tabelas.config_retencao = [{ regra: 'nunca_mandou', modo: 'todos', atraso_horas: 24, texto: txt }, { regra: 'parou_de_usar', modo: 'ensaio', atraso_horas: 48, texto: txt }]
+  E.tabelas.config_retencao_etapa = [
+    { regra: 'nunca_mandou', etapa: 2, ativa: true, atraso_horas: 96, texto: txt + ' dois' },
+    { regra: 'nunca_mandou', etapa: 3, ativa: true, atraso_horas: 240, texto: txt + ' tres' },
+    { regra: 'parou_de_usar', etapa: 2, ativa: false, atraso_horas: 96, texto: txt },
+    { regra: 'parou_de_usar', etapa: 3, ativa: true, atraso_horas: 240, texto: txt },
+  ]
+  let c = await depsBanco().deps.configs()
+  const nm = c.find((x) => x.regra === 'nunca_mandou')!
+  assert.deepEqual(nm.etapas?.map((e) => `${e.etapa}:${e.atraso_horas}`), ['2:96', '3:240'], 'as duas ligadas, em ordem')
+  assert.equal(nm.etapas?.[0].texto.endsWith(' dois'), true)
+  assert.deepEqual(c.find((x) => x.regra === 'parou_de_usar')!.etapas, [], 'a etapa 3 ligada sem a 2 ligada é descartada')
+  E.tabelas.config_retencao_etapa[1].atraso_horas = 90
+  c = await depsBanco().deps.configs()
+  assert.deepEqual(c.find((x) => x.regra === 'nunca_mandou')!.etapas?.map((e) => e.etapa), [2], 'atraso da etapa 3 menor que o da 2: a 3 é descartada')
+  E.tabelas.config_retencao_etapa[0].atraso_horas = 20
+  c = await depsBanco().deps.configs()
+  assert.deepEqual(c.find((x) => x.regra === 'nunca_mandou')!.etapas, [], 'atraso da etapa 2 menor que o da 1: nenhuma etapa de acompanhamento vale')
+  E.falharTabela = 'config_retencao_etapa'
+  await assert.rejects(depsBanco().deps.configs(), /etapas/)
+})
+
 await casoBanco('banco: tabela de configuração fora do ar lança (e o ciclo, por isso, não envia)', async () => {
   E.falharTabela = 'config_retencao'
   await assert.rejects(depsBanco().deps.configs(), /configuração/)
@@ -410,24 +526,31 @@ await casoBanco('banco: elegiveis lê pela função SQL e normaliza (telefone s�
     chamadas.push([nome, args])
     return { data: [{ user_id: 'a', nome: null, telefone: '+55 (81) 99999-0001', whats: '8199990001', horas: 31 }, { user_id: 'b', nome: 'Bia', telefone: null, whats: '8199990002', horas: 40 }], error: null }
   }
-  const r = await depsBanco({ rpc }).deps.elegiveis('parou_de_usar', 48)
-  assert.deepEqual(chamadas, [['retencao_elegiveis', { p_regra: 'parou_de_usar', p_atraso: 48, p_ignorar_marco: false }]])
+  const r = await depsBanco({ rpc }).deps.elegiveis('parou_de_usar', 48, 1)
+  const r3 = await depsBanco({ rpc }).deps.elegiveis('nunca_mandou', 240, 3)
+  assert.deepEqual(chamadas, [['retencao_elegiveis', { p_regra: 'parou_de_usar', p_atraso: 48, p_ignorar_marco: false, p_etapa: 1 }], ['retencao_elegiveis', { p_regra: 'nunca_mandou', p_atraso: 240, p_ignorar_marco: false, p_etapa: 3 }]], 'a etapa vai para a função SQL')
+  assert.equal(r3.length, 2)
   assert.deepEqual(r.map((x) => [x.user_id, x.nome, x.telefone]), [['a', '', '5581999990001'], ['b', 'Bia', null]])
-  await assert.rejects(depsBanco({ rpc: async () => ({ data: null, error: { message: 'boom' } }) }).deps.elegiveis('nunca_mandou', 24), /elegíveis/)
+  await assert.rejects(depsBanco({ rpc: async () => ({ data: null, error: { message: 'boom' } }) }).deps.elegiveis('nunca_mandou', 24, 1), /elegíveis/)
 })
 
 await casoBanco('banco: reservar é atômico (quem reserva primeiro é quem envia) e soltar libera para tentar de novo', async () => {
   E.tabelas.avisos = []
   const { deps } = depsBanco()
-  assert.equal(await deps.reservar('u1', 'nunca_mandou', '5581999990001'), true)
-  assert.equal(await deps.reservar('u1', 'nunca_mandou', '5581999990001'), false, 'segunda chamada não reserva')
-  assert.equal(await deps.reservar('u1', 'parou_de_usar', '5581999990001'), true, 'outra regra é outra chave')
+  assert.equal(await deps.reservar('u1', 'nunca_mandou', 1, '5581999990001'), true)
+  assert.equal(await deps.reservar('u1', 'nunca_mandou', 1, '5581999990001'), false, 'segunda chamada não reserva')
+  assert.equal(await deps.reservar('u1', 'parou_de_usar', 1, '5581999990001'), true, 'outra regra é outra chave')
+  assert.equal(await deps.reservar('u1', 'nunca_mandou', 2, '5581999990001'), true, 'outra etapa é outra chave')
+  assert.equal(E.tabelas.avisos[2].chave, 'ret:nunca_mandou:u1:2')
+  assert.equal(E.tabelas.avisos[2].tipo, 'retencao_nunca', 'o tipo é o da regra, em qualquer etapa')
+  await deps.concluir('u1', 'nunca_mandou', 2, false)
+  assert.equal(E.tabelas.avisos.length, 2, 'soltar a etapa 2 não mexe nas outras chaves')
   assert.equal(E.tabelas.avisos[0].chave, 'ret:nunca_mandou:u1')
   assert.equal(E.tabelas.avisos[0].tipo, 'retencao_nunca')
   assert.equal(E.tabelas.avisos[1].tipo, 'retencao_parou')
-  await deps.concluir('u1', 'nunca_mandou', false)
-  assert.equal(await deps.reservar('u1', 'nunca_mandou', '5581999990001'), true, 'soltou: pode reservar de novo')
-  await deps.concluir('u1', 'nunca_mandou', true)
+  await deps.concluir('u1', 'nunca_mandou', 1, false)
+  assert.equal(await deps.reservar('u1', 'nunca_mandou', 1, '5581999990001'), true, 'soltou: pode reservar de novo')
+  await deps.concluir('u1', 'nunca_mandou', 1, true)
   assert.equal(E.tabelas.avisos.find((a) => a.chave === 'ret:nunca_mandou:u1')?.status, 'enviado')
 })
 

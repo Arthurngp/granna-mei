@@ -7,6 +7,8 @@ import { Ausente, n, pct } from './visao/usar'
 type Regra = 'nunca_mandou' | 'parou_de_usar'
 interface PorRegra {
   regra: Regra
+  /** Ausente antes da migration da sequência: vale como etapa 1. */
+  etapa?: number
   enviados: number
   medidos_24h: number
   responderam_24h: number
@@ -17,6 +19,7 @@ interface PorRegra {
 interface Ultimo {
   em: string
   regra: Regra
+  etapa?: number
   nome: string
   negocio: string
   respondeu: boolean | null
@@ -25,6 +28,7 @@ interface Ultimo {
 }
 interface FilaRegra {
   regra: Regra
+  etapa?: number
   modo: string
   atraso_horas: number
   agora: { nome: string; negocio: string; horas: number }[]
@@ -38,6 +42,8 @@ interface Acomp {
 }
 
 const NOME_REGRA: Record<Regra, string> = { nunca_mandou: 'Nunca mandou nada', parou_de_usar: 'Parou de usar' }
+/** "Nunca mandou nada" na etapa 1, "Nunca mandou nada, etapa 2" nas outras. */
+const nomeEtapa = (regra: Regra, etapa?: number) => (!etapa || etapa === 1 ? NOME_REGRA[regra] : `${NOME_REGRA[regra]}, etapa ${etapa}`)
 
 /** "há 5 h", "há 2 dias": o suficiente para ver se o envio é de agora ou de ontem. */
 function ha(iso: string): string {
@@ -99,8 +105,8 @@ export function AvisosAcompanhar() {
           <div className="pilha" style={{ gap: 10 }}>
             {d.por_regra.length === 0 && <p className="suave" style={{ margin: 0 }}>Nenhum lembrete enviado nos últimos {dias} dias.</p>}
             {d.por_regra.map((r) => (
-              <div className="item-ob ligado" key={r.regra} style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
-                <b>{NOME_REGRA[r.regra]}: {n(r.enviados)} {r.enviados === 1 ? 'enviado' : 'enviados'}</b>
+              <div className="item-ob ligado" key={`${r.regra}:${r.etapa ?? 1}`} style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
+                <b>{nomeEtapa(r.regra, r.etapa)}: {n(r.enviados)} {r.enviados === 1 ? 'enviado' : 'enviados'}</b>
                 <small className="suave">Respondeu em até 24 h: {taxa(r.responderam_24h, r.medidos_24h)}. Voltou a lançar em até 48 h: {taxa(r.lancaram_48h, r.medidos_48h)}. Pediram SAIR: {n(r.pediram_sair)}.</small>
               </div>
             ))}
@@ -122,7 +128,7 @@ export function AvisosAcompanhar() {
                   <div className="linha" key={i} style={{ padding: '8px 0' }}>
                     <div className="meio">
                       <div className="tit" style={{ fontSize: 14, whiteSpace: 'normal' }}>{u.nome || 'Sem nome'}{u.negocio ? ` · ${u.negocio}` : ''}</div>
-                      <div className="det"><span>{NOME_REGRA[u.regra]} · {ha(u.em)}</span></div>
+                      <div className="det"><span>{nomeEtapa(u.regra, u.etapa)} · {ha(u.em)}</span></div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
                         {u.respondeu === null ? <Etiqueta texto="aguardando resposta" tom="neutro" /> : u.respondeu ? <Etiqueta texto="respondeu" tom="bom" /> : <Etiqueta texto="não respondeu" tom="ruim" />}
                         {u.lancou === null ? <Etiqueta texto="lançamento: aguardando" tom="neutro" /> : u.lancou ? <Etiqueta texto="voltou a lançar" tom="bom" /> : <Etiqueta texto="não lançou" tom="ruim" />}
@@ -138,8 +144,8 @@ export function AvisosAcompanhar() {
           <Cartao g={6} titulo="Na fila" nota="quem recebe e quando">
             <div className="pilha" style={{ gap: 12 }}>
               {d.fila.map((f) => (
-                <div key={f.regra}>
-                  <b style={{ fontSize: 14 }}>{NOME_REGRA[f.regra]}</b>{' '}
+                <div key={`${f.regra}:${f.etapa ?? 1}`}>
+                  <b style={{ fontSize: 14 }}>{nomeEtapa(f.regra, f.etapa)}</b>{' '}
                   <small className="suave">({f.modo === 'desligado' ? 'regra desligada: ninguém recebe, esta é só a lista de quem receberia' : f.modo === 'todos' ? 'ligada para todos' : `em modo ${f.modo}`}, espera de {n(f.atraso_horas)} h)</small>
                   <p className="suave pq" style={{ margin: '6px 0 0' }}>
                     <b>Receberia agora ({n(f.agora.length)}):</b>{' '}
