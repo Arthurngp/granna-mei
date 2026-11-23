@@ -346,6 +346,7 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
     case 'admin_envio_pedir': {
       const u = String(args.p_user)
       if (!['nunca', 'sumiu'].includes(String(args.p_grupo))) throw new Error('este grupo não tem envio pelo sistema: use o link do WhatsApp')
+      if (u.includes('Larissa Gomes')) throw new Error('esta pessoa nunca escreveu para o número atual: chamar primeiro pode bloquear o número')
       if (u.includes('Diego Matos')) throw new Error('esta pessoa respondeu SAIR e não quer receber mensagem')
       if (enviosMock.some((e) => e.user_id === u && e.status === 'fila')) return { ok: true, ja_na_fila: true }
       const id = `mock-${enviosMock.length + 1}`

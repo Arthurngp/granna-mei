@@ -76,6 +76,8 @@ type EstadoEnvio =
 
 /** Só estes grupos têm envio pelo sistema: quem parou no passo do WhatsApp nunca escreveu para o número, e quem está sem acesso pede conversa de gente. */
 const COM_ENVIO: Item['grupo'][] = ['nunca', 'sumiu']
+/** A recusa do banco para quem só falou com o número ANTIGO (contato frio). Só nesse caso a tela oferece o link do WhatsApp pessoal: quem respondeu SAIR ou pediu exclusão não recebe nada. */
+const RECUSA_FRIA = /nunca escreveu para o número atual/i
 /** A mesma linha que o servidor acrescenta no fim de toda mensagem (RODAPE_SAIR em server/src/retencao.ts). */
 const LINHA_SAIR = 'Para não receber mais lembretes meus, responda SAIR.'
 
@@ -155,7 +157,7 @@ function ChipEnvio({ e, whatsOk, desvio }: { e: EstadoEnvio; whatsOk: boolean; d
 }
 
 /** O que o admin confere antes de soltar uma mensagem de verdade: o texto exato, por onde sai e quando. */
-function ConfirmarEnvio({ item, fila, desvio, onFechar, onEnviado }: { item: Item; fila: Fila; desvio: number; onFechar: () => void; onEnviado: () => void }) {
+function ConfirmarEnvio({ item, fila, desvio, onFechar, onEnviado, onRecusaFria }: { item: Item; fila: Fila; desvio: number; onFechar: () => void; onEnviado: () => void; onRecusaFria: () => void }) {
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
   const texto = sugestao(item)
@@ -169,10 +171,13 @@ function ConfirmarEnvio({ item, fila, desvio, onFechar, onEnviado }: { item: Ite
       await rpc('admin_envio_pedir', { p_user: item.user_id, p_grupo: item.grupo, p_texto: texto })
       onEnviado()
     } catch (e) {
-      setErro((e as Error).message)
+      const msg = (e as Error).message
+      setErro(msg)
       setEnviando(false)
+      if (RECUSA_FRIA.test(msg)) onRecusaFria()
     }
   }
+  const fria = RECUSA_FRIA.test(erro)
   return (
     <>
       <span className="k">Confirmar envio</span>
@@ -191,13 +196,20 @@ function ConfirmarEnvio({ item, fila, desvio, onFechar, onEnviado }: { item: Ite
       </p>
       {!fila.whatsapp_ok && <div className="por">O WhatsApp da Granninha está desconectado agora. O pedido fica na fila e sai quando reconectar.</div>}
       {erro && <div className="por" role="alert">{erro}</div>}
+      {fria && <p className="texto-ajuda">Esta pessoa só falou com o número antigo da Granninha. Pelo seu WhatsApp pessoal você pode chamar: o texto abre pronto, você revisa e envia.</p>}
       <div className="acoes-g">
         <button type="button" onClick={onFechar}>
           Cancelar
         </button>
-        <button type="button" className="p" onClick={enviar} disabled={enviando}>
-          {enviando ? 'Enviando…' : 'Enviar mensagem'}
-        </button>
+        {fria ? (
+          <a className="p" href={waLink(item.whats, texto)} target="_blank" rel="noopener noreferrer">
+            Abrir no WhatsApp
+          </a>
+        ) : (
+          <button type="button" className="p" onClick={enviar} disabled={enviando}>
+            {enviando ? 'Enviando…' : 'Enviar mensagem'}
+          </button>
+        )}
       </div>
     </>
   )
@@ -225,12 +237,15 @@ export function Resumo() {
   const fila = useRpc<Fila>('admin_envios_fila', {}, 10_000, versaoFila)
   const [confirmar, setConfirmar] = useState<Item | null>(null)
   const [avisoEnvio, setAvisoEnvio] = useState('')
+  // Quem o banco recusou por nunca ter escrito para o número atual: a linha volta ao link do WhatsApp em vez de oferecer um botão que sempre falha.
+  const [soAntigo, setSoAntigo] = useState<Record<string, true>>({})
   const fecharFicha = useCallback(() => setSel(null), [])
   const fecharConfirmar = useCallback(() => setConfirmar(null), [])
   // A diferença entre o relógio do servidor e o deste navegador, para a contagem não depender de o relógio daqui estar certo.
   const recebidoEm = useMemo(() => Date.now(), [fila.dados])
   const desvio = fila.dados ? Date.parse(fila.dados.agora) - recebidoEm : 0
   const podeEnviar = !!fila.dados
+  const comEnvioPara = (i: Item) => podeEnviar && COM_ENVIO.includes(i.grupo) && !soAntigo[i.user_id]
   const envioDe = (i: Item): EstadoEnvio | null => {
     const f = fila.dados
     if (!f || !COM_ENVIO.includes(i.grupo)) return null
@@ -337,7 +352,7 @@ export function Resumo() {
               {lista.map((i) => {
                 const mt = motivo(i)
                 const env = envioDe(i)
-                const comEnvio = podeEnviar && COM_ENVIO.includes(i.grupo)
+                const comEnvio = comEnvioPara(i)
                 return (
                   <div key={i.user_id} className="ac" role="button" tabIndex={0} onClick={() => setSel(i)} onKeyDown={(e) => (e.key === 'Enter' ? setSel(i) : undefined)}>
                     <div className="ac-id">
@@ -517,7 +532,7 @@ export function Resumo() {
             <div className="msg">{sugestao(sel)}</div>
             {(() => {
               const env = envioDe(sel)
-              const podeSistema = podeEnviar && COM_ENVIO.includes(sel.grupo) && (!env || env.tipo === 'falhou')
+              const podeSistema = comEnvioPara(sel) && (!env || env.tipo === 'falhou')
               return (
                 <>
                   <div className="acoes-g">
@@ -550,6 +565,7 @@ export function Resumo() {
             fila={fila.dados}
             desvio={desvio}
             onFechar={fecharConfirmar}
+            onRecusaFria={() => setSoAntigo((m) => ({ ...m, [confirmar.user_id]: true }))}
             onEnviado={() => {
               setConfirmar(null)
               setAvisoEnvio('')
