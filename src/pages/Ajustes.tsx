@@ -776,6 +776,9 @@ export default function Ajustes() {
           <p>
             Nesse prazo você ainda entra aqui para desistir. Se desistir, é só confirmar seu número de novo para a Granninha voltar a te atender.
           </p>
+          <p>
+            Se você assina, a cobrança também para: sua assinatura não renova. Você usa o que já pagou até o fim do período, e se desistir ela volta a renovar sozinha.
+          </p>
           <button type="button" className="btn btn-sec" onClick={() => baixarTudo(s)}>
             <Download size={18} />
             Baixar meus dados antes
