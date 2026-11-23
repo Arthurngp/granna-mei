@@ -47,6 +47,12 @@ export const diasNoMes = (ym: string) => {
   return new Date(y, m, 0).getDate()
 }
 
+/**
+ * Vencimento de uma conta que cai "todo dia N", em um mês AAAA-MM. No mês que não tem o dia N, vai para o último dia do mês
+ * (31 vira 30 em abril, 28 ou 29 em fevereiro). Sempre calculado do dia configurado, nunca do vencimento anterior.
+ */
+export const vencimentoNoMes = (ym: string, dia: number) => `${ym}-${pad(Math.min(Math.max(1, dia), diasNoMes(ym)))}`
+
 export function difDias(a: string, b: string) {
   return Math.round((parse(a).getTime() - parse(b).getTime()) / 86400000)
 }

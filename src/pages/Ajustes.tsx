@@ -10,7 +10,7 @@ import { CampoDinheiro, Chave, Codigo, Folha, Seg, useAviso } from '../component
 import { saldos } from '../lib/calc'
 import { PRECO_ANUAL, PRECO_MENSAL, RAMOS } from '../lib/config'
 import { baixar, csvLancamentos } from '../lib/exportar'
-import { brl, diaCurto, documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, somaDias, somaMeses } from '../lib/format'
+import { brl, diaCurto, documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, somaDias, somaMeses, vencimentoNoMes } from '../lib/format'
 import { novoId, useApp } from '../lib/store'
 import type { Carteira, Categoria, Conta, Estado, Fixa, StatusAssinatura, TipoCarteira } from '../lib/tipos'
 
@@ -23,7 +23,7 @@ function contasDaFixa(f: Fixa): Conta[] {
   const h = hoje()
   const r: Conta[] = []
   for (let k = 0; k < 3; k++) {
-    const venc = `${somaMeses(mesAtual(), k)}-${String(f.dia).padStart(2, '0')}`
+    const venc = vencimentoNoMes(somaMeses(mesAtual(), k), f.dia)
     if (venc < h) continue
     r.push({ id: novoId('c'), tipo: 'pagar', descricao: f.descricao, valor: f.valor, vencimento: venc, status: 'aberta', categoriaId: f.categoriaId, fixaId: f.id, das: f.das })
   }
@@ -95,7 +95,7 @@ export default function Ajustes() {
       const fixas = a.fixas.map((f) => (f.id === id ? { ...f, ...p } : f))
       const f = fixas.find((x) => x.id === id)!
       // As contas em aberto dessa fixa acompanham o novo valor e o novo dia.
-      const contas = a.contas.map((c): Conta => (c.fixaId === id && c.status === 'aberta' ? { ...c, valor: f.valor, descricao: f.descricao, vencimento: `${c.vencimento.slice(0, 8)}${String(f.dia).padStart(2, '0')}` } : c))
+      const contas = a.contas.map((c): Conta => (c.fixaId === id && c.status === 'aberta' ? { ...c, valor: f.valor, descricao: f.descricao, vencimento: vencimentoNoMes(c.vencimento.slice(0, 7), f.dia) } : c))
       return { ...a, fixas, contas }
     })
 
@@ -698,7 +698,7 @@ export default function Ajustes() {
                 <label className="campo">
                   <span>Vence todo dia</span>
                   <select className="entrada num" value={f.dia} onChange={(e) => mudaFixa(f.id, { dia: Number(e.target.value) })}>
-                    {Array.from({ length: 28 }, (_, i) => (
+                    {Array.from({ length: 31 }, (_, i) => (
                       <option key={i} value={i + 1}>
                         {i + 1}
                       </option>
@@ -719,7 +719,7 @@ export default function Ajustes() {
               <label className="campo">
                 <span>Vence todo dia</span>
                 <select className="entrada num" value={nFixa.dia} onChange={(e) => setNFixa({ ...nFixa, dia: Number(e.target.value) })}>
-                  {Array.from({ length: 28 }, (_, i) => (
+                  {Array.from({ length: 31 }, (_, i) => (
                     <option key={i} value={i + 1}>
                       {i + 1}
                     </option>

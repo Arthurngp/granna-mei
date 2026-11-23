@@ -8,6 +8,8 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  fixasdia 20261123020000_fixas_dia_ate_31.sql   conta fixa pode vencer até o dia 31 (o banco só aceitava até 28): troca a regra da coluna dia, sem mexer
+          em nenhuma linha. Sem ela o painel e o WhatsApp deixam escolher 29 a 31 e o banco recusa ao gravar. Rodar ANTES de o painel novo subir.
   desfazercortesia 20261121173700_admin_desfazer_cortesia.sql   admin_acao ganha a ação "Desfazer cortesia" (devolve a conta ao
           estado de antes, lido da auditoria; recusa se não souber). Sem ela o botão do admin dá erro. Não cria tabela nem coluna.
   retencaosequencia 20261122150000_retencao_sequencia.sql   sequência de até 3 mensagens por pessoa: etapas 2 e 3 (nascem DESLIGADAS), teto de 3 somando as regras, 48 h entre
@@ -62,6 +64,7 @@ MIGRATIONS = {
     "retencao": "20261121210000_retencao.sql",
     "retencaoacompanhar": "20261122120000_retencao_acompanhar.sql",
     "retencaosequencia": "20261122150000_retencao_sequencia.sql",
+    "fixasdia": "20261123020000_fixas_dia_ate_31.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
@@ -188,6 +191,12 @@ CONFERE = {
         -- Consulta dinâmica: a tabela ainda não existe antes da migration, e citá-la direto faria o ANTES inteiro falhar.
         (case when to_regclass('public.config_limite') is null then null
               else (xpath('/row/c/text()', query_to_xml('select lancamentos as c from public.config_limite where id', false, true, '')))[1]::text end) as padrao_hoje""",
+    # Conta fixa até o dia 31. Mostra a regra que o banco aplica HOJE à coluna dia (antes: between 1 and 28; depois: between 1 and 31) e quantas fixas já passam de 28
+    # (tem que ser 0 antes e pode ser maior que 0 depois). Só leitura.
+    "fixasdia": """select
+        (select string_agg(pg_get_constraintdef(c.oid), ' | ') from pg_constraint c where c.conrelid = 'public.fixas'::regclass and c.contype = 'c'
+          and c.conkey = array[(select attnum from pg_attribute where attrelid = 'public.fixas'::regclass and attname = 'dia')]) as regra_do_dia,
+        (select count(*) from public.fixas where dia > 28) as fixas_acima_de_28""",
     # Só funções de leitura do admin (custo por período, ativação, receita): confere as 3.
     "adminvisao": """select (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
         where n.nspname='public' and p.proname in ('admin_custo_periodo','admin_ativacao','admin_receita')) as funcoes_de_3""",
