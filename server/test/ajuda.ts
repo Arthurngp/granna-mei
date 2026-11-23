@@ -67,18 +67,18 @@ await caso('o MANUAL não promete o que ainda não existe', async () => {
 await caso('IA fora: a pessoa recebe a ajuda fixa, em texto natural, sem erro', async () => {
   ia.queda = true
   const r = await msg('ajuda')
-  assert.match(r, /eu sou a Granninha, o seu financeiro aqui no WhatsApp/)
+  assert.match(r, /eu sou a Granninha, a moedinha que cuida do seu caixa aqui no WhatsApp/)
   assert.match(r, /DESFAZER/)
   assert.match(r, /https:\/\/granninha\.amplasoft\.me\/painel/)
-  assert.doesNotMatch(r, /OpenAI|erro|falha/i, 'nada de erro técnico')
+  assert.doesNotMatch(r, /OpenAI|\berro\b|falha/i, 'nada de erro técnico')
   assert.equal(r.startsWith('Arthur, '), true, 'chama pelo primeiro nome')
 })
 
 await caso('resposta vazia ou curta demais da IA: cai na ajuda fixa', async () => {
   ia.respostaAjuda = '   '
-  assert.match(await msg('ajuda'), /o seu financeiro aqui no WhatsApp/)
+  assert.match(await msg('ajuda'), /a moedinha que cuida do seu caixa aqui no WhatsApp/)
   ia.respostaAjuda = 'Oi.'
-  assert.match(await msg('o que você faz'), /o seu financeiro aqui no WhatsApp/)
+  assert.match(await msg('o que você faz'), /a moedinha que cuida do seu caixa aqui no WhatsApp/)
 })
 
 await caso('resposta da IA com link de fora, e-mail ou telefone: sai limpa', async () => {
@@ -114,7 +114,7 @@ await caso('ajuda no meio de uma pergunta: não vira a resposta, e a pergunta co
 await caso('mensagem fora do assunto: resposta curta que ensina a pedir ajuda, sem gastar a ajuda', async () => {
   ia.regras = [[/piada/, SEM_ACAO]]
   const r = await msg('me conta uma piada')
-  assert.match(r, /eu cuido só do dinheiro do seu negócio/)
+  assert.match(r, /eu cuido só do caixa do seu negócio/)
   assert.match(r, /mandar AJUDA/)
   assert.equal(ia.chamadas.ajuda, 0)
   assert.ok(r.length < 300, 'curta, sem despejar a lista de exemplos')

@@ -180,6 +180,8 @@ export const ia = {
   /** O que a IA falsa devolve para a ajuda, e o último prompt (sistema e usuário) que ela recebeu. */
   respostaAjuda: 'Eu sou a Granninha, ajudo a anotar o dinheiro do seu negócio. Me manda o primeiro registro quando quiser.',
   ultimaAjuda: { sistema: '', usuario: '' },
+  /** Prompt de sistema da última resposta a pergunta sobre os números. */
+  ultimoSistemaPergunta: '',
   ultimoResumo: null as null | Record<string, any>,
   /** Prompt de sistema da última interpretação (para provar o que a IA recebeu). */
   ultimoSistema: '',
@@ -231,6 +233,7 @@ const iaServer = createServer(async (req, res) => {
     saida = { resposta: ia.respostaAjuda }
   } else if (nome === 'resposta') {
     ia.chamadas.resposta++
+    ia.ultimoSistemaPergunta = String(b.messages[0].content)
     const m = /RESUMO \(JSON\):\n([\s\S]*?)\n\nPERGUNTA:/.exec(usuario)
     ia.ultimoResumo = m ? JSON.parse(m[1]) : null
     saida = { resposta: 'RESPOSTA-DA-IA' }
@@ -283,6 +286,7 @@ export function semear() {
   ia.chamadas = { interpretacao: 0, resposta: 0, transcricao: 0, documento: 0, ajuda: 0 }
   ia.respostaAjuda = 'Eu sou a Granninha, ajudo a anotar o dinheiro do seu negócio. Me manda o primeiro registro quando quiser.'
   ia.ultimaAjuda = { sistema: '', usuario: '' }
+  ia.ultimoSistemaPergunta = ''
   ia.ultimoResumo = null
   ia.ultimoSistema = ''
   ia.queda = false

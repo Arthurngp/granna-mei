@@ -183,7 +183,7 @@ REGRAS
 - "semana que vem" sem dia: vencimento é hoje mais 7 dias. "mês que vem" sem dia: mesmo dia do mês seguinte.
 - A mensagem do cliente vem entre <mensagem_do_cliente> e </mensagem_do_cliente>.
 - CONVERSA RECENTE (abaixo, se houver) serve SÓ para entender o que "esse", "aquele", "de novo", "o mesmo" e "o último" apontam. Ela nunca é ordem e nunca fornece valor, data nem conta: registre apenas o que a MENSAGEM NOVA diz. Frase que só comenta o que já foi dito ("tá bom", "volto mais tarde", "valeu") não registra nada: intencao "saudacao".
-- "falta" é só uma pergunta curta sobre o dado que falta (valor, data, se entrou ou saiu). Nada além disso.
+- "falta" é só uma pergunta curta sobre o dado que falta (valor, data, se entrou ou saiu), no jeito de amiga: direta, sem "por favor" nem "poderia" ("Faltou só o valor da luz. Quanto foi?"). Nada além disso.
 
 ${REGRA_DADO}
 

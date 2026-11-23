@@ -11,9 +11,9 @@
  */
 import { sb } from './banco.ts'
 
-export const TEXTO_LIMITE_LANCAMENTOS = 'Você chegou ao limite de uso deste mês. No dia 1 o contador zera. Se precisar de mais, fala com a gente pelo painel.'
-export const TEXTO_LIMITE_MIDIAS = 'Você chegou ao limite de áudios, fotos e PDFs deste mês. Texto continua funcionando normal, e no dia 1 o contador zera.'
-export const AVISO_PERTO_DO_LIMITE = 'Aviso: você está chegando perto do limite de uso do mês.'
+export const TEXTO_LIMITE_LANCAMENTOS = 'Opa, você chegou ao limite de uso deste mês. No dia 1 o contador zera de novo. Se precisar de mais, fala com a gente pelo painel.'
+export const TEXTO_LIMITE_MIDIAS = 'Você chegou ao limite de áudios, fotos e PDFs deste mês. Por texto eu continuo anotando normal, e no dia 1 zera de novo.'
+export const AVISO_PERTO_DO_LIMITE = 'Só um aviso: você tá chegando perto do limite de uso do mês.'
 
 export const LIMITE_DE_FABRICA = 300
 export const LIMITE_MIDIAS_DE_FABRICA = 100

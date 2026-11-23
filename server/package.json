@@ -24,8 +24,9 @@
     "test:trocar-whatsapp": "tsx test/trocar-whatsapp.ts",
     "test:limite": "tsx test/limite-sem-numero.ts && tsx test/limite-configuravel.ts",
     "test:ajuda": "tsx test/ajuda.ts",
+    "test:voz": "tsx test/voz.ts",
     "test:retencao": "tsx test/retencao.ts && tsx test/retencao-sair.ts",
-    "test:sem-ia": "tsx test/cartao.ts && tsx test/conferir.ts && tsx test/confirmar.ts && tsx test/externos.ts && tsx test/excluir.ts && tsx test/saude.ts && tsx test/saldo.ts && tsx test/saldo-fluxo.ts && tsx test/correcao-fluxo.ts && tsx test/contexto-fluxo.ts && tsx test/presas.ts && tsx test/reenvio.ts && tsx test/desfazer.ts && tsx test/pendente.ts && tsx test/ruido.ts && tsx test/numeros.ts && tsx test/ia-fora.ts && tsx test/alerta.ts && tsx test/retirada.ts && tsx test/avisos.ts && tsx test/avisos-teste.ts && tsx test/cobranca.ts && tsx test/seguranca.ts && tsx test/dominio.ts && tsx test/trocar-whatsapp.ts && tsx test/limite-sem-numero.ts && tsx test/limite-configuravel.ts && tsx test/retencao.ts && tsx test/retencao-sair.ts && tsx test/ajuda.ts"
+    "test:sem-ia": "tsx test/cartao.ts && tsx test/conferir.ts && tsx test/confirmar.ts && tsx test/externos.ts && tsx test/excluir.ts && tsx test/saude.ts && tsx test/saldo.ts && tsx test/saldo-fluxo.ts && tsx test/correcao-fluxo.ts && tsx test/contexto-fluxo.ts && tsx test/presas.ts && tsx test/reenvio.ts && tsx test/desfazer.ts && tsx test/pendente.ts && tsx test/ruido.ts && tsx test/numeros.ts && tsx test/ia-fora.ts && tsx test/alerta.ts && tsx test/retirada.ts && tsx test/avisos.ts && tsx test/avisos-teste.ts && tsx test/cobranca.ts && tsx test/seguranca.ts && tsx test/dominio.ts && tsx test/trocar-whatsapp.ts && tsx test/limite-sem-numero.ts && tsx test/limite-configuravel.ts && tsx test/retencao.ts && tsx test/retencao-sair.ts && tsx test/ajuda.ts && tsx test/voz.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

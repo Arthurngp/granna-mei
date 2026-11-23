@@ -98,7 +98,7 @@ await caso('resposta 1: corrige o anterior no lugar, mostra Antes e Agora, e o s
   await msg('recebi 290 no pix')
   await msg(CORRECAO)
   const r = await msg('1')
-  assert.match(r, /Corrigido/)
+  assert.match(r, /Pronto, corrigi/)
   assert.match(r, /Antes: R\$ 290,00 · .*Outras entradas · Nubank/)
   assert.match(r, /Agora: R\$ 290,00 · .*Prestação de serviço · Nubank/)
   assert.match(r, /Saldo Nubank: R\$ 1\.290,00/)
@@ -113,7 +113,7 @@ await caso('resposta 2: era outro recebimento mesmo, entram os dois', async () =
   await msg('recebi 290 no pix')
   await msg(CORRECAO)
   const r = await msg('2')
-  assert.match(r, /Anotado: entrada de R\$ 290,00/)
+  assert.match(r, /entrou R\$ 290,00/)
   assert.match(r, /Saldo Nubank: R\$ 1\.580,00/)
   assert.equal(lancsU1().length, 2)
 })
@@ -137,7 +137,7 @@ await caso('dois cortes de 50 seguidos, descrições diferentes e sem pista: lan
   ]
   await msg('corte 50 pix')
   const r = await msg('escova 50 pix')
-  assert.match(r, /Anotado: entrada de R\$ 50,00/)
+  assert.match(r, /entrou R\$ 50,00/)
   assert.ok(!/mesmo/.test(r))
   assert.equal(lancsU1().length, 2)
 })
@@ -158,7 +158,7 @@ await caso('passou da janela de 15 minutos: não pergunta, é lançamento novo',
   await msg('recebi 290 no pix')
   for (const m of E.tabelas.mensagens) m.criado_em = new Date(Date.now() - 20 * 60_000).toISOString()
   const r = await msg(CORRECAO)
-  assert.match(r, /Anotado: entrada de R\$ 290,00/)
+  assert.match(r, /entrou R\$ 290,00/)
   assert.equal(lancsU1().length, 2)
 })
 
@@ -170,7 +170,7 @@ await caso('valor diferente não dispara a trava (é outro lançamento)', async 
   ]
   await msg('recebi 290 no pix')
   const r = await msg('não, foi 300 de serviço')
-  assert.match(r, /Anotado: entrada de R\$ 300,00/)
+  assert.match(r, /entrou R\$ 300,00/)
   assert.equal(lancsU1().length, 2)
 })
 
@@ -183,7 +183,7 @@ await caso('quando a IA acerta e classifica como "corrigir", muda o anterior e m
   ]
   await msg('recebi 290 no pix')
   const r = await msg('esse recebimento foi de serviço')
-  assert.match(r, /Corrigido/)
+  assert.match(r, /Pronto, corrigi/)
   assert.match(r, /Antes: .*Outras entradas/)
   assert.match(r, /Agora: .*Prestação de serviço/)
   assert.equal(lancsU1().length, 1)
@@ -198,7 +198,7 @@ await caso('outra mensagem no lugar da resposta: a pergunta é deixada de lado e
   const saldo = await msg('qual meu saldo')
   assert.match(saldo, /Nubank: R\$ 1\.290,00/)
   const r = await msg('1')
-  assert.ok(!/Corrigido/.test(r), 'a pergunta antiga já foi descartada')
+  assert.ok(!/Pronto, corrigi/.test(r), 'a pergunta antiga já foi descartada')
   assert.equal(lancsU1().length, 1)
 })
 

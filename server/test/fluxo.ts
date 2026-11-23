@@ -256,7 +256,7 @@ try {
   })
   await caso('"não foi 900, foi 950" corrige a última sem duplicar', async () => {
     const r = await mandar(FONE, { content: 'não foi 900, foi 950' })
-    assert.match(r.texto, /Corrigido/)
+    assert.match(r.texto, /Pronto, corrigi/)
     const f = (await sb.from('fixas').select('valor').eq('user_id', uid)).data!
     assert.equal(f.length, 1)
     assert.equal(Number(f[0].valor), 950)
@@ -477,7 +477,7 @@ try {
   })
   await caso('dois DESFAZER seguidos: o segundo pergunta antes de apagar outro', async () => {
     const r = await mandar(FONE, { content: 'desfazer' })
-    assert.match(r.texto, /já tinha desfeito|Não achei nada recente/)
+    assert.match(r.texto, /já tinha desfeito|Não tem nada recente/)
   })
   await caso('a pergunta em aberto é apagada de verdade no banco quando dá certo', async () => {
     // O banco falso compara `atualizado_em` como texto; aqui é timestamptz de verdade. Se o filtro
