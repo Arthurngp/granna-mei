@@ -21,6 +21,7 @@ import { estado as estadoAvisos, estadoTeste, lerConfig as lerConfigAvisos, lerC
 import { depsAvisosDoBanco } from './avisos-banco.ts'
 import { rodarRetencao, estado as estadoRetencao } from './retencao.ts'
 import { depsRetencaoDoBanco } from './retencao-banco.ts'
+import { sincronizarCobrancaDasExclusoes } from './exclusao-cobranca.ts'
 
 const PORTA = Number(process.env.PORT ?? 3000)
 let ultimaMensagem: string | null = null
@@ -269,6 +270,14 @@ export function iniciar(porta = PORTA) {
       if (soltos) console.log('[excluir] números soltos de contas em exclusão:', soltos)
     } catch (e) {
       console.error('[excluir] soltar números:', (e as Error).message)
+    }
+    // Quem pediu a exclusão não segue sendo cobrado nos 30 dias (a cobrança para no fim do período); quem desistiu volta a renovar.
+    try {
+      const c = await sincronizarCobrancaDasExclusoes(sb)
+      if (c.paradas || c.religadas) console.log(`[excluir] cobrança: ${c.paradas} parada(s) no fim do período, ${c.religadas} religada(s) por desistência`)
+      for (const e of c.erros) console.error('[excluir] cobrança:', e)
+    } catch (e) {
+      console.error('[excluir] cobrança:', (e as Error).message)
     }
     try {
       for (const linha of await varrerPresas(varredura)) console.log('[presas]', linha)

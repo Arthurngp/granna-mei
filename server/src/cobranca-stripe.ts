@@ -47,3 +47,70 @@ export async function cancelarAssinaturaDe(sb: SupabaseClient, userId: string): 
     throw new Error(`não consegui cancelar a assinatura na Stripe (${id}), por isso a conta NÃO foi excluída: ${err.message}`)
   }
 }
+
+/**
+ * Marca que a Granninha põe na assinatura da Stripe quando É ELA que para a cobrança por causa de um pedido de exclusão de conta.
+ * É o que separa "parei por causa da exclusão" de "a própria pessoa cancelou no portal": só o primeiro caso é desfeito se ela desistir da exclusão.
+ */
+export const MARCA_EXCLUSAO = 'cancelada_por_pedido_de_exclusao'
+
+async function idDaAssinatura(sb: SupabaseClient, userId: string): Promise<string | null> {
+  const a = await sb.from('assinaturas').select('stripe_subscription_id').eq('user_id', userId).maybeSingle()
+  if (a.error && (a.error.code === '42703' || a.error.code === 'PGRST204' || /stripe_subscription_id/.test(a.error.message))) return null
+  if (a.error) throw new Error(`ler assinatura na Stripe: ${a.error.message}`)
+  return (a.data as { stripe_subscription_id?: string | null } | null)?.stripe_subscription_id ?? null
+}
+
+const semAssinatura = (e: unknown) => {
+  const err = e as { code?: string; statusCode?: number }
+  return err.code === 'resource_missing' || err.statusCode === 404
+}
+
+/**
+ * Quem PEDE a exclusão fica 30 dias antes de a conta sumir, e nesse prazo a assinatura seguiria cobrando. Aqui a cobrança para no FIM do período
+ * já pago (cancel_at_period_end): a pessoa não é cobrada de novo e mantém o acesso até acabar o que pagou, e dá para desfazer se ela desistir
+ * (religarCobrancaSeDesistiu). Cancelar na hora tiraria o plano de quem volta atrás. Se a assinatura já vai parar (a pessoa cancelou sozinha, ou
+ * já marcamos), não mexe em nada, nem na marca. Sem Stripe ligada, ou sem assinatura, não faz nada.
+ */
+export async function pararCobrancaPorExclusao(sb: SupabaseClient, userId: string): Promise<'nada' | 'parada' | 'ja_parando'> {
+  const s = stripe()
+  if (!s) return 'nada'
+  const id = await idDaAssinatura(sb, userId)
+  if (!id) return 'nada'
+  try {
+    const sub = await s.subscriptions.retrieve(id)
+    if (!ASSINATURA_VIVA.includes(sub.status)) return 'nada'
+    if (sub.cancel_at_period_end || sub.cancel_at) return 'ja_parando'
+    await s.subscriptions.update(id, { cancel_at_period_end: true, metadata: { [MARCA_EXCLUSAO]: '1' } })
+    return 'parada'
+  } catch (e) {
+    if (semAssinatura(e)) return 'nada'
+    throw new Error(`não consegui parar a cobrança na Stripe (${id}): ${(e as Error).message}`)
+  }
+}
+
+/**
+ * A pessoa desistiu da exclusão: se FOI a Granninha que parou a cobrança (a marca está na assinatura), a assinatura volta a renovar.
+ * Se o cancelamento é decisão da própria pessoa (sem a marca), não se mexe: religar isso seria cobrar quem pediu para não ser cobrado.
+ */
+export async function religarCobrancaSeDesistiu(sb: SupabaseClient, userId: string): Promise<'nada' | 'religada'> {
+  const s = stripe()
+  if (!s) return 'nada'
+  const id = await idDaAssinatura(sb, userId)
+  if (!id) return 'nada'
+  try {
+    const sub = await s.subscriptions.retrieve(id)
+    if (!ASSINATURA_VIVA.includes(sub.status)) return 'nada'
+    if (sub.metadata?.[MARCA_EXCLUSAO] !== '1') return 'nada'
+    if (!sub.cancel_at_period_end) {
+      // A marca ficou, mas a assinatura já não está parando (a pessoa renovou pelo portal): só limpa a marca.
+      await s.subscriptions.update(id, { metadata: { [MARCA_EXCLUSAO]: '' } })
+      return 'nada'
+    }
+    await s.subscriptions.update(id, { cancel_at_period_end: false, metadata: { [MARCA_EXCLUSAO]: '' } })
+    return 'religada'
+  } catch (e) {
+    if (semAssinatura(e)) return 'nada'
+    throw new Error(`não consegui religar a cobrança na Stripe (${id}): ${(e as Error).message}`)
+  }
+}
