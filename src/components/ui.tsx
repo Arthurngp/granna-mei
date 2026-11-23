@@ -108,6 +108,55 @@ export function CampoDinheiro({ valor, onChange, id, autoFocus }: { valor: numbe
   )
 }
 
+/**
+ * Campo de dinheiro de algo que JÁ existe e é gravado na hora (conta fixa, conta em aberto).
+ * Você pode apagar tudo e digitar de novo: o que está na tela é só rascunho, e o valor só vai para o banco ao sair do campo,
+ * apertar Enter ou fechar a janela, e só se for maior que zero. Vazio ou zero volta ao valor salvo.
+ * (No `CampoDinheiro` comum cada tecla grava; apagar o campo passava por 0, o banco recusava e a edição era desfeita.)
+ */
+export function CampoDinheiroSalvo({ valor, onSalvar, id, rotulo, estilo }: { valor: number; onSalvar: (n: number) => void; id?: string; rotulo?: string; estilo?: CSSProperties }) {
+  const [rascunho, setRascunho] = useState(valor)
+  const editando = useRef(false)
+  const vivo = useRef({ rascunho, valor, onSalvar })
+  vivo.current = { rascunho, valor, onSalvar }
+  // O valor de fora mudou (recarga do banco, desfazer) e a pessoa não está digitando: acompanha.
+  useEffect(() => {
+    if (!editando.current) setRascunho(valor)
+  }, [valor])
+  const mudou = () => vivo.current.rascunho > 0 && Math.abs(vivo.current.rascunho - vivo.current.valor) >= 0.005
+  const salvar = () => {
+    if (mudou()) vivo.current.onSalvar(vivo.current.rascunho)
+    else setRascunho(vivo.current.valor)
+  }
+  // Fechou a janela (Esc, fundo) com valor digitado e sem sair do campo: não perde.
+  useEffect(
+    () => () => {
+      if (mudou()) vivo.current.onSalvar(vivo.current.rascunho)
+    },
+    [],
+  )
+  return (
+    <div className="entrada-dinheiro" style={estilo}>
+      <b>R$</b>
+      <input
+        id={id}
+        className="entrada num"
+        inputMode="numeric"
+        aria-label={rotulo}
+        value={rascunho ? dinheiroCampo(rascunho) : ''}
+        placeholder="0,00"
+        onFocus={() => (editando.current = true)}
+        onChange={(e) => setRascunho(centavosDe(e.target.value))}
+        onBlur={() => {
+          editando.current = false
+          salvar()
+        }}
+        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+      />
+    </div>
+  )
+}
+
 const ICONE_ORIGEM = { texto: MessageCircle, audio: Mic, foto: Camera, pdf: FileText, painel: Monitor }
 export const NOME_ORIGEM: Record<Origem, string> = { texto: 'Mensagem no WhatsApp', audio: 'Áudio no WhatsApp', foto: 'Foto no WhatsApp', pdf: 'PDF no WhatsApp', painel: 'Pelo painel' }
 export function IconeOrigem({ origem, size = 13 }: { origem: Origem; size?: number }) {

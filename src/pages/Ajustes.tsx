@@ -6,11 +6,12 @@ import { FaixaAssinatura, FotoPerfil, IconeCarteira, Topo } from '../components/
 import { faturas } from '../lib/cartao'
 import { blobParaDataUrl, prepararFoto } from '../lib/foto'
 import { enviarFoto, removerFoto } from '../lib/remoto'
-import { CampoDinheiro, Chave, Codigo, Folha, Seg, useAviso } from '../components/ui'
+import { CampoDinheiro, CampoDinheiroSalvo, Chave, Codigo, Folha, Seg, useAviso } from '../components/ui'
 import { saldos } from '../lib/calc'
 import { PRECO_ANUAL, PRECO_MENSAL, RAMOS } from '../lib/config'
 import { baixar, csvLancamentos } from '../lib/exportar'
 import { brl, diaCurto, documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, somaDias, somaMeses, vencimentoNoMes } from '../lib/format'
+import { mudarFixa } from '../lib/fixas'
 import { novoId, useApp } from '../lib/store'
 import type { Carteira, Categoria, Conta, Estado, Fixa, StatusAssinatura, TipoCarteira } from '../lib/tipos'
 
@@ -90,14 +91,7 @@ export default function Ajustes() {
   const contador = (p: Partial<Estado['contador']>) => mut((a) => ({ ...a, contador: { ...a.contador, ...p } }))
 
   const carteiraEmUso = (id: string) => s.lancamentos.some((l) => l.carteiraId === id || l.carteiraDestinoId === id)
-  const mudaFixa = (id: string, p: Partial<Fixa>) =>
-    mut((a) => {
-      const fixas = a.fixas.map((f) => (f.id === id ? { ...f, ...p } : f))
-      const f = fixas.find((x) => x.id === id)!
-      // As contas em aberto dessa fixa acompanham o novo valor e o novo dia.
-      const contas = a.contas.map((c): Conta => (c.fixaId === id && c.status === 'aberta' ? { ...c, valor: f.valor, descricao: f.descricao, vencimento: vencimentoNoMes(c.vencimento.slice(0, 7), f.dia) } : c))
-      return { ...a, fixas, contas }
-    })
+  const mudaFixa = (id: string, p: Partial<Pick<Fixa, 'descricao' | 'valor' | 'dia'>>) => mut((a) => mudarFixa(a, id, p))
 
   const Item = ({ I, titulo, det, onClick, para }: { I: typeof Bell; titulo: string; det: string; onClick?: () => void; para?: string }) => {
     const dentro: ReactNode = (
@@ -693,7 +687,7 @@ export default function Ajustes() {
               <div className="dupla">
                 <label className="campo">
                   <span>Valor</span>
-                  <CampoDinheiro valor={f.valor} onChange={(v) => mudaFixa(f.id, { valor: v })} />
+                  <CampoDinheiroSalvo valor={f.valor} rotulo={`Valor de ${f.descricao}`} onSalvar={(v) => mudaFixa(f.id, { valor: v })} />
                 </label>
                 <label className="campo">
                   <span>Vence todo dia</span>
