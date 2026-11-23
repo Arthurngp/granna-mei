@@ -12,9 +12,20 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { depsAvisosDoBanco } from './avisos-banco.ts'
+import { faturas as faturasDosCartoes, type MovCartao } from './cartao.ts'
+import type { ContaAviso } from './avisos.ts'
 import { RECURSO_RESUMO, type DepsResumo, type PerfilResumo } from './resumo-diario.ts'
 
 const LOTE = 100
+const PAGINA = 1000
+
+type LinhaLanc = { id: string; tipo: string; valor: number | string; data: string; descricao: string; carteira_id: string; carteira_destino_id?: string | null; categoria_id?: string | null; pessoal?: boolean | null; fatura?: string | null }
+
+/** Mesmo mapeamento de banco.paraMov, escrito aqui porque importar banco.ts cria o cliente do Supabase no import. */
+const paraMov = (l: LinhaLanc): MovCartao => ({
+  id: l.id, tipo: l.tipo as MovCartao['tipo'], valor: Number(l.valor), data: l.data, descricao: l.descricao, carteiraId: l.carteira_id,
+  carteiraDestinoId: l.carteira_destino_id ?? undefined, categoriaId: l.categoria_id ?? undefined, pessoal: !!l.pessoal, fatura: l.fatura ?? undefined,
+})
 
 /** A tabela ainda não existe (migration recursos_cliente não rodou). Só isto vira "ninguém"; outro erro nunca. */
 export function tabelaAusente(e: { code?: string; message: string }): boolean {
@@ -31,6 +42,37 @@ export function depsResumoDoBanco(sb: SupabaseClient, enviar: (telefone: string,
     concluir: base.concluir,
     enviar: base.enviar,
     esperar: base.esperar,
+
+    async faturas(userId, hoje) {
+      const c = await sb.from('carteiras').select('id, nome, tipo, fechamento, vencimento').eq('user_id', userId).eq('tipo', 'cartao')
+      if (c.error) throw new Error(`resumo diário, cartões: ${c.error.message}`)
+      const cartoes = (c.data ?? []) as { id: string; nome: string; tipo: string; fechamento: number | null; vencimento: number | null }[]
+      if (!cartoes.length) return [] // sem cartão não há o que carregar
+      const ids = cartoes.map((x) => x.id)
+      // Compras (carteira_id) e pagamentos de fatura (carteira_destino_id) dos cartões, em páginas de 1000 até vir uma página curta. Com a lista CORTADA,
+      // um pagamento ficaria de fora e uma fatura já paga apareceria como devida (e vencida: atrasada falsa).
+      const porId = new Map<string, LinhaLanc>()
+      for (const coluna of ['carteira_id', 'carteira_destino_id']) {
+        for (let de = 0; ; de += PAGINA) {
+          const r = await sb
+            .from('lancamentos')
+            .select('id, tipo, valor, data, categoria_id, carteira_id, carteira_destino_id, pessoal, descricao, fatura')
+            .eq('user_id', userId)
+            .in(coluna, ids)
+            .order('data', { ascending: false })
+            .order('id', { ascending: true })
+            .range(de, de + PAGINA - 1)
+          if (r.error) throw new Error(`resumo diário, lançamentos dos cartões: ${r.error.message}`)
+          const pagina = (r.data ?? []) as LinhaLanc[]
+          for (const l of pagina) porId.set(l.id, l)
+          if (pagina.length < PAGINA) break
+        }
+      }
+      const nome = new Map(cartoes.map((x) => [x.id, x.nome]))
+      return faturasDosCartoes([...porId.values()].map(paraMov), cartoes.map((x) => ({ id: x.id, tipo: x.tipo, fechamento: x.fechamento ?? undefined, vencimento: x.vencimento ?? undefined })))
+        .filter((f) => f.falta > 0.004 && f.vence <= hoje)
+        .map((f): ContaAviso => ({ id: `fatura:${f.cartaoId}:${f.fatura}`, descricao: `Fatura ${nome.get(f.cartaoId) ?? 'do cartão'}`, valor: f.falta, vencimento: f.vence }))
+    },
 
     async liberados(hhmm) {
       const r = await sb.from('recursos_cliente').select('user_id').eq('recurso', RECURSO_RESUMO)

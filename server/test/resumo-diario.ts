@@ -349,5 +349,142 @@ await caso('banco: se o filtro falhasse e devolvesse todos os perfis, só entram
   assert.equal(r[0].assinatura?.status, 'ativa')
 })
 
+/* ---------- fatura do cartão ---------- */
+
+const fatura = (valor: number, vencimento: string, cartao = 'Cartão Inter'): Conta => ({ id: `fatura:cartao:${vencimento.slice(0, 7)}`, descricao: `Fatura ${cartao}`, valor, vencimento })
+
+await caso('fatura que vence hoje entra em "hoje", e a dica vira "paguei a fatura"', async () => {
+  const m = mundo()
+  const d = deps(m)
+  d.faturas = async () => [fatura(235.2, HOJE)]
+  await R.rodarResumo(d, cfg(), AGORA)
+  const t = m.enviados[0].texto
+  assert.match(t, /Esta conta vence hoje:/)
+  assert.match(t, /- Fatura Cartão Inter, R\$.*235,20/)
+  assert.match(t, /"paguei a fatura"/)
+})
+
+await caso('fatura vencida e não paga entra em atrasadas, e só ela já dispara o resumo', async () => {
+  const m = mundo()
+  const d = deps(m)
+  d.faturas = async () => [fatura(235.2, '2026-11-10')]
+  await R.rodarResumo(d, cfg(), AGORA)
+  assert.equal(m.enviados.length, 1)
+  assert.match(m.enviados[0].texto, /Você tem 1 conta atrasada:/)
+  assert.match(m.enviados[0].texto, /- Fatura Cartão Inter, R\$.*235,20, venceu há 13 dias \(10\/11\)/)
+})
+
+await caso('fatura que vence depois de hoje não entra (nem dispara o resumo)', async () => {
+  const m = mundo()
+  const d = deps(m)
+  d.faturas = async () => [fatura(235.2, '2026-11-24')]
+  await R.rodarResumo(d, cfg(), AGORA)
+  assert.equal(m.enviados.length, 0)
+})
+
+await caso('fatura junto com as contas: aparece na mesma lista e entra no total', async () => {
+  const m = mundo({ contas: { 'u-1': [conta('c1', 'Aluguel', 900, HOJE)] } })
+  const d = deps(m)
+  d.faturas = async () => [fatura(100, HOJE)]
+  await R.rodarResumo(d, cfg(), AGORA)
+  assert.match(m.enviados[0].texto, /- Aluguel, R\$.*900,00/)
+  assert.match(m.enviados[0].texto, /- Fatura Cartão Inter, R\$.*100,00/)
+  assert.match(m.enviados[0].texto, /Total de hoje: R\$.*1\.000,00/)
+})
+
+await caso('ocultar valores vale também para a fatura', async () => {
+  const m = mundo({ perfis: [perfil('u-1', { ocultar: true })] })
+  const d = deps(m)
+  d.faturas = async () => [fatura(235.2, '2026-11-10')]
+  await R.rodarResumo(d, cfg(), AGORA)
+  assert.match(m.enviados[0].texto, /- Fatura Cartão Inter, venceu há 13 dias/)
+  assert.doesNotMatch(m.enviados[0].texto, /R\$|235/)
+})
+
+await caso('erro ao ler as faturas de uma pessoa: o resumo dela NÃO sai (incompleto seria pior), as outras seguem, e tenta de novo depois', async () => {
+  const m = mundo({ perfis: [perfil('u-1'), perfil('u-2')], contas: { 'u-1': [conta('c1', 'Aluguel', 900, HOJE)], 'u-2': [conta('c2', 'Luz', 100, HOJE)] } })
+  const d = deps(m)
+  let quebrar = true
+  d.faturas = async (uid) => {
+    if (uid === 'u-1' && quebrar) throw new Error('banco fora')
+    return []
+  }
+  const log = await R.rodarResumo(d, cfg(), AGORA)
+  assert.equal(m.enviados.length, 1, 'só a outra pessoa recebeu')
+  assert.match(m.enviados[0].texto, /Luz/)
+  assert.match(log.join('\n'), /não consegui ler as faturas da conta u-1/)
+  quebrar = false
+  await R.rodarResumo(d, cfg(), minutosDepois(6)) // depois do silêncio de 5 minutos
+  assert.equal(m.enviados.length, 2, 'passado o erro, a pessoa recebe')
+  assert.match(m.enviados[1].texto, /Aluguel/)
+})
+
+/* ---------- a leitura real das faturas, contra um banco falso que PAGINA ---------- */
+
+interface Lanc { id: string; tipo: string; valor: number; data: string; descricao: string; carteira_id: string; carteira_destino_id: string | null; categoria_id: null; pessoal: boolean; fatura: string | null }
+const lanc = (mais: Partial<Lanc> & { id: string }): Lanc => ({ tipo: 'compra_cartao', valor: 100, data: '2026-10-05', descricao: 'compra', carteira_id: 'cartao', carteira_destino_id: null, categoria_id: null, pessoal: false, fatura: '2026-10', ...mais })
+const cartaoLinha = { id: 'cartao', nome: 'Cartão Inter', tipo: 'cartao', fechamento: 3, vencimento: 10 }
+/** Banco que ignora os filtros mas respeita `.range`: devolve as linhas da página pedida. Conta quantas páginas de lançamentos foram lidas. */
+function bancoDeCartoes(carteiras: unknown[], lancs: unknown[], contagem: { paginas: number }, erroEm?: string) {
+  return {
+    from: (t: string) => {
+      const q: Record<string, unknown> = {}
+      let faixa: [number, number] | null = null
+      for (const f of ['select', 'eq', 'in', 'order', 'is', 'lte', 'not', 'limit']) q[f] = () => q
+      q.range = (de: number, ate: number) => ((faixa = [de, ate]), q)
+      q.then = (ok: (v: unknown) => unknown) => {
+        if (erroEm === t) return Promise.resolve({ data: null, error: { message: 'timeout' } }).then(ok)
+        if (t === 'carteiras') return Promise.resolve({ data: carteiras, error: null }).then(ok)
+        contagem.paginas++
+        return Promise.resolve({ data: faixa ? lancs.slice(faixa[0], faixa[1] + 1) : lancs, error: null }).then(ok)
+      }
+      return q
+    },
+  } as never
+}
+const faturasDo = (banco: never) => RB.depsResumoDoBanco(banco, enviarFalso).faturas!('u-1', HOJE)
+
+await caso('banco: fatura vencida e não paga vira uma conta atrasada com o valor que falta', async () => {
+  const r = await faturasDo(bancoDeCartoes([cartaoLinha], [lanc({ id: 'l1', valor: 235.2 })], { paginas: 0 }))
+  assert.deepEqual(r, [{ id: 'fatura:cartao:2026-10', descricao: 'Fatura Cartão Inter', valor: 235.2, vencimento: '2026-10-10' }])
+})
+
+await caso('banco: fatura já paga não aparece, e a paga em parte mostra só o que falta', async () => {
+  const paga = [lanc({ id: 'l1', valor: 235.2 }), lanc({ id: 'p1', tipo: 'transferencia', valor: 235.2, carteira_id: 'nubank', carteira_destino_id: 'cartao', fatura: null, data: '2026-10-09' })]
+  assert.deepEqual(await faturasDo(bancoDeCartoes([cartaoLinha], paga, { paginas: 0 })), [])
+  const emParte = [lanc({ id: 'l1', valor: 235.2 }), lanc({ id: 'p1', tipo: 'transferencia', valor: 100, carteira_id: 'nubank', carteira_destino_id: 'cartao', fatura: null, data: '2026-10-09' })]
+  const r = await faturasDo(bancoDeCartoes([cartaoLinha], emParte, { paginas: 0 }))
+  assert.equal(r.length, 1)
+  assert.equal(r[0].valor, 135.2)
+})
+
+await caso('banco: fatura que vence hoje entra, a que vence depois não', async () => {
+  const hojeNoCartao = { ...cartaoLinha, vencimento: 23 }
+  const r = await faturasDo(bancoDeCartoes([hojeNoCartao], [lanc({ id: 'l1', valor: 50, fatura: '2026-11', data: '2026-11-01' }), lanc({ id: 'l2', valor: 70, fatura: '2026-12', data: '2026-11-20' })], { paginas: 0 }))
+  assert.deepEqual(r.map((x) => [x.vencimento, x.valor]), [['2026-11-23', 50]], 'a de dezembro (vence em 23/12) não entra')
+})
+
+await caso('banco: sem cartão nenhum, nem consulta os lançamentos', async () => {
+  const contagem = { paginas: 0 }
+  assert.deepEqual(await faturasDo(bancoDeCartoes([], [lanc({ id: 'l1' })], contagem)), [])
+  assert.equal(contagem.paginas, 0)
+})
+
+await caso('banco: com mais de 1000 lançamentos o pagamento da página 2 é considerado (senão a fatura paga virava atrasada falsa)', async () => {
+  const enchimento = (n: number, de: number) => Array.from({ length: n }, (_, i) => lanc({ id: `e${de + i}`, tipo: 'entrada', carteira_id: 'cartao', valor: 1, fatura: null, data: '2026-09-01' }))
+  const compra = lanc({ id: 'l1', valor: 235.2 })
+  const pagamento = lanc({ id: 'p1', tipo: 'transferencia', valor: 235.2, carteira_id: 'nubank', carteira_destino_id: 'cartao', fatura: null, data: '2026-10-09' })
+  const todos = [compra, ...enchimento(999, 0), pagamento, ...enchimento(50, 999)] // a compra na linha 0 (página 1), o pagamento na linha 1000 (página 2)
+  assert.equal(todos.indexOf(pagamento), 1000)
+  const contagem = { paginas: 0 }
+  assert.deepEqual(await faturasDo(bancoDeCartoes([cartaoLinha], todos, contagem)), [], 'a fatura está paga')
+  assert.ok(contagem.paginas >= 4, `leu todas as páginas das duas consultas (leu ${contagem.paginas})`)
+})
+
+await caso('banco: erro ao ler os cartões ou os lançamentos LANÇA (nunca devolve "sem faturas" calado)', async () => {
+  await assert.rejects(() => faturasDo(bancoDeCartoes([cartaoLinha], [], { paginas: 0 }, 'carteiras')), /cartões/)
+  await assert.rejects(() => faturasDo(bancoDeCartoes([cartaoLinha], [], { paginas: 0 }, 'lancamentos')), /lançamentos dos cartões/)
+})
+
 console.log(`\n${ok} casos ok${falhas ? `, ${falhas} falha(s)` : ''}`)
 process.exit(falhas ? 1 : 0)
