@@ -11,6 +11,25 @@ const limites = { padrao: 300, proprio: { c5: 80 } as Record<string, number> }
 /** Recursos de plano superior liberados (só para olhar a tela). Um cliente de exemplo já vem com o resumo diário liberado. */
 const recursosMock: Record<string, { motivo: string; desde: string }> = { c2: { motivo: 'plano superior combinado', desde: '2026-11-20T15:00:00Z' } }
 
+// Envios pelo sistema: um já saiu, um falhou e um espera na fila, para a tela mostrar os quatro estados. `?limpo` começa sem nenhum.
+interface EnvioMock {
+  id: string
+  user_id: string
+  status: 'fila' | 'enviado' | 'falhou' | 'cancelado'
+  pedido_em: string
+  enviado_em?: string
+  erro?: string
+}
+const semExemplo = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('limpo')
+let enviosMock: EnvioMock[] = semExemplo
+  ? []
+  : [
+      { id: 'm-a', user_id: 'sumiu-Rafael Dias', status: 'enviado', pedido_em: new Date(Date.now() - 50 * 60_000).toISOString(), enviado_em: new Date(Date.now() - 47 * 60_000).toISOString() },
+      { id: 'm-b', user_id: 'nunca-Paulo Reis', status: 'falhou', pedido_em: new Date(Date.now() - 30 * 60_000).toISOString(), erro: 'gateway recusou' },
+      { id: 'm-c', user_id: 'nunca-Marina Costa', status: 'fila', pedido_em: new Date(Date.now() - 60_000).toISOString() },
+    ]
+const ultimoEnvioMock = Date.now() - 2 * 60_000
+
 /** Lembretes de retenção (só para olhar a tela; a regra de verdade é do banco). Os textos e as faixas são os que a migration semeia. */
 const lembretes = {
   regras: [
@@ -303,6 +322,42 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
       if (args.p_ativo) recursosMock[u] = recursosMock[u] ?? { motivo: String(args.p_motivo).trim(), desde: new Date().toISOString() }
       else delete recursosMock[u]
       return { ok: true, recurso: args.p_recurso, liberado: !!args.p_ativo }
+    }
+    // Envio pelo sistema (só para olhar a tela; a fila, a espera e as recusas de verdade são do banco e do servidor).
+    // ?semfila finge o banco sem a migration; ?limpo começa sem nenhum envio de exemplo.
+    case 'admin_envios_fila': {
+      if (new URLSearchParams(window.location.search).has('semfila')) throw new Error('Could not find the function public.admin_envios_fila in the schema cache')
+      const ativos = enviosMock.filter((e) => e.status === 'fila').sort((a, b) => a.pedido_em.localeCompare(b.pedido_em))
+      let prox = Math.max(Date.now(), ultimoEnvioMock + 5 * 60_000)
+      const itens = ativos.map((e, k) => {
+        const previsto_em = new Date(prox).toISOString()
+        prox += 5 * 60_000
+        return { id: e.id, user_id: e.user_id, status: 'fila', pedido_em: e.pedido_em, posicao: k + 1, previsto_em }
+      })
+      return {
+        agora: new Date().toISOString(),
+        espera_min: 5,
+        ultimo_envio_em: new Date(ultimoEnvioMock).toISOString(),
+        whatsapp_ok: !new URLSearchParams(window.location.search).has('whatsoff'),
+        itens,
+        recentes: enviosMock.filter((e) => e.status === 'enviado' || e.status === 'falhou').map((e) => ({ id: e.id, user_id: e.user_id, status: e.status, enviado_em: e.enviado_em ?? null, erro: e.erro ?? null })),
+      }
+    }
+    case 'admin_envio_pedir': {
+      const u = String(args.p_user)
+      if (!['nunca', 'sumiu'].includes(String(args.p_grupo))) throw new Error('este grupo não tem envio pelo sistema: use o link do WhatsApp')
+      if (u.includes('Diego Matos')) throw new Error('esta pessoa respondeu SAIR e não quer receber mensagem')
+      if (enviosMock.some((e) => e.user_id === u && e.status === 'fila')) return { ok: true, ja_na_fila: true }
+      const id = `mock-${enviosMock.length + 1}`
+      enviosMock = enviosMock.filter((e) => !(e.user_id === u && e.status === 'falhou'))
+      enviosMock.push({ id, user_id: u, status: 'fila', pedido_em: new Date().toISOString() })
+      return { ok: true, ja_na_fila: false, id }
+    }
+    case 'admin_envio_cancelar': {
+      const e = enviosMock.find((x) => x.id === String(args.p_id) && x.status === 'fila')
+      if (!e) return { ok: false, motivo: 'já saiu ou já foi cancelado' }
+      e.status = 'cancelado'
+      return { ok: true }
     }
     case 'admin_retencao_acompanhar': {
       const ha = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString()
