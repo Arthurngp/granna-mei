@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto'
 import { falhou, sb } from './banco.ts'
 import type { Acao, Contexto } from './interpretar.ts'
+import { confirma } from './voz.ts'
 
 export interface Efeitos {
   lancamentos?: string[]
@@ -91,7 +92,7 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         })
         falhou(error, 'pagamento de fatura')
         ef.lancamentos!.push(lid)
-        linhas.push(`Anotado: pagamento de fatura de ${brl(a.valor!)}\n${nomeCart(a.carteira_destino_id)}${a.fatura ? ` · fatura de ${mesBR(a.fatura)}` : ''} · saiu de ${nomeCart(a.carteira_id)} · ${quando(a.data)}\nAs compras dessa fatura entram nos gastos de hoje.`)
+        linhas.push(`${confirma.pagouFatura(brl(a.valor!))}\n${nomeCart(a.carteira_destino_id)}${a.fatura ? ` · fatura de ${mesBR(a.fatura)}` : ''} · saiu de ${nomeCart(a.carteira_id)} · ${quando(a.data)}\nAs compras dessa fatura entram nos gastos de hoje.`)
         continue
       }
       if (a.tipo_acao === 'lancamento' && a.noCartao) {
@@ -102,7 +103,7 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         })
         falhou(error, 'compra no cartão')
         ef.lancamentos!.push(lid)
-        linhas.push(`Anotado: compra no cartão de ${brl(a.valor!)}\n${[a.descricao, nomeCat(a.categoria_id), nomeCart(a.carteira_id), quando(a.data)].filter(Boolean).join(' · ')}\nEntra na fatura de ${mesBR(a.fatura!)} (vence ${diaBR(`${a.fatura}-${String(vencCartao(a.carteira_id)).padStart(2, '0')}`)}).`)
+        linhas.push(`${confirma.compraCartao(brl(a.valor!))}\n${[a.descricao, nomeCat(a.categoria_id), nomeCart(a.carteira_id), quando(a.data)].filter(Boolean).join(' · ')}\nEntra na fatura de ${mesBR(a.fatura!)} (vence ${diaBR(`${a.fatura}-${String(vencCartao(a.carteira_id)).padStart(2, '0')}`)}).`)
         continue
       }
       if (a.tipo_acao === 'parcelado' && a.noCartao) {
@@ -118,7 +119,7 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         const r = await sb.from('lancamentos').insert(linhasP)
         falhou(r.error, 'parcelas no cartão')
         ef.lancamentos!.push(...linhasP.map((l) => l.id))
-        linhas.push(`Anotado: ${a.descricao} de ${brl(total)} em ${n}x de ${brl(parcela)} no ${nomeCart(a.carteira_id)}\nDa fatura de ${mesBR(a.fatura!)} até a de ${mesBR(somaYM(a.fatura!, n - 1))}.`)
+        linhas.push(`Anotei: ${a.descricao} de ${brl(total)} em ${n}x de ${brl(parcela)} no ${nomeCart(a.carteira_id)}\nDa fatura de ${mesBR(a.fatura!)} até a de ${mesBR(somaYM(a.fatura!, n - 1))}.`)
         continue
       }
       if (a.tipo_acao === 'lancamento' || a.tipo_acao === 'transferencia') {
@@ -133,8 +134,8 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         ef.lancamentos!.push(lid)
         linhas.push(
           transf
-            ? `Anotado: transferência de ${brl(a.valor!)}\n${nomeCart(a.carteira_id)} para ${nomeCart(a.carteira_destino_id)} · ${quando(a.data)}`
-            : `Anotado: ${a.movimento === 'entrada' ? 'entrada' : a.pessoal ? 'retirada' : 'saída'} de ${brl(a.valor!)}\n${[a.descricao, nomeCat(a.categoria_id), nomeCart(a.carteira_id), quando(a.data)].filter(Boolean).join(' · ')}`,
+            ? `${confirma.transferencia(brl(a.valor!))}\n${nomeCart(a.carteira_id)} para ${nomeCart(a.carteira_destino_id)} · ${quando(a.data)}`
+            : `${confirma.lancamento(a.movimento === 'entrada' ? 'entrada' : a.pessoal ? 'retirada' : 'saida', brl(a.valor!))}\n${[a.descricao, nomeCat(a.categoria_id), nomeCart(a.carteira_id), quando(a.data)].filter(Boolean).join(' · ')}`,
         )
       } else if (a.tipo_acao === 'conta') {
         const cid = id('c')
@@ -144,7 +145,7 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         })
         falhou(error, 'conta')
         ef.contas!.push(cid)
-        linhas.push(`Anotado: ${a.movimento === 'entrada' ? 'a receber' : 'a pagar'} ${brl(a.valor!)}\n${a.descricao} · vence ${diaBR(a.vencimento!)}`)
+        linhas.push(`${confirma.conta(a.movimento === 'entrada' ? 'receber' : 'pagar', brl(a.valor!))}\n${a.descricao} · vence ${diaBR(a.vencimento!)}`)
       } else if (a.tipo_acao === 'recorrente') {
         const fid = id('fx')
         const dia = a.dia_do_mes!
@@ -161,7 +162,7 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         const r = await sb.from('contas').insert(contas)
         falhou(r.error, 'contas da fixa')
         ef.contas!.push(...contas.map((c) => c.id))
-        linhas.push(`Anotado: ${a.descricao} de ${brl(a.valor!)} todo dia ${dia}\nJá aparece em Contas, no painel.`)
+        linhas.push(`Anotei a conta fixa: ${a.descricao} de ${brl(a.valor!)} todo dia ${dia}\nJá aparece em Contas, no painel.`)
       } else if (a.tipo_acao === 'parcelado') {
         const n = a.parcelas!
         const total = centavos(a.valor!)
@@ -175,7 +176,7 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         const r = await sb.from('contas').insert(contas)
         falhou(r.error, 'parcelas')
         ef.contas!.push(...contas.map((c) => c.id))
-        linhas.push(`Anotado: ${a.descricao} de ${brl(total)} em ${n}x de ${brl(parcela)}\nPrimeira parcela em ${diaBR(contas[0].vencimento)}.`)
+        linhas.push(`Anotei: ${a.descricao} de ${brl(total)} em ${n}x de ${brl(parcela)}\nPrimeira parcela em ${diaBR(contas[0].vencimento)}.`)
       } else if (a.tipo_acao === 'baixar_conta') {
         const conta = ctx.contasAbertas.find((c) => c.id === a.conta_id)!
         const lid = id('l')
@@ -189,7 +190,7 @@ export async function executar(userId: string, ctx: Contexto, acoes: Acao[], ori
         const r2 = await sb.from('contas').update({ status: 'paga', pago_em: a.data, lancamento_id: lid }).eq('user_id', userId).eq('id', conta.id).eq('status', 'aberta').select('id')
         falhou(r2.error, 'baixa: conta')
         if (r2.data?.length) ef.contasPagas!.push(conta.id)
-        linhas.push(`Anotado: ${conta.tipo === 'receber' ? 'recebido' : 'pago'} ${brl(conta.valor)}\n${conta.descricao} · ${nomeCart(a.carteira_id)} · ${quando(a.data)}`)
+        linhas.push(`${confirma.baixa(conta.tipo === 'receber' ? 'receber' : 'pagar', brl(conta.valor))}\n${conta.descricao} · ${nomeCart(a.carteira_id)} · ${quando(a.data)}`)
       }
     }
   } catch (e) {

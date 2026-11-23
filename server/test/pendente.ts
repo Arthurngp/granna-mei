@@ -27,7 +27,7 @@ await caso('IA fora no meio: a pergunta em aberto NÃO se perde', async () => {
   const caiu = await msg('2')
   // Desde 19/11 a falha da IA tem recado próprio (a queda é classificada como "fora"); o que este
   // caso prova é que ela AVISA e não engole a pergunta.
-  assert.match(caiu, /problema técnico aqui do meu lado|Tive um problema/, caiu)
+  assert.match(caiu, /problema técnico aqui do meu lado|Deu um problema aqui do meu lado/, caiu)
   assert.equal(pendente()?.tipo, 'pergunta', 'a pergunta continua em aberto para a próxima tentativa')
 
   // Com a IA de volta, o "2" ainda faz sentido: é respondido contra a pergunta que ficou guardada.
@@ -63,7 +63,7 @@ await caso('erro de verdade (banco de conversas fora) não engole a pergunta', a
   E.falharTabela = 'lancamentos'
   ia.regras = [[/pão/, acoes(acao({ valor: 12, descricao: 'Pão' }))]]
   const r = await msg('1')
-  assert.match(r, /Tive um problema/)
+  assert.match(r, /Deu um problema aqui do meu lado/)
   E.falharTabela = null
   assert.equal(pendente()?.tipo, 'pergunta', 'nada foi gravado, então a pergunta fica')
 })

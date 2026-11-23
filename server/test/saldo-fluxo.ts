@@ -14,7 +14,7 @@ import { acao, acoes, caso, E, fim, HOJE, ia, lancsU1, msg, saldoNoBanco, SEM_AC
 await caso('CASO DOS R$ 6: gastar 6 no pix mostra o saldo novo na própria confirmação e o saldo do banco desce 6', async () => {
   ia.regras = [[/gastei 6/, acoes(acao({ valor: 6 }))]]
   const r = await msg('gastei 6 no mercado no pix')
-  assert.match(r, /Anotado: saída de R\$ 6,00/)
+  assert.match(r, /saiu R\$ 6,00/)
   assert.match(r, /Saldo Nubank: R\$ 994,00/)
   assert.match(r, /Disponível no total: R\$ 1\.044,00/)
   assert.equal(lancsU1().length, 1)
@@ -68,7 +68,7 @@ await caso('duas saídas seguidas acumulam (lê do banco, não de memória)', as
 await caso('entrada sobe o saldo e mostra', async () => {
   ia.regras = [[/recebi 150/, acoes(acao({ valor: 150, movimento: 'entrada', categoria_id: 'vendas', descricao: 'Venda' }))]]
   const r = await msg('recebi 150 no pix')
-  assert.match(r, /Anotado: entrada de R\$ 150,00/)
+  assert.match(r, /entrou R\$ 150,00/)
   assert.match(r, /Saldo Nubank: R\$ 1\.150,00/)
 })
 
@@ -78,7 +78,7 @@ await caso('sem dizer o meio e com mais de uma conta, a Granninha PERGUNTA em ve
   assert.match(r, /Pagou como/)
   assert.equal(lancsU1().length, 0, 'nada gravado antes de saber a conta')
   const r2 = await msg('1')
-  assert.match(r2, /Anotado: saída de R\$ 6,00/)
+  assert.match(r2, /saiu R\$ 6,00/)
   assert.match(r2, /Saldo/)
   assert.equal(lancsU1().length, 1)
 })
@@ -134,7 +134,7 @@ await caso('falha ao calcular o saldo depois de gravar NÃO desfaz nem esconde o
   ia.regras = [[/gastei 6/, acoes(acao({ valor: 6 }))]]
   E.falharTabela = 'fixas' // só a consulta de saldo lê fixas: o registro em si não depende disso
   const r = await msg('gastei 6 no pix')
-  assert.match(r, /Anotado: saída de R\$ 6,00/)
+  assert.match(r, /saiu R\$ 6,00/)
   assert.ok(!/Saldo Nubank/.test(r), 'sem saldo inventado quando não deu para calcular')
   assert.equal(lancsU1().length, 1, 'o lançamento ficou gravado')
 })
@@ -183,7 +183,7 @@ await caso('pergunta com assunto ("com material") vai para a IA, que recebe o re
 await caso('lançamento com número NUNCA é tratado como consulta, mesmo falando em "gastos"', async () => {
   ia.regras = [[/gastei 12/, acoes(acao({ valor: 12 }))]]
   const r = await msg('gastei 12 hoje')
-  assert.match(r, /Anotado: saída de R\$ 12,00/)
+  assert.match(r, /saiu R\$ 12,00/)
   assert.equal(lancsU1().length, 1)
 })
 

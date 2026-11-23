@@ -140,7 +140,7 @@ await novo('o aviso de "perto do limite" sai a 80% do limite DO CLIENTE, não do
   ia.regras = [[/luz/, LUZ]]
   const r = await msg('paguei 89 de luz')
   assert.match(r, /89/)
-  assert.match(r, /Aviso: você está chegando perto do limite/, `traz o aviso: ${r}`)
+  assert.match(r, /Só um aviso: você tá chegando perto do limite/, `traz o aviso: ${r}`)
 })
 
 fim()

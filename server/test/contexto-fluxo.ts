@@ -79,7 +79,7 @@ await caso('"ok" fica em silêncio: status ignorada, nada enviado, nada gravado'
 await caso('"ok, recebi 50" NÃO é confirmação: segue para a IA e vira lançamento', async () => {
   ia.regras = [[/recebi 50/, acoes(acao({ valor: 50, movimento: 'entrada', categoria_id: 'vendas', descricao: 'Venda', meio: 'pix' }))]]
   const r = await msg('ok, recebi 50 no pix')
-  assert.match(r, /Anotado: entrada de R\$ 50,00/)
+  assert.match(r, /entrou R\$ 50,00/)
   assert.equal(lancsU1().length, 1)
 })
 
@@ -112,7 +112,7 @@ await caso('a IA recebe a conversa recente: o lançamento anterior e a resposta 
   await msg('esse foi de serviço')
   assert.match(ia.ultimoSistema, BLOCO)
   assert.match(ia.ultimoSistema, /Cliente: recebi 290 no pix/)
-  assert.match(ia.ultimoSistema, /Granninha: Anotado: entrada de R\$ 290,00/)
+  assert.match(ia.ultimoSistema, /Granninha: (Boa, entrou|Anotei, entrou|Tá anotado, entrou) R\$ 290,00/, 'a IA recebe a resposta que a Granninha de fato deu')
   assert.ok(!/Cliente: esse foi de serviço/.test(ia.ultimoSistema), 'a mensagem de agora NÃO entra no histórico')
 })
 
@@ -159,7 +159,7 @@ await caso('o histórico NUNCA fornece valor: "esse foi de serviço" com 290 no 
   ]
   await msg('recebi 290 no pix')
   const r = await msg('esse foi de serviço')
-  assert.ok(!/Anotado/.test(r), r)
+  assert.ok(!/Anotei|anotado|entrou R\$|saiu R\$/.test(r), r)
   assert.equal(lancsU1().length, 1, 'continua um lançamento só')
 })
 
@@ -169,7 +169,7 @@ await caso('falha ao ler o histórico não impede de anotar', async () => {
   E.falharSelect = 'texto,resposta,criado_em'
   const r = await msg('recebi 290 no pix')
   E.falharSelect = null
-  assert.match(r, /Anotado: entrada de R\$ 290,00/)
+  assert.match(r, /entrou R\$ 290,00/)
   assert.equal(lancsU1().length, 1)
 })
 

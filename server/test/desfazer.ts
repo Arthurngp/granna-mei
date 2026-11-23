@@ -94,7 +94,7 @@ await caso('sem nada gravado, DESFAZER não inventa', async () => {
   ia.regras = [[/sobrou/, PERGUNTA], [/desfazer/, DESFAZER]]
   await msg('quanto sobrou?')
   const r = await msg('desfazer')
-  assert.match(r, /Não achei nada recente para desfazer/)
+  assert.match(r, /Não tem nada recente pra eu desfazer/)
 })
 
 await caso('temEfeito: só conta quem gravou algo', async () => {

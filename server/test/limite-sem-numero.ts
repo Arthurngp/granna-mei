@@ -47,7 +47,7 @@ await caso('perto do limite: o aviso sai uma vez, sem dizer quantos lançamentos
   ia.regras = [[/luz/, LUZ]]
   const r = await msg('paguei 89 de luz')
   assert.match(r, /89/, 'anotou normalmente')
-  const aviso = r.split('Aviso:')[1]
+  const aviso = r.split('Só um aviso:')[1]
   assert.ok(aviso, `traz o aviso: ${r}`)
   assert.match(aviso, /perto do limite/)
   assert.doesNotMatch(aviso, /\d/, `o aviso não tem número: ${aviso}`)

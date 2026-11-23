@@ -21,6 +21,7 @@ import { carregarBase } from './base.ts'
 import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, pareceReenvio, perguntaDuplicata, perguntaReenvio, respostaDuplicata, respostaSimNao, type LancAntigo } from './duplicata.ts'
 import { ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta } from './consultas.ts'
 import { foraDoDisponivel } from './cartao.ts'
+import { ERROU, MSG } from './voz.ts'
 
 const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.com.br/painel').replace(/\/+$/, '')
 
@@ -92,8 +93,6 @@ function tipoDaMensagem(d: EventoGateway['data']): Origem | 'outro' {
   return 'outro'
 }
 
-/** Mensagem que não tem a ver com dinheiro. Curta, sem despejar exemplos, e diz como pedir a ajuda de verdade. */
-const RESPOSTA_FORA_DO_ASSUNTO = `Isso eu não consigo te ajudar, eu cuido só do dinheiro do seu negócio. Mas me conta o que entrou ou saiu que eu anoto, tipo "recebi 150 no pix". Se quiser saber tudo o que eu faço, é só mandar AJUDA.`
 
 /**
  * Os cortes que valem antes de gravar qualquer coisa: evento que não é mensagem recebida, mensagem
@@ -263,7 +262,7 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
       resposta = recadoDaFalhaIA(e.tipo)
       console.error('[granninha] IA', e.tipo, msgId, e.message.slice(0, 200))
     } else {
-      resposta = 'Tive um problema para anotar agora. Pode mandar de novo daqui a pouco?'
+      resposta = MSG.problemaAoAnotar
       console.error('[granninha]', msgId, erro)
     }
   }
@@ -377,7 +376,7 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
       const nome = (up.data?.nome ?? '').split(' ')[0]
       return {
         status: 'ok',
-        resposta: `Pronto${nome ? `, ${nome}` : ''}! Seu número está confirmado. Agora é só me mandar o que entrou ou saiu que eu anoto.\n\nExemplo: "recebi 150 no pix" ou "paguei 89 de luz".`,
+        resposta: MSG.numeroConfirmado(nome),
         userId: v.user_id,
       }
     }
@@ -564,7 +563,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     }
     if (r === 'novo') {
       const ex = await executar(cliente.id, ctx, pend.acoes, pend.origem ?? tipo, pend.anexo ?? null)
-      return { status: 'ok', resposta: `${ex.linhas.join('\n\n')}${await saldoDepois(cliente.id, pend.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: ex.efeitos, intencao: 'acoes', texto, tokens }
+      return { status: 'ok', resposta: `${ex.linhas.join('\n\n')}${await saldoDepois(cliente.id, pend.acoes)}\n\n${ERROU}`, efeitos: ex.efeitos, intencao: 'acoes', texto, tokens }
     }
   }
 
@@ -669,11 +668,11 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     const r = await executar(cliente.id, ctx, it.acoes, origemFinal, anexo, anteriores)
     // Se ELA decidiu que o gasto foi seu e não do negócio, diz isso e oferece a correção de um toque.
     const aviso = avisoDeRetirada(it.acoes, ctx, forcar.pessoal)
-    return { status: 'ok', resposta: `${r.linhas.join('\n\n')}${aviso}${await saldoDepois(cliente.id, it.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
+    return { status: 'ok', resposta: `${r.linhas.join('\n\n')}${aviso}${await saldoDepois(cliente.id, it.acoes)}\n\n${ERROU}`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
   }
   if (it.intencao === 'desfazer') {
     const ult = await ultimaComEfeito(cliente.id)
-    if (!ult) return { status: 'ok', resposta: 'Não achei nada recente para desfazer.', efeitos: {}, intencao: 'desfazer', texto, tokens }
+    if (!ult) return { status: 'ok', resposta: MSG.nadaParaDesfazer, efeitos: {}, intencao: 'desfazer', texto, tokens }
     // Dois DESFAZER seguidos (a pessoa achou que o primeiro não pegou): o segundo reverteria o
     // lançamento ANTERIOR, que ela não pediu para desfazer. Pergunta antes.
     const anterior = await ultimaMensagem(cliente.id)
@@ -705,7 +704,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     const h = herdarComprovante(antes, anexo, tipo)
     const r = await executar(cliente.id, await contextoDe(cliente.id, hoje), it2.acoes, h.origem, h.anexo)
     const mudou = antesEAgora(antes, it2.acoes, ctx)
-    return { status: 'ok', resposta: `Corrigido.\n\n${r.linhas.join('\n\n')}${mudou ? `\n\n${mudou}` : ''}${await saldoDepois(cliente.id, it2.acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'corrigir', texto: novo, tokens }
+    return { status: 'ok', resposta: `${MSG.corrigi}\n\n${r.linhas.join('\n\n')}${mudou ? `\n\n${mudou}` : ''}${await saldoDepois(cliente.id, it2.acoes)}\n\n${ERROU}`, efeitos: r.efeitos, intencao: 'corrigir', texto: novo, tokens }
   }
   if (it.intencao === 'pergunta') {
     // A IA entendeu que é pergunta; se o pedido é um dos conhecidos, o número sai do código, não da IA.
@@ -721,13 +720,13 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     if (dp === 'silencio') return { status: 'ignorada', resposta: '', efeitos: {}, intencao: 'confirmacao', texto, tokens }
     if (dp) return { status: 'ok', resposta: RESPOSTA_DESPEDIDA[dp], efeitos: {}, intencao: 'despedida', texto, tokens }
   }
-  if (it.intencao === 'saudacao') return { status: 'ok', resposta: `Oi${nome ? `, ${nome}` : ''}! Me manda o que entrou ou saiu que eu anoto. Pode ser texto, áudio ou foto do comprovante. Se quiser saber tudo o que eu faço, é só pedir ajuda.`, efeitos: {}, intencao: 'saudacao', texto, tokens }
+  if (it.intencao === 'saudacao') return { status: 'ok', resposta: MSG.saudacao(nome), efeitos: {}, intencao: 'saudacao', texto, tokens }
   if (it.intencao === 'ajuda') {
     const a = await responderAjuda(texto, nome, ctx.historico)
     if (a.uso) soma(a.uso)
     return { status: 'ok', resposta: a.texto, efeitos: {}, intencao: 'ajuda', texto, tokens }
   }
-  return { status: 'ok', resposta: RESPOSTA_FORA_DO_ASSUNTO, efeitos: {}, intencao: 'outro', texto, tokens }
+  return { status: 'ok', resposta: MSG.foraDoAssunto, efeitos: {}, intencao: 'outro', texto, tokens }
 }
 
 /**
@@ -759,7 +758,7 @@ async function importarFatura(userId: string, ctx: Contexto, ts: Transacao[], ca
   const total = acoes.reduce((a, x) => a + (x.valor ?? 0), 0)
   return {
     status: 'ok',
-    resposta: `Importei ${acoes.length} compras no ${cartao.nome}, somando ${brl(total)}${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Elas entram nos gastos quando você pagar a fatura. Confira as categorias no painel.${await saldoDepois(userId, acoes)}\n\nErrou? Responda DESFAZER.`,
+    resposta: `Importei ${acoes.length} compras no ${cartao.nome}, somando ${brl(total)}${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Elas entram nos gastos quando você pagar a fatura. Confira as categorias no painel.${await saldoDepois(userId, acoes)}\n\n${ERROU}`,
     efeitos: r.efeitos, intencao: 'fatura', texto: 'importar fatura', tokens,
   }
 }
@@ -788,7 +787,7 @@ async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Or
   const r = await executar(userId, ctx, acoes, tipo, anexo)
   return {
     status: 'ok',
-    resposta: `Importei ${acoes.length} lançamentos${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Confira as categorias no painel.${await saldoDepois(userId, acoes)}\n\nErrou? Responda DESFAZER.`,
+    resposta: `Importei ${acoes.length} lançamentos${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Confira as categorias no painel.${await saldoDepois(userId, acoes)}\n\n${ERROU}`,
     efeitos: r.efeitos, intencao: 'extrato', texto: 'importar extrato', tokens,
   }
 }
@@ -816,7 +815,7 @@ function herdarComprovante(antigos: LancAntigo[], anexoAtual: string | null, ori
 async function resolverDuplicata(userId: string, ctx: Contexto, acoes: Acao[], anteriorMsg: string, escolha: 'corrigir' | 'novo', origem: Origem, anexo: string | null, texto: string, tokens: Uso): Promise<Conversa> {
   if (escolha === 'novo') {
     const r = await executar(userId, ctx, acoes, origem, anexo)
-    return { status: 'ok', resposta: `${r.linhas.join('\n\n')}${await saldoDepois(userId, acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
+    return { status: 'ok', resposta: `${r.linhas.join('\n\n')}${await saldoDepois(userId, acoes)}\n\n${ERROU}`, efeitos: r.efeitos, intencao: 'acoes', texto, tokens }
   }
   const ult = await ultimaComEfeito(userId)
   // Só corrige se o anterior ainda é o último registro vivo: se foi desfeito ou outra coisa entrou no meio, não mexe em nada.
@@ -829,7 +828,7 @@ async function resolverDuplicata(userId: string, ctx: Contexto, acoes: Acao[], a
   const h = herdarComprovante(antes, anexo, origem)
   const r = await executar(userId, ctx, acoes, h.origem, h.anexo)
   const mudou = antesEAgora(antes, acoes, ctx)
-  return { status: 'ok', resposta: `Corrigido.\n\n${r.linhas.join('\n\n')}${mudou ? `\n\n${mudou}` : ''}${await saldoDepois(userId, acoes)}\n\nErrou? Responda DESFAZER.`, efeitos: r.efeitos, intencao: 'corrigir', texto, tokens }
+  return { status: 'ok', resposta: `${MSG.corrigi}\n\n${r.linhas.join('\n\n')}${mudou ? `\n\n${mudou}` : ''}${await saldoDepois(userId, acoes)}\n\n${ERROU}`, efeitos: r.efeitos, intencao: 'corrigir', texto, tokens }
 }
 
 /** Tipos de ação que mexem no saldo de uma carteira. Conta a pagar, conta fixa e categoria nova não mexem. */
