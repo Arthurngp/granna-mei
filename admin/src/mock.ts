@@ -283,6 +283,26 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
       const proprio = args.p_user ? (limites.proprio[String(args.p_user)] ?? null) : null
       return { ok: true, padrao: limites.padrao, proprio, efetivo: proprio ?? limites.padrao }
     }
+    case 'admin_retencao_acompanhar': {
+      const ha = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString()
+      return {
+        dias: Number(args.p_dias),
+        por_regra: [
+          { regra: 'nunca_mandou', enviados: 12, medidos_24h: 10, responderam_24h: 4, medidos_48h: 8, lancaram_48h: 3, pediram_sair: 1 },
+          { regra: 'parou_de_usar', enviados: 7, medidos_24h: 5, responderam_24h: 0, medidos_48h: 0, lancaram_48h: 0, pediram_sair: 0 },
+        ],
+        ultimos: [
+          { em: ha(2), regra: 'nunca_mandou', nome: 'Juan Pinheiro', negocio: 'Juan', respondeu: null, lancou: null, pediu_sair: false },
+          { em: ha(30), regra: 'parou_de_usar', nome: 'Marina Costa', negocio: 'Studio Marina', respondeu: true, lancou: null, pediu_sair: false },
+          { em: ha(75), regra: 'nunca_mandou', nome: 'Walmir Silva', negocio: 'Growthcode', respondeu: true, lancou: true, pediu_sair: false },
+          { em: ha(100), regra: 'nunca_mandou', nome: 'Alvaro Melo', negocio: 'Alvaro Melo', respondeu: false, lancou: false, pediu_sair: true },
+        ],
+        fila: [
+          { regra: 'nunca_mandou', modo: lembretes.regras[0].modo, atraso_horas: lembretes.regras[0].atraso_horas, agora: [], a_caminho: [{ nome: 'Carla Dias', negocio: 'Carla Doces', faltam_horas: 6 }, { nome: 'Pedro Alves', negocio: 'PA Fretes', faltam_horas: 19 }] },
+          { regra: 'parou_de_usar', modo: lembretes.regras[1].modo, atraso_horas: lembretes.regras[1].atraso_horas, agora: [{ nome: 'João Pedro', negocio: 'JP Reformas', horas: 52 }], a_caminho: [] },
+        ],
+      }
+    }
     case 'admin_retencao_config':
       return { regras: lembretes.regras, enviados_hoje: 0, ultimo_envio: null, numero_desde: '2026-11-21T04:04:14+00:00', ciclo_em: lembretes.regras.some((r) => r.modo !== 'desligado') ? new Date().toISOString() : null, erro: null }
     case 'admin_retencao_previa': {

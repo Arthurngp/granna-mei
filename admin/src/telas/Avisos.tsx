@@ -5,6 +5,7 @@ import { rpc } from '../sb'
 import { dataHora, Falha } from './comum'
 import { Cartao, Pagina, type HeadDef } from './visao/layout'
 import { Ausente, n } from './visao/usar'
+import { AvisosAcompanhar } from './AvisosAcompanhar'
 
 type Regra = 'nunca_mandou' | 'parou_de_usar'
 type Modo = 'desligado' | 'ensaio' | 'piloto' | 'todos'
@@ -125,6 +126,8 @@ export function Avisos() {
           nunca em dobro. Quem responde SAIR nunca mais recebe. Se o WhatsApp cair ou 3 envios falharem seguidos, para sozinho.
         </p>
       </Cartao>
+
+      <AvisosAcompanhar />
 
       {cfg && erro && <div style={{ gridColumn: '1 / -1' }}><Falha texto={erro} /></div>}
       {cfg && cfg.erro && (
