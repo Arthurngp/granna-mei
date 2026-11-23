@@ -37,6 +37,12 @@ interface LimiteCliente {
   uso_mes: number
 }
 
+/** Recursos de plano superior liberados a este cliente. Só o admin libera, aqui; o cliente não vê. */
+interface RecursosCliente {
+  liberados: { recurso: string; motivo: string; desde: string }[]
+}
+const RESUMO_DIARIO = 'resumo_diario_contas'
+
 interface Ficha {
   carteiras: { nome: string; tipo: string }[]
   lancamentos_por_origem: Record<string, number>
@@ -162,6 +168,7 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
   const [emailConf, setEmailConf] = useState('')
   const [limite, setLimite] = useState<LimiteCliente | null>(null)
   const [valorLimite, setValorLimite] = useState('')
+  const [recursos, setRecursos] = useState<RecursosCliente | null>(null)
 
   useEffect(() => {
     setFicha(null)
@@ -172,9 +179,12 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
     setEmailConf('')
     setLimite(null)
     setValorLimite('')
+    setRecursos(null)
     if (c) rpc<Ficha>('admin_cliente', { p_id: c.id }).then(setFicha).catch((e: Error) => setErro(e.message))
     // Sem a migration do limite a função não existe: a ficha segue sem o bloco, em vez de dar erro.
     if (c) rpc<LimiteCliente>('admin_limite_cliente', { p_user: c.id }).then(setLimite).catch(() => setLimite(null))
+    // Sem a migration dos recursos a função não existe: a ficha segue sem o bloco, em vez de dar erro.
+    if (c) rpc<RecursosCliente>('admin_recursos_cliente', { p_user: c.id }).then(setRecursos).catch(() => setRecursos(null))
   }, [c])
 
   if (!c) return null
@@ -229,6 +239,26 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
     }
   }
 
+  /** Libera ou retira o resumo diário de contas SÓ deste cliente. Só o admin faz isso, aqui. */
+  const salvarRecurso = async (ativo: boolean) => {
+    setErro('')
+    setOcupado(true)
+    try {
+      await rpc('admin_recurso_definir', { p_user: c.id, p_recurso: RESUMO_DIARIO, p_ativo: ativo, p_motivo: motivo.trim() })
+      avisar(
+        ativo
+          ? `Resumo diário liberado para ${c.nome || c.email}. Ele só começa a sair quando o envio do resumo estiver ligado no servidor.`
+          : `Resumo diário retirado de ${c.nome || c.email}.`,
+      )
+      mudou()
+      fechar()
+    } catch (e) {
+      setErro((e as Error).message.includes('motivo') ? 'Escreva o motivo (pelo menos 3 letras).' : (e as Error).message)
+    } finally {
+      setOcupado(false)
+    }
+  }
+
   const excluirDefinitivo = async () => {
     setErro('')
     setOcupado(true)
@@ -245,6 +275,7 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
   }
 
   const def = acao ? ACOES[acao] : null
+  const resumoLiberado = recursos?.liberados.find((r) => r.recurso === RESUMO_DIARIO) ?? null
   const limiteNovo = Number(valorLimite)
   const limiteValorOk = /^\d{1,6}$/.test(valorLimite) && limiteNovo >= 1 && limiteNovo <= 100_000
   /** Quem já usou o novo limite para de anotar na hora: o botão avisa e muda de cor. */
@@ -264,6 +295,12 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
           <div><span>Cadastro</span><span>{dataHora(c.criado_em)}</span></div>
           <div><span>Boas-vindas</span><span>{c.onboarding_feito ? 'terminou' : `parou no passo ${c.onboarding_passo + 1} de 7`}</span></div>
           <div><span>Lançamentos</span><span className="num">{c.lancamentos}</span></div>
+          {recursos && c.papel !== 'admin' && (
+            <div>
+              <span>Resumo diário de contas</span>
+              <span>{resumoLiberado ? `liberado desde ${dataHora(resumoLiberado.desde)}` : 'não liberado'}</span>
+            </div>
+          )}
           {limite && (
             <div>
               <span>Limite do mês</span>
@@ -297,6 +334,11 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
             {limite && c.papel !== 'admin' && (
               <button type="button" className="btn btn-sec btn-bloco" onClick={() => { setValorLimite(String(limite.efetivo)); setAcao('limite') }}>
                 Mudar o limite de lançamentos
+              </button>
+            )}
+            {recursos && c.papel !== 'admin' && (
+              <button type="button" className="btn btn-sec btn-bloco" onClick={() => setAcao('recurso')}>
+                Recursos de plano superior
               </button>
             )}
             <button type="button" className="btn btn-sec btn-bloco" disabled={ocupado} onClick={() => executar(c.verificado ? 'desverificar_numero' : 'verificar_numero')}>
@@ -374,6 +416,49 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
                 Voltar ao padrão ({n(limite.padrao)})
               </button>
             )}
+          </div>
+        ) : acao === 'recurso' && recursos ? (
+          <div className="item-ob ligado" style={CAIXA}>
+            <b>Resumo diário de contas</b>
+            <small className="suave">
+              Recurso de plano superior (acima do de R$ 29,90). Só você libera, aqui, cliente a cliente. O cliente não vê isso em lugar nenhum: nem no painel, nem no site, nem no WhatsApp.
+            </small>
+            <small className="suave">
+              Liberado, {c.nome || c.email} recebe todo dia, na hora que escolheu nos Ajustes, as contas que vencem hoje e o aviso das atrasadas. Se não houver nada para hoje nem atrasada, não manda nada.
+            </small>
+            <small className="suave">
+              <b>Atenção:</b> mesmo liberado, nada sai enquanto o envio do resumo estiver desligado no servidor (AVISOS_RESUMO). Ele começa desligado.
+            </small>
+            <div className="fatos">
+              <div>
+                <span>Hoje</span>
+                <span>{resumoLiberado ? `liberado desde ${dataHora(resumoLiberado.desde)}` : 'não liberado'}</span>
+              </div>
+              {resumoLiberado && (
+                <div>
+                  <span>Motivo da liberação</span>
+                  <span>{resumoLiberado.motivo}</span>
+                </div>
+              )}
+            </div>
+            <label className="campo">
+              <span>Motivo (fica na auditoria)</span>
+              <input className="entrada" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder={resumoLiberado ? 'Ex.: saiu do plano superior' : 'Ex.: plano superior combinado'} />
+            </label>
+            <div className="dupla">
+              <button type="button" className="btn btn-sec" onClick={() => setAcao(null)}>
+                Voltar
+              </button>
+              {resumoLiberado ? (
+                <button type="button" className="btn btn-perigo" disabled={ocupado || motivo.trim().length < 3} onClick={() => salvarRecurso(false)}>
+                  Retirar o recurso
+                </button>
+              ) : (
+                <button type="button" className="btn btn-pri" disabled={ocupado || motivo.trim().length < 3} onClick={() => salvarRecurso(true)}>
+                  Liberar para este cliente
+                </button>
+              )}
+            </div>
           </div>
         ) : acao === 'excluir_definitivo' ? (
           <div className="item-ob ligado">

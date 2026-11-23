@@ -8,6 +8,8 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  recursos 20261123030000_recursos_cliente.sql   recursos de plano superior liberados POR CLIENTE, só pelo admin (o primeiro: resumo diário de contas). Tabela fechada ao
+          cliente e 2 funções do admin com auditoria. Ninguém ganha nada: sem a migration ninguém está liberado e nada é enviado.
   fixasdia 20261123020000_fixas_dia_ate_31.sql   conta fixa pode vencer até o dia 31 (o banco só aceitava até 28): troca a regra da coluna dia, sem mexer
           em nenhuma linha. Sem ela o painel e o WhatsApp deixam escolher 29 a 31 e o banco recusa ao gravar. Rodar ANTES de o painel novo subir.
   desfazercortesia 20261121173700_admin_desfazer_cortesia.sql   admin_acao ganha a ação "Desfazer cortesia" (devolve a conta ao
@@ -65,6 +67,7 @@ MIGRATIONS = {
     "retencaoacompanhar": "20261122120000_retencao_acompanhar.sql",
     "retencaosequencia": "20261122150000_retencao_sequencia.sql",
     "fixasdia": "20261123020000_fixas_dia_ate_31.sql",
+    "recursos": "20261123030000_recursos_cliente.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
@@ -197,6 +200,18 @@ CONFERE = {
         (select string_agg(pg_get_constraintdef(c.oid), ' | ') from pg_constraint c where c.conrelid = 'public.fixas'::regclass and c.contype = 'c'
           and c.conkey = array[(select attnum from pg_attribute where attrelid = 'public.fixas'::regclass and attname = 'dia')]) as regra_do_dia,
         (select count(*) from public.fixas where dia > 28) as fixas_acima_de_28""",
+    # Recursos de plano superior por cliente. Confere o que importa: a tabela existe, está FECHADA ao cliente (RLS ligada e sem permissão para anon e
+    # authenticated), o serviço consegue ler, as 2 funções existem, o anon não executa nenhuma, e quantos clientes têm recurso (tem que ser 0 de início).
+    "recursos": """select
+        (select count(*) from information_schema.tables where table_schema='public' and table_name='recursos_cliente') as tabela_existe,
+        (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname='recursos_cliente' and c.relrowsecurity) as rls_ligada,
+        (select count(*) from information_schema.role_table_grants where table_schema='public' and table_name='recursos_cliente' and grantee in ('anon','authenticated')) as permissoes_para_cliente,
+        (case when to_regclass('public.recursos_cliente') is null then null else has_table_privilege('service_role', 'public.recursos_cliente', 'select') end) as service_role_le,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('admin_recursos_cliente','admin_recurso_definir')) as funcoes_de_2,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('admin_recursos_cliente','admin_recurso_definir')
+            and has_function_privilege('anon', p.oid, 'execute')) as funcoes_abertas_ao_anon,
+        (case when to_regclass('public.recursos_cliente') is null then null
+              else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.recursos_cliente', false, true, '')))[1]::text end) as clientes_com_recurso""",
     # Só funções de leitura do admin (custo por período, ativação, receita): confere as 3.
     "adminvisao": """select (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
         where n.nspname='public' and p.proname in ('admin_custo_periodo','admin_ativacao','admin_receita')) as funcoes_de_3""",

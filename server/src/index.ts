@@ -22,6 +22,8 @@ import { depsAvisosDoBanco } from './avisos-banco.ts'
 import { rodarRetencao, estado as estadoRetencao } from './retencao.ts'
 import { depsRetencaoDoBanco } from './retencao-banco.ts'
 import { sincronizarCobrancaDasExclusoes } from './exclusao-cobranca.ts'
+import { estadoResumo, lerConfigResumo, rodarResumo } from './resumo-diario.ts'
+import { depsResumoDoBanco } from './resumo-diario-banco.ts'
 import { estadoSonda, sondarIA } from './ia-sonda.ts'
 
 const PORTA = Number(process.env.PORT ?? 3000)
@@ -220,6 +222,7 @@ export function iniciar(porta = PORTA) {
         res.writeHead(200, { 'Content-Type': 'application/json' }).end(
           JSON.stringify({ ok: true, whatsapp: wa, ia: { ...estadoIA(), sonda: estadoSonda() }, mensagens_24h: hoje.count ?? null, erros_24h: falhas.count ?? null, erros_envio_desde_inicio: erros, ultima_mensagem: ultimaMensagem, fila: filas.size,
             avisos: { modo: estadoAvisos.modo, ultimo_ciclo: estadoAvisos.ultimoCiclo, enviados_desde_inicio: estadoAvisos.enviados, falhas_desde_inicio: estadoAvisos.falhas, ultimo_erro: estadoAvisos.ultimoErro,
+              resumo_diario: { modo: estadoResumo.modo, ultimo_ciclo: estadoResumo.ultimoCiclo, enviados_desde_inicio: estadoResumo.enviados, falhas_desde_inicio: estadoResumo.falhas, ultimo_erro: estadoResumo.ultimoErro },
               fim_do_teste: { modo: estadoTeste.modo, ultimo_ciclo: estadoTeste.ultimoCiclo, enviados_desde_inicio: estadoTeste.enviados, falhas_desde_inicio: estadoTeste.falhas, ultimo_erro: estadoTeste.ultimoErro },
               retencao: { ultimo_ciclo: estadoRetencao.ultimoCiclo, enviados_desde_inicio: estadoRetencao.enviados, falhas_desde_inicio: estadoRetencao.falhas, parado_ate: estadoRetencao.pausaAte > Date.now() ? new Date(estadoRetencao.pausaAte).toISOString() : null, ultimo_erro: estadoRetencao.ultimoErro } } }),
         )
@@ -235,6 +238,7 @@ export function iniciar(porta = PORTA) {
   // Aviso de conta vencendo (fase f4). Corre à parte do batimento porque dorme entre um envio e outro, e isso
   // não pode atrasar o resto. Desligado por padrão: AVISOS=ensaio | piloto | todos (ver avisos.ts).
   const depsAvisos = depsAvisosDoBanco(sb, enviarTexto)
+  const depsResumo = depsResumoDoBanco(sb, enviarTexto)
   // Lembretes de retenção (quem nunca mandou nada e quem parou de usar). Desligados até o Arthur ligar no admin; ver retencao.ts.
   const depsRetencao = depsRetencaoDoBanco(sb, enviarTexto, async () => (await statusSessao()).estado === 'CONNECTED', () => lerConfigAvisos().piloto)
   const avisar = async () => {
@@ -248,6 +252,12 @@ export function iniciar(porta = PORTA) {
       for (const linha of await rodarAvisosTeste(depsAvisos, lerConfigTeste())) console.log('[avisos]', linha)
     } catch (e) {
       console.error('[avisos] fim do teste:', (e as Error).message)
+    }
+    // Resumo diário de contas: recurso de plano superior, liberado cliente a cliente pelo admin. Interruptor PRÓPRIO (AVISOS_RESUMO, desligado por padrão).
+    try {
+      for (const linha of await rodarResumo(depsResumo, lerConfigResumo())) console.log('[resumo]', linha)
+    } catch (e) {
+      console.error('[resumo]', (e as Error).message)
     }
     // Lembretes de retenção: por último, e só depois de os dois acima terminarem (saem pelo mesmo chip).
     try {
