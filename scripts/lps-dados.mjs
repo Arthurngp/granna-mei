@@ -2,7 +2,9 @@
 // Gere as páginas com: node scripts/gerar-lps.mjs  (molde: site/index.html)
 // Regra: só prometer o que o produto já faz. Mensagens da Granninha seguem o formato real dela.
 
-const anotado = (tipo, valor, linha) => `Anotado: ${tipo} de R$ ${valor}\n${linha}\n\nErrou? Responda DESFAZER.`
+// Mesmo formato que a Granninha usa de verdade (server/src/voz.ts): abertura de confirmação, linha do registro e o fecho com DESFAZER.
+const ERROU = 'Errou? É só responder DESFAZER.'
+const anotado = (tipo, valor, linha) => `${tipo === 'entrada' ? 'Boa, entrou' : 'Anotei, saiu'} R$ ${valor}.\n${linha}\n\n${ERROU}`
 
 export const LPS = [
   {
@@ -50,7 +52,7 @@ export const LPS = [
     titulo: 'Veja o que vence antes de virar multa',
     h1: ['Veja o que vence', 'antes de virar multa.'],
     sub: 'Aluguel, internet, fornecedor, DAS. Anote cada conta uma vez e veja no painel o que vence, ou pergunte no WhatsApp “o que vence até sexta?”.',
-    chat: ['Aluguel 900 todo dia 10', 'Anotado: conta fixa de R$ 900,00\nAluguel · todo dia 10\n\nErrou? Responda DESFAZER.', 'O que vence até sexta?', 'Até sexta vencem a internet, R$ 99,90, e o fornecedor, R$ 450,00.'],
+    chat: ['Aluguel 900 todo dia 10', `Anotei a conta fixa: Aluguel de R$ 900,00 todo dia 10\nJá aparece em Contas, no painel.\n\n${ERROU}`, 'O que vence até sexta?', 'Até sexta vencem a internet, R$ 99,90, e o fornecedor, R$ 450,00.'],
     fita: ['aluguel 900 todo dia 10', 'o que vence até sexta?', 'boleto do fornecedor 450 dia 20', 'paguei a internet', 'conta de luz 89 dia 15', 'o que vence amanhã?'],
     contaH2: 'Sem multa no meio, sobra mais no fim do mês.',
     comoH2: 'Contas em dia em 3 passos',
@@ -89,7 +91,7 @@ export const LPS = [
     titulo: 'Saiba quem te deve e quando cobrar',
     h1: ['Saiba quem te deve', 'e quando cobrar.'],
     sub: 'Cliente que paga depois, fiado, serviço parcelado. Mande no WhatsApp quem deve e até quando, e a Granninha guarda como conta a receber. Quando quiser, pergunte “quem me deve?”.',
-    chat: ['A Bia me deve 150 pra sexta', 'Anotado: a receber R$ 150,00\nBia · vence sexta\n\nErrou? Responda DESFAZER.', 'Quem me deve?', 'Estão em aberto R$ 620,00: Bia, R$ 150,00, sexta. Carlos, R$ 470,00, dia 25.'],
+    chat: ['A Bia me deve 150 pra sexta', `Guardei a conta: R$ 150,00 a receber.\nBia · vence sexta\n\n${ERROU}`, 'Quem me deve?', 'Estão em aberto R$ 620,00: Bia, R$ 150,00, sexta. Carlos, R$ 470,00, dia 25.'],
     fita: ['a Bia me deve 150 pra sexta', 'quem me deve?', 'o Carlos pagou os 470', 'serviço de 900 em 3x', 'quanto tenho a receber?', 'a Ana pagou metade'],
     contaH2: 'Com o que te devem anotado, nenhum valor fica para trás.',
     comoH2: 'Cobre na hora certa em 3 passos',
@@ -102,7 +104,7 @@ export const LPS = [
     titulo: 'Controle o cartão do MEI sem susto na fatura',
     h1: ['Controle o cartão do MEI', 'sem susto na fatura.'],
     sub: 'Compra no crédito, parcelada ou à vista: mande no WhatsApp e a Granninha guarda na fatura certa. Quando você paga a fatura, ela vira gasto do mês. Dá até para mandar a foto da fatura.',
-    chat: ['Gastei 50 no crédito com gasolina', 'Anotado: R$ 50,00 no Nubank Cartão\nCombustível · fatura de dezembro\n\nErrou? Responda DESFAZER.', 'Quanto está a fatura?', 'A fatura de dezembro do Nubank Cartão está em R$ 1.240,00 e vence dia 8.'],
+    chat: ['Gastei 50 no crédito com gasolina', `Anotei a compra no cartão: R$ 50,00.\nGasolina · Combustível · Nubank Cartão · hoje\nEntra na fatura de dezembro.\n\n${ERROU}`, 'Quanto está a fatura?', 'A fatura de dezembro do Nubank Cartão está em R$ 1.240,00 e vence dia 8.'],
     fita: ['gastei 50 no crédito com gasolina', 'quanto está a fatura?', 'comprei 1.200 em 4x no cartão', 'paguei a fatura', 'paguei 600 da fatura', 'qual cartão vence primeiro?'],
     contaH2: 'A fatura vira gasto quando você paga. O mês fica certo.',
     comoH2: 'Cartão sob controle em 3 passos',
@@ -115,7 +117,7 @@ export const LPS = [
     titulo: 'Mande a foto do comprovante e esqueça o papel',
     h1: ['Mande a foto do comprovante', 'e esqueça o papel.'],
     sub: 'Tirou foto do comprovante do Pix, da nota ou do boleto? Manda no WhatsApp. A Granninha lê o valor, anota no lugar certo e guarda a imagem para você.',
-    chat: ['(foto do comprovante)', 'Li o comprovante: Pix de R$ 320,00 para Distribuidora Silva.\nAnotei como saída · Fornecedores · hoje.\n\nErrou? Responda DESFAZER.', 'Quanto paguei de fornecedor?', 'Em novembro você pagou R$ 1.150,00 a fornecedores, em 4 pagamentos.'],
+    chat: ['(foto do comprovante)', anotado('saída', '320,00', 'Distribuidora Silva · Fornecedores · Conta do banco · hoje'), 'Quanto paguei de fornecedor?', 'Em novembro você pagou R$ 1.150,00 a fornecedores, em 4 pagamentos.'],
     fita: ['(foto do comprovante)', '(PDF do boleto)', '(foto da nota)', 'quanto paguei de fornecedor?', '(print do Pix recebido)', 'paguei 320 pro fornecedor'],
     contaH2: 'Cada comprovante vira número no seu mês.',
     comoH2: 'Do comprovante ao controle em 3 passos',
@@ -128,7 +130,7 @@ export const LPS = [
     titulo: 'Falou o gasto em áudio, está lançado',
     h1: ['Falou o gasto em áudio,', 'está lançado.'],
     sub: 'Dirigindo, atendendo ou no meio do serviço? Mande um áudio contando o que entrou ou saiu. A Granninha escuta, entende e anota no seu financeiro.',
-    chat: ['▶ Áudio · 0:07', 'Ouvi: “gastei 80 de material na loja do Zé”.\nAnotado: saída de R$ 80,00 · Material · hoje\n\nErrou? Responda DESFAZER.', '▶ Áudio · 0:04', 'Ouvi: “quanto entrou hoje?”. Hoje entrou R$ 540,00.'],
+    chat: ['▶ Áudio · 0:07', anotado('saída', '80,00', 'Material na loja do Zé · Material · Conta do banco · hoje'), '▶ Áudio · 0:04', 'Hoje entrou R$ 540,00.'],
     fita: ['(áudio) gastei 80 de material', '(áudio) recebi 300 do serviço', '(áudio) quanto entrou hoje?', '(áudio) paguei o fornecedor', '(áudio) a Bia me deve 150', '(áudio) quanto sobrou no mês?'],
     contaH2: 'Você fala. O mês aparece organizado.',
     comoH2: 'Seu financeiro por áudio em 3 passos',
@@ -167,7 +169,7 @@ export const LPS = [
     titulo: 'Aluguel, internet, fornecedor: todas as contas fixas no lugar',
     h1: ['Aluguel, internet, fornecedor:', 'todas as contas fixas no lugar.'],
     sub: 'Mande cada conta que se repete uma vez só. A Granninha guarda, mostra o que vence a cada mês e anota quando você paga.',
-    chat: ['Internet 99,90 todo dia 5', 'Anotado: conta fixa de R$ 99,90\nInternet · todo dia 5\n\nErrou? Responda DESFAZER.', 'Quanto tenho de conta fixa?', 'Suas contas fixas somam R$ 1.380,95 por mês: aluguel, internet, contador e DAS.'],
+    chat: ['Internet 99,90 todo dia 5', `Anotei a conta fixa: Internet de R$ 99,90 todo dia 5\nJá aparece em Contas, no painel.\n\n${ERROU}`, 'Quanto tenho de conta fixa?', 'Suas contas fixas somam R$ 1.380,95 por mês: aluguel, internet, contador e DAS.'],
     fita: ['aluguel 900 todo dia 10', 'internet 99,90 todo dia 5', 'contador 300 todo mês', 'quanto tenho de conta fixa?', 'paguei o aluguel', 'o que vence essa semana?'],
     contaH2: 'Sabendo o custo fixo, você sabe quanto precisa vender.',
     comoH2: 'Contas fixas em ordem em 3 passos',
@@ -180,7 +182,7 @@ export const LPS = [
     titulo: 'Compras parceladas do MEI sem perder o controle',
     h1: ['Compras parceladas do MEI', 'sem perder o controle.'],
     sub: 'Comprou material em 4x, equipamento em 10x? Mande uma vez no WhatsApp. A Granninha guarda as parcelas, mostra quando cada uma vence e quanto ainda falta pagar.',
-    chat: ['Comprei 1.200 de material em 4x', 'Anotado: R$ 1.200,00 em 4x de R$ 300,00\nMaterial · primeira parcela em dezembro\n\nErrou? Responda DESFAZER.', 'Quanto falta pagar de parcela?', 'Faltam R$ 2.100,00: material, 4x de R$ 300,00, e a máquina, 3x de R$ 300,00.'],
+    chat: ['Comprei 1.200 de material em 4x', `Anotei: Material de R$ 1.200,00 em 4x de R$ 300,00\nPrimeira parcela em dezembro.\n\n${ERROU}`, 'Quanto falta pagar de parcela?', 'Faltam R$ 2.100,00: material, 4x de R$ 300,00, e a máquina, 3x de R$ 300,00.'],
     fita: ['comprei 1.200 de material em 4x', 'quanto falta de parcela?', 'máquina 3.000 em 10x', 'paguei a parcela', 'o que vence esse mês?', 'compra de 600 em 3x no cartão'],
     contaH2: 'Com as parcelas à vista, o mês não surpreende.',
     comoH2: 'Parcelas sob controle em 3 passos',
@@ -206,7 +208,7 @@ export const LPS = [
     titulo: 'Desistiu de aplicativo de finanças? Esse você já sabe usar',
     h1: ['Desistiu de aplicativo de finanças?', 'Esse você já sabe usar.'],
     sub: 'Nada de tela nova, cadastro de categoria ou formulário. É o WhatsApp que você já usa todo dia: você manda uma mensagem e a Granninha organiza.',
-    chat: ['Recebi 250 de um serviço', anotado('entrada', '250,00', 'Serviços · Conta do banco · hoje'), 'Errei, era 280', 'Corrigido: entrada de R$ 280,00\nServiços · Conta do banco · hoje'],
+    chat: ['Recebi 250 de um serviço', anotado('entrada', '250,00', 'Serviços · Conta do banco · hoje'), 'Errei, era 280', 'Pronto, corrigi.\n\nBoa, entrou R$ 280,00.\nServiços · Conta do banco · hoje\n\nAntes: R$ 250,00 · Serviços · Conta do banco\nAgora: R$ 280,00 · Serviços · Conta do banco'],
     fita: ['recebi 250 de um serviço', 'errei, era 280', 'DESFAZER', 'quanto sobrou?', 'paguei 89 de luz', 'o que vence amanhã?'],
     contaH2: 'Simples de usar, completo no resultado.',
     comoH2: 'Começa em 3 passos',
@@ -245,7 +247,7 @@ export const LPS = [
     titulo: 'Acabou de abrir o MEI? Comece o financeiro do jeito certo',
     h1: ['Acabou de abrir o MEI?', 'Comece o financeiro do jeito certo.'],
     sub: 'Separe desde o primeiro dia o que é do negócio e o que é seu, acompanhe o limite de faturamento e não esqueça o DAS. Tudo pelo WhatsApp, sem precisar entender de finanças.',
-    chat: ['Primeira venda! 180 no pix', 'Anotado: entrada de R$ 180,00\nVendas · Conta do banco · hoje\n\nParabéns pela primeira venda!', 'Quando vence o DAS?', 'O DAS vence todo dia 20.'],
+    chat: ['Primeira venda! 180 no pix', anotado('entrada', '180,00', 'Vendas · Conta do banco · hoje'), 'Quanto falta pro limite do MEI?', 'Faltam R$ 80.820,00 para bater o limite do MEI neste ano.'],
     fita: ['primeira venda, 180 no pix', 'quando vence o DAS?', 'comprei 300 de material', 'quanto falta pro limite?', 'gastei 50, pessoal', 'quanto sobrou no mês?'],
     contaH2: 'Desde o primeiro mês, você sabe quanto o MEI deu.',
     comoH2: 'Seu MEI organizado em 3 passos',
@@ -271,7 +273,7 @@ export const LPS = [
     titulo: 'Recebeu no Pix? Manda o print e pronto',
     h1: ['Recebeu no Pix?', 'Manda o print e pronto.'],
     sub: 'Print do Pix recebido ou pago, foto do comprovante, PDF do boleto. Mande no WhatsApp e a Granninha lê o valor e anota no seu financeiro.',
-    chat: ['(print do Pix recebido)', 'Li o comprovante: Pix de R$ 350,00 recebido de Juliana Souza.\nAnotei como entrada · Vendas · hoje.\n\nErrou? Responda DESFAZER.', 'Quanto recebi hoje?', 'Hoje você recebeu R$ 1.020,00 em 4 entradas.'],
+    chat: ['(print do Pix recebido)', anotado('entrada', '350,00', 'Juliana Souza · Vendas · Conta do banco · hoje'), 'Quanto recebi hoje?', 'Hoje você recebeu R$ 1.020,00 em 4 entradas.'],
     fita: ['(print do Pix)', '(comprovante de pagamento)', 'quanto recebi hoje?', '(PDF do boleto)', 'recebi 350 no pix', 'quanto entrou na semana?'],
     contaH2: 'Cada Pix vira número no seu mês.',
     comoH2: 'Do print ao controle em 3 passos',

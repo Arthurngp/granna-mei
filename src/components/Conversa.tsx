@@ -10,11 +10,11 @@ interface Msg {
 
 const ROTEIRO: Msg[] = [
   { de: 'eu', texto: 'Recebi 150 da Juliana no pix', hora: '09:12' },
-  { de: 'ela', texto: 'Anotado: entrada de R$ 150,00\nServiços · Conta do banco · hoje\n\nErrou? Responda DESFAZER.', hora: '09:12' },
+  { de: 'ela', texto: 'Boa, entrou R$ 150,00.\nServiços · Conta do banco · hoje\n\nErrou? É só responder DESFAZER.', hora: '09:12' },
   { de: 'eu', audio: '0:06', hora: '12:40' },
-  { de: 'ela', texto: 'Ouvi aqui: saída de R$ 89,90 com a conta de luz. Anotado.', hora: '12:40' },
+  { de: 'ela', texto: 'Anotei, saiu R$ 89,90.\nConta de luz · Conta do banco · hoje\n\nErrou? É só responder DESFAZER.', hora: '12:40' },
   { de: 'eu', texto: 'Quanto sobrou esse mês?', hora: '18:03' },
-  { de: 'ela', texto: 'Entrou R$ 4.280,00 e saiu R$ 1.930,00.\nSobrou R$ 2.350,00. Está indo bem!', hora: '18:03' },
+  { de: 'ela', texto: 'Boa, esse mês tá bonito. Sobrou R$ 2.350,00.\nEntrou R$ 4.280,00 e saiu R$ 1.930,00.', hora: '18:03' },
 ]
 
 /** Conversa de exemplo que se escreve sozinha, para mostrar como o produto funciona de verdade. */
