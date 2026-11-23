@@ -14,6 +14,7 @@ const DINHEIRO = /(recebi|gastei|paguei|pagar|receber|entrou|saiu|saldo|quanto|v
 const SO_EMOJI = /^[\s\p{Extended_Pictographic}‍️\p{Emoji_Modifier}]+$/u
 
 const ACK = /^(ok|okay|okk|blz|beleza|belezinha|show|top|certo|certinho|entendi|entendido|combinado|fechado|fechou|perfeito|otimo|massa|joia|de boa|tranquilo|ta bom|ta certo|ta|tudo bem|tudo certo|sim|isso|isso mesmo|uhum|aham|pode ser|tmj|tamo junto|tamo ai|pode crer|pode cre|firmeza|suave|sussa|maravilha|positivo|boa|show de bola|top demais|demais|da hora|dahora|legal|bacana|gostei|gostei demais|gostei muito)( (ok|blz|beleza|show|top|certo|entendi|combinado|fechado|tudo bem|pode ser|tmj|pode crer|pode cre))*$/
+const RISADA = /^(k{2,}|(ha|he|hi|ah|eh){2,}h?|rs(rs)*|kk+)$/
 const OBRIGADO = /\b(obrigad[oa]s?|brigad[oa]|valeu|vlw|agradec\w*|grat[oa])\b/
 const ADEUS = /\b(volto|voltei? mais tarde|ate (mais|logo|amanha|depois|ja)|tchau|falou|flw|fui|boa noite|boa tarde ate|depois (eu )?(volto|falo|mando)|mais tarde (eu )?(volto|falo|mando)|qualquer coisa eu (chamo|falo))\b/
 
@@ -27,6 +28,8 @@ export function despedidaDe(texto: string): Despedida | null {
   if (SO_EMOJI.test(bruto)) return 'silencio'
   const t = norm(bruto)
   if (!t || /\d/.test(t) || t.includes('?') || DINHEIRO.test(t)) return null
+  // Risada (kkkkk, haha, rsrs) é resposta, não pedido: fica em silêncio, como o "ok".
+  if (RISADA.test(t.replace(/\s+/g, ''))) return 'silencio'
   if (ADEUS.test(t)) return 'despedida'
   if (OBRIGADO.test(t)) return 'agradecimento'
   // Só vale se a frase INTEIRA é confirmação: "tá bom, beleza" sim; "beleza, e a fatura" não.

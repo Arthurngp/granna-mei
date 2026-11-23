@@ -218,7 +218,8 @@ export function textoPeriodo(b: Base, p: Periodo, direcao: Direcao, porDia: bool
       if (quer('entrada')) partes.push(`entrou ${brl(r.entrou)}`)
       if (quer('saida')) partes.push(`saiu ${brl(r.saiu)}`)
       linhas.push(`${p.rotulo}: ${partes.join(', ')}.`)
-      if (direcao === 'ambos') linhas.push(`Sobrou ${brl(r.entrou - r.saiu)}.`)
+      // Resultado negativo não vira "sobrou -R$": diz com palavras de gente que saiu mais do que entrou.
+      if (direcao === 'ambos') linhas.push(r.entrou - r.saiu >= 0 ? `Sobrou ${brl(r.entrou - r.saiu)}.` : `Ficou ${brl(r.saiu - r.entrou)} abaixo: saiu mais do que entrou.`)
       if (quer('saida') && r.categoriasSaida.length) linhas.push(`Onde mais saiu: ${r.categoriasSaida.slice(0, 3).map((c) => `${c.nome} ${brl(c.valor)}`).join(', ')}.`)
       if (direcao === 'entrada' && r.categoriasEntrada.length > 1) linhas.push(`Mais entrou por: ${r.categoriasEntrada.slice(0, 3).map((c) => `${c.nome} ${brl(c.valor)}`).join(', ')}.`)
     }
@@ -321,6 +322,8 @@ export function reconhecer(texto: string): Consulta | null {
   // Com número solto na frase ("paguei 50 de luz") é lançamento, não consulta. Só "7 dias", "15 dias" são pedido de período.
   if (/\d/.test(t.replace(/\d{1,2}\s+dias/g, ''))) return null
   if (temValorPorExtenso(t)) return null
+  // Pergunta de ranking, comparação ou "qual o maior" não é o total do período: quem sabe responder é a IA, com os números prontos.
+  if (/\b(maior|maiores|menor|menores|mais|menos|principal|principais|pesou|pesa|pesaram|compar\w*|media|top|ranking|melhor|pior)\b/.test(t)) return null
   if (/\b(fixo|fixos|fixa|fixas)\b/.test(t) && /(gasto|despesa|conta|custo|quanto|quais|lista|mostr)/.test(t)) return { tipo: 'fixas' }
   const periodo: QualPeriodo | null = /\bontem\b/.test(t)
     ? 'ontem'

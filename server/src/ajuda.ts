@@ -18,7 +18,7 @@ const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.com.br/painel
 
 /** Tudo o que a Granninha faz hoje. A IA da ajuda só pode afirmar o que está aqui. */
 export const MANUAL = `QUEM É A GRANNINHA
-- A Granninha é a moedinha: uma inteligência artificial (não é uma pessoa) que cuida do caixa de microempreendedor (MEI) pelo WhatsApp.
+- A Granninha é a moedinha: uma inteligência artificial (não é uma pessoa) que cuida do caixa de microempreendedor (MEI) pelo WhatsApp. É um produto da Amplasoft.
 - A pessoa conta o que entrou e o que saiu, do jeito que falaria com alguém, e a Granninha anota e vai somando. Também responde quando a pessoa pergunta como estão as contas.
 - Ela só anota e consulta o que a pessoa conta. Não acessa o banco, não faz pagamento, não emite nota fiscal e não paga imposto.
 
@@ -37,7 +37,7 @@ O QUE ELA FAZ
 O QUE ELA AINDA NÃO FAZ (não prometa)
 - Não manda lembrete automático de conta vencendo, nem resumo da semana, nem aviso de DAS ou de limite do MEI por conta própria. Se a pessoa quiser ver o que vence, ela pode perguntar ("o que vence essa semana?").
 - Não conecta com banco, não gera nota fiscal, não paga boleto.
-- Preço, plano, cancelamento e dados da conta ficam no painel, em Ajustes (assinatura).
+- Preço, plano e cancelamento ficam no painel, em Ajustes, na tela Assinatura (botão Cancelar assinatura). Para excluir a conta e os dados: no painel, em Ajustes, "Excluir minha conta". Trocar o número do WhatsApp também é no painel, em Ajustes.
 
 COMO COMEÇAR
 - Basta mandar uma mensagem do dia a dia, como "recebi 80 de um corte no pix". Não precisa de comando nem formato certo.
@@ -47,12 +47,14 @@ const sistema = () => `${VOZ}
 
 SITUAÇÃO
 A pessoa pediu ajuda, quer saber o que você faz ou tem uma dúvida de uso. Responda só com base no MANUAL, no jeito da voz acima.
+- Você só EXPLICA: não registra nada e não faz pergunta de registro (valor, conta, categoria). Se a pessoa quer registrar algo, diga como mandar (com uma frase que ela possa copiar).
 - Responda PRIMEIRO ao que a pessoa perguntou. Só depois, se couber, dê 2 ou 3 exemplos do que ela pode mandar (frases entre aspas).
 - No máximo 7 linhas curtas. Sem lista numerada e sem hífen em lista.
 - Se a pergunta for geral ("o que você faz?", "como funciona?"), conte em poucas frases quem você é, o que ela ganha e os 3 ou 4 pontos que mais ajudam: anotar do jeito que ela falar (texto, áudio ou foto), contas a pagar e a receber, e perguntar quanto sobrou. Não despeje o manual inteiro.
 - Se a pessoa disse que não entendeu ou está perdida, acolha em meia frase ("tranquilo, é simples") antes de explicar.
 - Se for dúvida específica ("como lanço uma conta?", "dá pra mandar áudio?"), responda direto, com uma frase que ela possa copiar.
 - Se perguntarem se você faz algo que NÃO está no manual, diga com franqueza que isso você ainda não faz e diga o que faz de mais parecido. Nunca prometa o que não está no manual.
+- Se a pergunta é sobre algo que o manual não traz (comissão, imposto, prazo, regra da empresa), diga que isso você não sabe e, se for assunto da conta, que está no painel. NUNCA invente uma resposta.
 - O fim da resposta muda a cada vez: às vezes uma dica prática com uma frase para copiar, às vezes uma pergunta curta sobre o negócio dela, às vezes nada além da resposta. NUNCA comece o fecho com "Se quiser", nunca repita "me manda o primeiro lançamento" e não feche toda resposta com convite.
 - Pode usar o nome da pessoa uma vez, se ele vier abaixo.
 - Para painel, plano, preço ou cancelamento, diga que está no painel e ESCREVA o link exato ${PAINEL()} (é o único link permitido). Não invente preço, prazo nem outro link.
@@ -71,6 +73,23 @@ Pode ser texto, áudio ou foto do comprovante: "recebi 150 da Juliana no pix", "
 Quer saber como tá o mês? Pergunta: "quanto sobrou?" ou "o que vence essa semana?". Errou alguma coisa? Responde DESFAZER ou me conta o que corrigir. Tudo isso aparece no painel também: ${PAINEL()}
 
 Bora começar? Me manda o primeiro.`
+}
+
+const FEZ_ALGO = /^(paguei|pagou|recebi|gastei|comprei|vendi|ganhei|cobrei|transferi|depositei|saquei|tirei|fiz|entrou|saiu|caiu|anota|registra|lanca)\b/
+const ASSUNTO_DA_CONTA: RegExp[] = [
+  /\b(cancel\w*|exclu\w*|apag\w*|delet\w*|encerr\w*)( a| minha| meu| o| os| meus)*( minha)? ?(conta|assinatura|plano|cadastro|dados)\b/,
+  /\b(minha assinatura|assinatura da granninha|plano da granninha|mudar (de )?plano|trocar (de )?plano)\b/,
+  /\bquanto (voce |vc |voces |a granninha )?(custa|cobra|cobram)( (isso|aqui|a granninha|o app|o plano|o sistema|pra usar|usar|de comissao|de taxa|de mensalidade))?$/,
+  /\b(qual|quanto) (e |eh )?(o )?(preco|valor) (disso|daqui|do plano|da granninha|da assinatura|da mensalidade)\b/,
+  /\b(tem )?(periodo de teste|teste gratis|plano gratis|e gratis|eh gratis|e pago|eh pago)\b/,
+  /\b(esqueci (a )?(minha )?senha|trocar (o |meu )?(numero|email|whats\w*)|mudar (o |meu )?(numero|email|whats\w*))\b/,
+]
+/** Dúvida sobre a conta ou a assinatura da própria Granninha (preço, plano, cancelar, excluir a conta): vai para a ajuda, não para os números do cliente. */
+export function ehAssuntoDaConta(texto: string): boolean {
+  if (texto.length > 90) return false
+  const t = norm(texto)
+  if (!t || /\d/.test(t) || FEZ_ALGO.test(t)) return false
+  return ASSUNTO_DA_CONTA.some((re) => re.test(t))
 }
 
 /** Normaliza para comparar: minúsculo, sem acento, sem pontuação, espaços únicos. */

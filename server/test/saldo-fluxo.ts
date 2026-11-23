@@ -75,7 +75,7 @@ await caso('entrada sobe o saldo e mostra', async () => {
 await caso('sem dizer o meio e com mais de uma conta, a Granninha PERGUNTA em vez de chutar a conta', async () => {
   ia.regras = [[/gastei 6/, acoes(acao({ valor: 6, meio: null }))]]
   const r = await msg('gastei 6 no mercado')
-  assert.match(r, /Pagou como/)
+  assert.match(r, /saiu de qual conta\?/)
   assert.equal(lancsU1().length, 0, 'nada gravado antes de saber a conta')
   const r2 = await msg('1')
   assert.match(r2, /saiu R\$ 6,00/)

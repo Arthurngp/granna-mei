@@ -4,7 +4,8 @@
  * transforma áudio, foto ou PDF em texto → entende → grava → responde.
  */
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, silenciarLembretes, usoDoMes } from './banco.ts'
-import { ehPedidoDeAjuda, responderAjuda } from './ajuda.ts'
+import { ehAssuntoDaConta, ehPedidoDeAjuda, responderAjuda } from './ajuda.ts'
+import { ehApagarTudo, valorSozinho } from './atalhos.ts'
 import { despedidaDe, RESPOSTA_DESPEDIDA } from './despedida.ts'
 import { AVISO_PERTO_DO_LIMITE, limiteDeMidias, limiteDoCliente, TEXTO_LIMITE_LANCAMENTOS, TEXTO_LIMITE_MIDIAS } from './limite.ts'
 import { ehSair, TEXTO_SAIR } from './retencao.ts'
@@ -593,7 +594,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
   // é deixada de lado e a mensagem nova vale sozinha: nada de repetir a mesma pergunta para sempre.
   // Quem pede ajuda no meio de uma pergunta ("qual foi o valor?") recebe a ajuda: o texto NÃO vira resposta da pergunta,
   // e a pergunta continua em aberto para quando ela responder.
-  const pediuAjuda = !documento && !anexo && ehPedidoDeAjuda(texto)
+  const pediuAjuda = !documento && !anexo && (ehPedidoDeAjuda(texto) || ehAssuntoDaConta(texto))
   const escolha = pend?.tipo === 'pergunta' && fresco && pend.opcoes?.length ? opcaoEscolhida(texto, pend.opcoes) : null
   const continua = !pediuAjuda && pend?.tipo === 'pergunta' && fresco && !!pend.texto && (!pend.opcoes?.length || !!escolha || /^\s*\d{1,2}\s*$/.test(texto))
   const forcar: { carteira?: string; pessoal?: boolean } = continua ? { ...(pend!.forcar ?? {}) } : {}
@@ -628,8 +629,32 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     return { status: 'ok', resposta: a.texto, efeitos: {}, intencao: 'ajuda', texto, tokens }
   }
 
-  const it = await interpretar(texto, ctx, { forcarCarteira: forcar.carteira, forcarPessoal: forcar.pessoal, documento })
+  // "apaga tudo": a Granninha só desfaz o último registro. Diz isso e aponta o painel, sem IA e sem desfazer nada sem querer.
+  if (!continua && !documento && !anexo && ehApagarTudo(texto)) {
+    return { status: 'ok', resposta: MSG.apagarTudo, efeitos: {}, intencao: 'ajuda', texto, tokens }
+  }
+  // Só um valor ("150", "R$ 1.250,50"): é o valor de alguma coisa. Pergunta "de quê? entrou ou saiu?" e guarda a pergunta,
+  // para a resposta seguinte ("recebi da Juliana") fechar o registro. Antes caía em "isso eu não sei te ajudar".
+  const soValor = !continua && !documento && !anexo ? valorSozinho(texto) : null
+  if (soValor !== null) {
+    const pergunta = MSG.valorSozinho(brl(soValor))
+    await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta, forcar: {}, origem: tipo }, atualizado_em: new Date().toISOString() })
+    return { status: 'pergunta', resposta: pergunta, efeitos: {}, intencao: 'acoes', texto, tokens }
+  }
+
+  let it = await interpretar(texto, ctx, { forcarCarteira: forcar.carteira, forcarPessoal: forcar.pessoal, documento })
   soma(it.uso)
+  // "Não foi 200, foi 250" com a pergunta ainda aberta: corrige o que está esperando resposta, em vez de dizer que não achou nada
+  // (e deixar o registro se perder).
+  if (it.intencao === 'corrigir' && pend?.tipo === 'pergunta' && fresco && pend.texto && !continua) {
+    const novoTexto = `${pend.texto}\nCorreção: ${it.correcao ?? texto}`
+    const it2 = await interpretar(novoTexto, ctx, { forcarCarteira: pend.forcar?.carteira, forcarPessoal: pend.forcar?.pessoal, documento: pend.documento })
+    soma(it2.uso)
+    if (it2.intencao === 'acoes') {
+      it = it2
+      texto = novoTexto
+    }
+  }
 
   if (it.intencao === 'acoes') {
     if (it.perguntar) {
@@ -720,7 +745,7 @@ async function conversar(cliente: { id: string; nome: string }, hoje: string, ti
     if (dp === 'silencio') return { status: 'ignorada', resposta: '', efeitos: {}, intencao: 'confirmacao', texto, tokens }
     if (dp) return { status: 'ok', resposta: RESPOSTA_DESPEDIDA[dp], efeitos: {}, intencao: 'despedida', texto, tokens }
   }
-  if (it.intencao === 'saudacao') return { status: 'ok', resposta: MSG.saudacao(nome), efeitos: {}, intencao: 'saudacao', texto, tokens }
+  if (it.intencao === 'saudacao') return { status: 'ok', resposta: MSG.saudacao(nome, texto, !!ctx.poucosRegistros), efeitos: {}, intencao: 'saudacao', texto, tokens }
   if (it.intencao === 'ajuda') {
     const a = await responderAjuda(texto, nome, ctx.historico)
     if (a.uso) soma(a.uso)

@@ -44,6 +44,13 @@ export interface Contexto {
    * palavra da descrição → true (pessoal) ou false (do negócio). A última decisão vale.
    */
   lembrancaPessoal?: Record<string, boolean>
+  /**
+   * Em que conta o cliente costuma lançar cada coisa, tirado do histórico: `entrada:juliana` ou `saida:luz` → id da conta.
+   * Só entra quando as últimas vezes (de 2 a 3) foram TODAS na mesma conta. Serve para não perguntar "de qual conta?" a cada registro.
+   */
+  habitoCarteira?: Record<string, string>
+  /** Cliente com poucos registros: ainda está aprendendo, então vale uma dica a mais. */
+  poucosRegistros?: boolean
   /** Últimas trocas (30 min, até 6), da mais antiga para a mais nova. Só ajuda a entender "esse", "aquele", "de novo". */
   historico?: { cliente: string; granninha: string }[]
 }
@@ -90,6 +97,8 @@ export interface Acao extends AcaoIA {
   fatura: string | null
   /** Parcelado que vira contas a pagar/receber (boleto, carnê, fiado) em vez de parcelas no cartão */
   noCartao: boolean
+  /** A conta foi escolhida pelo histórico do cliente (e não dita nem perguntada): a confirmação avisa. */
+  carteiraDoHabito?: boolean
 }
 
 /** Opção de uma pergunta de forma de pagamento. O id especial BOLETO quer dizer "boleto ou carnê". */
@@ -152,7 +161,7 @@ INTENÇÃO
 - "corrigir": quer mudar o último registro ("não foi 50, foi 60", "era dinheiro, não pix", "esse recebimento foi de prestação de serviço", "na verdade foi no Nubank", "era da casa, não do negócio", "muda a categoria para Material"). Descreva a correção em "correcao".
   Frase que fala de "esse", "essa", "isso", "o último" ou "o de agora" e só diz o que ele É (categoria, conta, meio, se é da casa) é "corrigir", NUNCA um registro novo: quem registra algo novo conta um fato novo ("recebi 290 do João").
 - "saudacao": só cumprimento ou agradecimento.
-- "ajuda": pede ajuda ou pergunta sobre a própria Granninha: o que ela faz, quem é, se é robô, como usar, se ela faz tal coisa ("como eu lanço uma conta?", "dá pra mandar áudio?", "você controla o cartão?"), ou diz que não entendeu como funciona. Pergunta sobre os NÚMEROS do cliente ("quanto sobrou", "o que vence") é "pergunta", nunca "ajuda".
+- "ajuda": pede ajuda ou pergunta sobre a própria Granninha: o que ela faz, quem é, se é robô, como usar, se ela faz tal coisa ("como eu lanço uma conta?", "dá pra mandar áudio?", "você controla o cartão?"), ou diz que não entendeu como funciona. Pedido de ajuda para REGISTRAR algo COM valor ("me ajuda a lançar uma venda de 500", "anota pra mim 80 de luz") é "acoes", nunca "ajuda". Dúvida sobre a CONTA ou a assinatura da própria Granninha (preço, plano, cancelar, excluir a conta) também é "ajuda". Pergunta sobre os NÚMEROS do cliente ("quanto sobrou", "o que vence") é "pergunta", nunca "ajuda".
 - "outro": nada a ver com dinheiro nem com a Granninha.
 
 TIPOS DE AÇÃO
@@ -277,11 +286,15 @@ export function candidatas(cs: CarteiraCtx[], movimento: 'entrada' | 'saida', me
  * contas que existem, recebeu a MESMA pergunta de novo. Insistiu uma vez e desistiu — o gasto dele
  * nunca foi registrado. Sem essa saída, quem usa uma conta que não cadastrou não tem para onde ir.
  */
-export function perguntaDeOpcoes(movimento: 'entrada' | 'saida', descricao: string, opcoes: Opcao[]) {
-  const titulo = movimento === 'entrada' ? `Onde caiu${descricao ? ` "${descricao}"` : ''}?` : `Pagou como${descricao ? ` "${descricao}"` : ''}?`
+export function perguntaDeOpcoes(movimento: 'entrada' | 'saida', descricao: string, opcoes: Opcao[], valor?: number | null) {
+  // Diz o valor junto: a pessoa confere que a Granninha entendeu certo e já sabe de qual registro se trata.
+  const que = `${descricao || (movimento === 'entrada' ? 'Entrada' : 'Saída')}${valor ? ` de ${brlSimples(valor)}` : ''}`
+  const titulo = movimento === 'entrada' ? `${que}: caiu em qual conta?` : `${que}: saiu de qual conta?`
   const lista = opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')
-  return `${titulo} Responda com o número:\n${lista}\n\nSe foi por uma conta que não está aí, cadastre em ${PAINEL()}/ajustes e me mande de novo.`
+  return `${titulo}\n${lista}\n\nOutra conta? Cadastre em ${PAINEL()}/ajustes e me mande de novo.`
 }
+
+const brlSimples = (n: number) => 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.com.br/painel').replace(/\/+$/, '')
 
@@ -310,21 +323,24 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
   const out: Acao[] = []
 
   /** Escolhe a carteira de um gasto ou recebimento, ou devolve a pergunta. */
-  const escolher = (a: AcaoIA, movimento: 'entrada' | 'saida'): { id: string } | Conferencia => {
+  const escolher = (a: AcaoIA, movimento: 'entrada' | 'saida'): { id: string; habito?: boolean } | Conferencia => {
     const nomeada = cart(a.carteira_id)
     const lista = candidatas(c.carteiras, movimento, a.meio)
     if (nomeada && nomeada.tipo !== 'investimento' && !(movimento === 'saida' && nomeada.tipo === 'maquininha') && !(movimento === 'entrada' && nomeada.tipo === 'cartao')) return { id: nomeada.id }
     if (forcada && candidatas(c.carteiras, movimento, null).some((x) => x.id === forcada.id)) return { id: forcada.id }
     if (!perguntarMeio) return { id: lista[0]?.id ?? padrao }
+    // Quem sempre lança isto na mesma conta não precisa ser perguntado de novo: a confirmação diz qual conta foi usada.
+    const habito = habitoDeCarteira(a.descricao, movimento, c.habitoCarteira)
+    if (habito && lista.length > 1 && lista.some((x) => x.id === habito)) return { id: habito, habito: true }
     if (lista.length === 1) return { id: lista[0].id }
     if (lista.length === 0 && a.meio === 'credito' && movimento === 'saida') {
       return { acoes: [], perguntar: `Você ainda não cadastrou cartão de crédito. Cadastre em ${PAINEL()}/ajustes (Carteiras) e me mande de novo, ou me diga se "${a.descricao}" foi pix ou dinheiro.` }
     }
     const opcoes = (lista.length ? lista : candidatas(c.carteiras, movimento, null)).map((x) => ({ id: x.id, nome: x.nome }))
     if (opcoes.length <= 1) return { id: opcoes[0]?.id ?? padrao }
-    return { acoes: [], perguntar: perguntaDeOpcoes(movimento, a.descricao, opcoes), opcoes }
+    return { acoes: [], perguntar: perguntaDeOpcoes(movimento, a.descricao, opcoes, a.valor), opcoes }
   }
-  const ehPergunta = (x: { id: string } | Conferencia): x is Conferencia => !('id' in x)
+  const ehPergunta = (x: { id: string; habito?: boolean } | Conferencia): x is Conferencia => !('id' in x)
 
   for (const a of r.acoes) {
     if (a.tipo_acao === 'criar_categoria') {
@@ -396,7 +412,7 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
       if (decidiuPessoal === undefined) {
         if (perguntarMeio) {
           const opcoes = [{ id: NEGOCIO, nome: 'Do negócio' }, { id: PESSOAL, nome: 'Pessoal (da casa)' }]
-          return { acoes: [], perguntar: `"${a.descricao}" é gasto do negócio ou pessoal? Responda com o número:\n1. Do negócio\n2. Pessoal (da casa)\nDepois eu lembro.`, opcoes }
+          return { acoes: [], perguntar: `${a.descricao}${a.valor ? ` de ${brlSimples(a.valor)}` : ''}: é gasto do negócio ou da casa?\n1. Do negócio\n2. Pessoal (da casa)\nDa próxima vez eu já sei.`, opcoes }
         }
       } else a.pessoal = decidiuPessoal
     }
@@ -404,6 +420,7 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
     // Carteira.
     let carteira = padrao
     let noCartao = false
+    let doHabito = false
     if (a.tipo_acao === 'transferencia') {
       const destino = cart(a.carteira_destino_id)
       if (!destino) return { acoes: [], perguntar: 'De qual carteira para qual? Ex.: "do dinheiro para o banco".' }
@@ -423,6 +440,7 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
       const e = escolher(a, a.movimento!)
       if (ehPergunta(e)) return e
       carteira = e.id
+      doHabito = !!e.habito
       noCartao = cart(carteira)?.tipo === 'cartao'
     } else if (a.tipo_acao === 'parcelado' && a.movimento === 'saida') {
       // Parcelado: no cartão vira parcelas nas faturas; no boleto/carnê vira contas a pagar.
@@ -436,11 +454,11 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
         if (cartoes.length === 1 || !perguntarMeio) ((noCartao = true), (carteira = cartoes[0].id))
         else {
           const opcoes = cartoes.map((x) => ({ id: x.id, nome: x.nome }))
-          return { acoes: [], perguntar: perguntaDeOpcoes('saida', a.descricao, opcoes), opcoes }
+          return { acoes: [], perguntar: perguntaDeOpcoes('saida', a.descricao, opcoes, a.valor), opcoes }
         }
       } else if (cartoes.length && perguntarMeio) {
         const opcoes = [...cartoes.map((x) => ({ id: x.id, nome: x.nome })), { id: BOLETO, nome: 'Boleto ou carnê' }]
-        return { acoes: [], perguntar: perguntaDeOpcoes('saida', a.descricao, opcoes), opcoes }
+        return { acoes: [], perguntar: perguntaDeOpcoes('saida', a.descricao, opcoes, a.valor), opcoes }
       }
     }
 
@@ -465,6 +483,7 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
       data,
       dia_do_mes: a.dia_do_mes ? Math.min(28, a.dia_do_mes) : null,
       noCartao,
+      carteiraDoHabito: doHabito || undefined,
       fatura: noCartao && ccart ? faturaDe(data, ccart.fechamento ?? 1, ccart.vencimento ?? 10) : null,
     })
   }
@@ -492,6 +511,36 @@ export function palavrasChave(descricao: string): string[] {
 export function lembrancaDe(descricao: string, mapa?: Record<string, boolean>): boolean | undefined {
   if (!mapa) return undefined
   for (const p of palavrasChave(descricao).reverse()) if (p in mapa) return mapa[p]
+  return undefined
+}
+
+/**
+ * Em que conta o cliente costuma lançar cada coisa. Linhas do histórico da mais nova para a mais antiga.
+ * Uma palavra vira hábito quando as 2 ou 3 últimas vezes em que apareceu foram TODAS na mesma conta (uma vez só não basta).
+ * Chave: `entrada:juliana`, `saida:luz`.
+ */
+export function construirHabitos(linhas: { descricao: string | null; tipo: string; carteira_id: string | null }[]): Record<string, string> {
+  const vistas = new Map<string, string[]>()
+  for (const l of linhas) {
+    if ((l.tipo !== 'entrada' && l.tipo !== 'saida') || !l.carteira_id) continue
+    for (const p of new Set(palavrasChave(l.descricao ?? ''))) {
+      const k = `${l.tipo}:${p}`
+      const ids = vistas.get(k) ?? []
+      if (ids.length < 3) ids.push(l.carteira_id)
+      vistas.set(k, ids)
+    }
+  }
+  const habitos: Record<string, string> = {}
+  for (const [k, ids] of vistas) if (ids.length >= 2 && ids.every((x) => x === ids[0])) habitos[k] = ids[0]
+  return habitos
+}
+/** A conta habitual para esta descrição, ou undefined. Começa pela última palavra, onde costuma estar a coisa. */
+export function habitoDeCarteira(descricao: string, movimento: 'entrada' | 'saida', mapa?: Record<string, string>): string | undefined {
+  if (!mapa) return undefined
+  for (const p of palavrasChave(descricao).reverse()) {
+    const h = mapa[`${movimento}:${p}`]
+    if (h) return h
+  }
   return undefined
 }
 

@@ -5,7 +5,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { env } from './env.ts'
 import { faturas, type MovCartao } from './cartao.ts'
-import { palavrasChave, type Contexto, type FaturaAberta } from './interpretar.ts'
+import { construirHabitos, palavrasChave, type Contexto, type FaturaAberta } from './interpretar.ts'
 
 export const sb = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false, autoRefreshToken: false } })
 
@@ -103,10 +103,16 @@ export async function contextoDe(userId: string, hoje: string): Promise<Contexto
   falhou(hist.error, 'contexto histórico')
   const lembrancaPessoal: Record<string, boolean> = {}
   for (const l of [...(hist.data ?? [])].reverse()) for (const w of palavrasChave(l.descricao ?? '')) lembrancaPessoal[w] = !!l.pessoal
+  // Em que conta o cliente costuma lançar cada coisa (só vira hábito com 2 ou 3 vezes seguidas na mesma conta).
+  const hab = await sb.from('lancamentos').select('descricao,tipo,carteira_id,data').eq('user_id', userId).in('tipo', ['entrada', 'saida']).order('data', { ascending: false }).limit(300)
+  falhou(hab.error, 'contexto: conta habitual')
+  const habitoCarteira = construirHabitos(hab.data ?? [])
   return {
     hoje,
     ramo: p.data?.ramo || undefined,
     lembrancaPessoal,
+    habitoCarteira,
+    poucosRegistros: (hab.data ?? []).length < 5,
     categorias,
     carteiras,
     contasAbertas: (contas.data ?? []).map((c) => ({ ...c, valor: Number(c.valor) })),

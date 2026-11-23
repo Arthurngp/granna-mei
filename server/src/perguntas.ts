@@ -6,6 +6,7 @@
  */
 import { carregarBase } from './base.ts'
 import { efetivos, faturas } from './cartao.ts'
+import { palavrasChave } from './interpretar.ts'
 import { disponivelDaBase, periodoDe, resumoDoPeriodo, saldosDaBase, somaDias, type Base } from './consultas.ts'
 import { jsonEstruturado, type Uso } from './openai.ts'
 import { centavosDe } from './saldo.ts'
@@ -53,6 +54,29 @@ export function resumoDaBase(b: Base, hoje: string) {
   const categoriasPorMes = Object.fromEntries(
     [...catMes.entries()].filter(([k]) => k.slice(0, 7) >= meses[Math.max(0, meses.length - 3)]?.mes).map(([k, v]) => [k, Object.fromEntries([...v.entries()].sort((a, c) => c[1] - a[1]).map(([n, x]) => [n, r2(x)]))]),
   )
+  // "Quanto gastei de gasolina?", "quem mais me pagou?": o que a pessoa chama pelo nome vive na DESCRIÇÃO, não na categoria.
+  // Por isso vai pronto, já somado por palavra e por descrição, para a IA achar o número sem somar nada.
+  const mesPassado = somaDias(`${mes}-01`, -1).slice(0, 7)
+  const porPalavra = (m: string, tipo: 'entrada' | 'saida') => {
+    const acc = new Map<string, number>()
+    for (const l of ef) {
+      if (l.tipo !== tipo || !l.data.startsWith(m) || (tipo === 'saida' && l.pessoal)) continue
+      for (const p of new Set(palavrasChave(l.descricao ?? ''))) acc.set(p, (acc.get(p) ?? 0) + l.valor)
+    }
+    return Object.fromEntries([...acc.entries()].sort((a, c) => c[1] - a[1]).slice(0, 40).map(([p, v]) => [p, r2(v)]))
+  }
+  const porDescricao = (m: string, tipo: 'entrada' | 'saida') => {
+    const acc = new Map<string, { descricao: string; total: number; vezes: number }>()
+    for (const l of ef) {
+      if (l.tipo !== tipo || !l.data.startsWith(m) || (tipo === 'saida' && l.pessoal)) continue
+      const k = (l.descricao ?? '').trim().toLowerCase()
+      const x = acc.get(k) ?? { descricao: l.descricao ?? '', total: 0, vezes: 0 }
+      x.total += l.valor
+      x.vezes++
+      acc.set(k, x)
+    }
+    return [...acc.values()].sort((a, c) => c.total - a.total).slice(0, 10).map((x) => ({ descricao: x.descricao, total: r2(x.total), vezes: x.vezes }))
+  }
   const periodo = (q: 'hoje' | 'ontem' | 'semana' | 'mes') => {
     const p = periodoDe(hoje, q)
     const r = resumoDoPeriodo(b, p.de, p.ate)
@@ -73,6 +97,8 @@ export function resumoDaBase(b: Base, hoje: string) {
     dias_recentes: [...porDia.entries()].sort().map(([d, v]) => ({ dia: d, entrou: r2(v.entrou), saiu: r2(v.saiu) })),
     categorias_por_mes: categoriasPorMes,
     maiores_gastos_do_mes: ef.filter((l) => l.tipo === 'saida' && l.data.startsWith(mes)).sort((a, c) => c.valor - a.valor).slice(0, 5).map((l) => ({ descricao: l.descricao, valor: l.valor, dia: l.data })),
+    por_palavra: { mes_atual: { saidas: porPalavra(mes, 'saida'), entradas: porPalavra(mes, 'entrada') }, mes_passado: { saidas: porPalavra(mesPassado, 'saida'), entradas: porPalavra(mesPassado, 'entrada') } },
+    por_descricao: { mes_atual: { saidas: porDescricao(mes, 'saida'), entradas: porDescricao(mes, 'entrada') }, mes_passado: { saidas: porDescricao(mesPassado, 'saida'), entradas: porDescricao(mesPassado, 'entrada') } },
     contas_fixas: b.fixas.map((f) => ({ descricao: f.descricao, valor: f.valor, dia_do_mes: f.dia })),
     contas_em_aberto: b.contas.slice(0, 80).map((c) => ({ descricao: c.descricao, valor: c.valor, vencimento: c.vencimento, tipo: c.tipo === 'pagar' ? 'a pagar' : 'a receber', atrasada: c.vencimento < hoje })),
     mei: { faturamento_do_ano: r2(faturamentoAno), limite_anual: LIMITE_MEI, usado: `${Math.round((faturamentoAno / LIMITE_MEI) * 100)}%`, falta: r2(Math.max(0, LIMITE_MEI - faturamentoAno)) },
@@ -88,7 +114,10 @@ const SISTEMA = `${VOZ}
 SITUAÇÃO
 A pessoa perguntou sobre os próprios números, no WhatsApp.
 Responda à pergunta usando SÓ os números do resumo abaixo. Nunca invente número e nunca some, subtraia nem estime: use o valor pronto que está no resumo.
-Regras: no máximo 4 linhas curtas, valores no formato R$ 1.234,56. Resultado negativo (mês no vermelho): nunca escreva "sobrou R$ -550,00"; diga que ficou R$ 550,00 abaixo (ou que faltou), dê o número limpo, acolha em meia frase ("acontece, dá pra ajustar") e ofereça o próximo passo que existe: mostrar os maiores gastos do mês. Conta atrasada: o mesmo, oferecendo mostrar o que está vencendo. Resultado bom: comemore em poucas palavras antes do número ("boa, esse mês tá bonito"), sem exagero.
+Regras: no máximo 4 linhas curtas, valores no formato R$ 1.234,56. Resultado negativo (mês no vermelho): nunca escreva "sobrou R$ -550,00"; diga que ficou R$ 550,00 abaixo (ou que faltou), dê o número limpo, acolha em meia frase, com palavras suas e diferentes a cada vez, sem frase pronta e ofereça o próximo passo que existe: mostrar os maiores gastos do mês. Conta atrasada: o mesmo, oferecendo mostrar o que está vencendo. Resultado bom: comemore em poucas palavras antes do número, do seu jeito e sem repetir sempre a mesma frase.
+Em pergunta de UM número (quanto gastei de X, quanto entrou, quanto tirei, quanto falta pro limite), responda com UMA frase completa que cite o assunto, o período e o número, e pare: sem comentário extra, sem piada e sem oferecer nada. A oferta de próximo passo é só para resultado negativo ou conta atrasada.
+Para perguntas sobre UMA coisa ("quanto gastei de gasolina", "quanto entrou de corte"), procure a palavra em "por_palavra" (já somada, por mês): se ela não aparece naquele mês, o valor é R$ 0,00 e você diz isso, nunca "não tenho". Para "quem mais me pagou" ou "qual foi meu maior gasto", use "por_descricao" e "maiores_gastos_do_mes".
+Nunca diga a palavra "resumo" (a pessoa não sabe o que é): fale "nos seus lançamentos" ou só dê o número. Nunca prometa olhar o painel junto com ela: se mandar para o painel, diga só onde fica (Relatórios ou Lançamentos). Nunca diga "anotei" nem "tá anotado": você está respondendo, não registrando.
 "Saiu" é gasto do negócio; retiradas do dono ficam à parte. Compra no cartão de crédito só conta como gasto quando a fatura é paga; antes disso está em "faturas_em_aberto".
 SALDO é "disponivel" (dinheiro em conta e em mãos agora, sem cartão nem investimento) e "carteiras[].saldo". Não confunda com "sobrou" de "periodos" e "meses", que é entrou menos saiu de um período: se perguntarem saldo, responda com "disponivel".
 Para hoje, ontem, semana e mês use "periodos". Contas fixas estão em "contas_fixas"; o que vence está em "contas_em_aberto". Se o resumo não tiver a resposta, diga com simplicidade e sugira ver no painel.
