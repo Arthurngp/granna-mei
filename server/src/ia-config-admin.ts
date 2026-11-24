@@ -7,8 +7,9 @@
  *  - Depois de qualquer mudança o cache de 60 s é limpo: vale já na próxima mensagem.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { chamadaMinimaAnthropic } from './anthropic.ts'
 import { chamadaMinimaIA } from './openai.ts'
-import { cifrar, decifrar, fabricaDe, limparCacheIA, MODELO_VALIDO, segredoConfigurado, TAREFAS, TAREFAS_IDS, type Tarefa } from './ia-config.ts'
+import { cifrar, decifrar, fabricaDe, limparCacheIA, MODELO_TESTE_ANTHROPIC, MODELO_VALIDO, PROVEDORES, provedorDoModelo, segredoConfigurado, TAREFAS, TAREFAS_IDS, type Provedor, type Tarefa } from './ia-config.ts'
 
 export class ErroConfig extends Error {
   constructor(
@@ -33,10 +34,13 @@ export const depsReais = (sb: SupabaseClient, auditar: Deps['auditar']): Deps =>
   sb,
   auditar,
   testar: async (modelo, chave) => {
-    const r = await chamadaMinimaIA(modelo, chave)
+    const r = provedorDoModelo(modelo) === 'anthropic' ? await chamadaMinimaAnthropic(modelo, chave) : await chamadaMinimaIA(modelo, chave)
     return r.ok ? { ok: true, detalhe: 'respondeu' } : { ok: false, detalhe: r.detalhe }
   },
 })
+
+/** Modelo usado só para TESTAR uma chave nova: o de fábrica da OpenAI ou o modelo barato da Anthropic. */
+const modeloDeTeste = (p: Provedor) => (p === 'anthropic' ? MODELO_TESTE_ANTHROPIC : fabricaDe('interpretacao'))
 
 /** Tira a chave de qualquer texto que vá voltar para a tela. */
 const sem = (texto: string, chave?: string) => (chave ? texto.split(chave).join('•••') : texto).slice(0, 220)
@@ -54,7 +58,7 @@ function modeloValido(m: unknown): string {
 export async function listar(d: Deps) {
   const g = await d.sb.from('config_ia_modelo').select('tarefa,modelo,atualizado_em')
   // Sem a migration as tabelas não existem: a tela avisa e o servidor segue com o padrão.
-  if (g.error) return { pronto: false, segredo: segredoConfigurado(), fabrica: Object.fromEntries(TAREFAS_IDS.map((t) => [t, fabricaDe(t)])), tarefas: [], chaves: [], clientes: [], chave_em_uso: 'ambiente' as const }
+  if (g.error) return { pronto: false, segredo: segredoConfigurado(), fabrica: Object.fromEntries(TAREFAS_IDS.map((t) => [t, fabricaDe(t)])), tarefas: [], chaves: [], clientes: [], chave_em_uso: 'ambiente' as const, em_uso: { openai: { origem: 'ambiente' as const, nome: null }, anthropic: { origem: (process.env.ANTHROPIC_API_KEY ? 'ambiente' : 'nenhuma') as 'ambiente' | 'nenhuma', nome: null } } }
   const [c, k] = await Promise.all([
     d.sb.from('ia_modelo_cliente').select('user_id,tarefa,modelo,atualizado_em').order('atualizado_em', { ascending: false }),
     d.sb.from('ia_chaves').select('id,provedor,nome,ultimos4,ativa,testada_em,criado_em').order('criado_em', { ascending: false }),
@@ -63,7 +67,11 @@ export async function listar(d: Deps) {
   const nomes = ids.length ? (await d.sb.from('perfis').select('id,nome,negocio').in('id', ids)).data ?? [] : []
   const nome = (id: string) => nomes.find((p) => p.id === id)
   const globais = new Map((g.data ?? []).map((x) => [x.tarefa as string, x]))
-  const ativa = (k.data ?? []).find((x) => x.ativa)
+  const ativaDe = (p: Provedor) => (k.data ?? []).find((x) => x.ativa && (x.provedor ?? 'openai') === p)
+  const emUso = (p: Provedor) => {
+    const a = ativaDe(p)
+    return a ? { origem: 'banco' as const, nome: a.nome as string } : { origem: (p === 'openai' || process.env.ANTHROPIC_API_KEY ? 'ambiente' : 'nenhuma') as 'ambiente' | 'nenhuma', nome: null }
+  }
   return {
     pronto: true,
     segredo: segredoConfigurado(),
@@ -71,15 +79,19 @@ export async function listar(d: Deps) {
     tarefas: TAREFAS.map((t) => ({ ...t, global: (globais.get(t.id)?.modelo as string | undefined) ?? null })),
     chaves: (k.data ?? []).map((x) => ({ id: x.id, provedor: x.provedor, nome: x.nome, ultimos4: x.ultimos4, ativa: x.ativa, testada_em: x.testada_em, criado_em: x.criado_em })),
     clientes: (c.data ?? []).map((x) => ({ user_id: x.user_id, nome: nome(x.user_id)?.nome ?? '', negocio: nome(x.user_id)?.negocio ?? '', tarefa: x.tarefa, modelo: x.modelo })),
-    chave_em_uso: ativa ? ('banco' as const) : ('ambiente' as const),
-    chave_em_uso_nome: ativa?.nome ?? null,
+    chave_em_uso: ativaDe('openai') ? ('banco' as const) : ('ambiente' as const),
+    chave_em_uso_nome: ativaDe('openai')?.nome ?? null,
+    em_uso: { openai: emUso('openai'), anthropic: emUso('anthropic') },
   }
 }
 
 async function testarOuRecusar(d: Deps, tarefa: Tarefa, modelo: string) {
   // Transcrição de áudio não é modelo de chat: a chamada mínima de chat não serve de teste. Só o formato do nome é conferido (e o servidor volta ao de fábrica
   // sozinho se a OpenAI recusar o nome na hora de transcrever).
-  if (tarefa === 'audio') return
+  if (tarefa === 'audio') {
+    if (provedorDoModelo(modelo) === 'anthropic') throw new ErroConfig(400, 'Transcrição de áudio só funciona com modelos da OpenAI: a Anthropic não transcreve áudio. Nada foi alterado.')
+    return
+  }
   const t = await d.testar(modelo)
   if (!t.ok) throw new ErroConfig(400, `O modelo "${modelo}" não respondeu (${sem(t.detalhe)}). Nada foi alterado.`)
 }
@@ -129,17 +141,19 @@ export async function salvarModeloCliente(d: Deps, admin: string, corpo: { user_
 }
 
 /** Cadastra uma chave de API: testa, cifra e guarda DESLIGADA. */
-export async function adicionarChave(d: Deps, admin: string, corpo: { nome?: unknown; chave?: unknown }) {
+export async function adicionarChave(d: Deps, admin: string, corpo: { nome?: unknown; chave?: unknown; provedor?: unknown }) {
+  const provedor = (corpo.provedor ?? 'openai') as Provedor
+  if (!PROVEDORES.includes(provedor)) throw new ErroConfig(400, 'Provedor desconhecido. Use OpenAI ou Anthropic.')
   if (!segredoConfigurado()) throw new ErroConfig(400, 'O servidor ainda não tem o segredo para cifrar chaves (variável IA_SEGREDO na Coolify). Sem ele a chave não pode ser guardada com segurança.')
   const nome = typeof corpo.nome === 'string' ? corpo.nome.trim() : ''
   if (nome.length < 1 || nome.length > 60) throw new ErroConfig(400, 'Dê um nome à chave (até 60 letras).')
   const chave = typeof corpo.chave === 'string' ? corpo.chave.trim() : ''
   if (!CHAVE_VALIDA.test(chave)) throw new ErroConfig(400, 'A chave parece incompleta ou tem espaço. Cole a chave inteira.')
-  const t = await d.testar(fabricaDe('interpretacao'), chave)
+  const t = await d.testar(modeloDeTeste(provedor), chave)
   if (!t.ok) throw new ErroConfig(400, `Essa chave não funcionou (${sem(t.detalhe, chave)}). Nada foi guardado.`)
-  const r = await d.sb.from('ia_chaves').insert({ provedor: 'openai', nome, chave_cifrada: cifrar(chave), ultimos4: chave.slice(-4), ativa: false, testada_em: new Date().toISOString(), criado_por: admin }).select('id').single()
+  const r = await d.sb.from('ia_chaves').insert({ provedor, nome, chave_cifrada: cifrar(chave), ultimos4: chave.slice(-4), ativa: false, testada_em: new Date().toISOString(), criado_por: admin }).select('id').single()
   if (r.error) throw new Error(sem(r.error.message, chave))
-  await d.auditar(admin, 'ia_chave_adicionar', { nome, ultimos4: chave.slice(-4) })
+  await d.auditar(admin, 'ia_chave_adicionar', { provedor, nome, ultimos4: chave.slice(-4) })
   limparCacheIA()
   return { ok: true, id: r.data.id }
 }
@@ -148,12 +162,13 @@ export async function adicionarChave(d: Deps, admin: string, corpo: { nome?: unk
 export async function definirChaveAtiva(d: Deps, admin: string, corpo: { id?: unknown; ativa?: unknown }) {
   const id = typeof corpo.id === 'string' && UUID.test(corpo.id) ? corpo.id : ''
   if (!id) throw new ErroConfig(400, 'Chave inválida.')
-  const k = await d.sb.from('ia_chaves').select('id,nome,ultimos4,chave_cifrada,ativa').eq('id', id).maybeSingle()
+  const k = await d.sb.from('ia_chaves').select('id,provedor,nome,ultimos4,chave_cifrada,ativa').eq('id', id).maybeSingle()
   if (!k.data) throw new ErroConfig(404, 'Chave não encontrada.')
+  const provedor = (k.data.provedor ?? 'openai') as Provedor
   if (corpo.ativa !== true) {
     const r = await d.sb.from('ia_chaves').update({ ativa: false, atualizado_em: new Date().toISOString() }).eq('id', id)
     if (r.error) throw new Error(r.error.message)
-    await d.auditar(admin, 'ia_chave_desativar', { nome: k.data.nome, ultimos4: k.data.ultimos4 })
+    await d.auditar(admin, 'ia_chave_desativar', { provedor, nome: k.data.nome, ultimos4: k.data.ultimos4 })
     limparCacheIA()
     return { ok: true, ativa: false }
   }
@@ -163,14 +178,14 @@ export async function definirChaveAtiva(d: Deps, admin: string, corpo: { id?: un
   } catch {
     throw new ErroConfig(400, 'Não consegui abrir esta chave (o segredo do servidor mudou?). Cadastre-a de novo.')
   }
-  const t = await d.testar(fabricaDe('interpretacao'), chave)
+  const t = await d.testar(modeloDeTeste(provedor), chave)
   if (!t.ok) throw new ErroConfig(400, `Esta chave não funcionou agora (${sem(t.detalhe, chave)}). Continua valendo a que já estava em uso.`)
-  // Uma por vez: desliga as outras ANTES de ligar esta (o banco também impede duas ligadas).
-  const off = await d.sb.from('ia_chaves').update({ ativa: false, atualizado_em: new Date().toISOString() }).neq('id', id).eq('ativa', true)
+  // Uma por vez DENTRO do provedor: desliga as outras do mesmo provedor ANTES de ligar esta (o banco também impede duas ligadas). A do outro provedor não é tocada.
+  const off = await d.sb.from('ia_chaves').update({ ativa: false, atualizado_em: new Date().toISOString() }).neq('id', id).eq('ativa', true).eq('provedor', provedor)
   if (off.error) throw new Error(off.error.message)
   const on = await d.sb.from('ia_chaves').update({ ativa: true, testada_em: new Date().toISOString(), atualizado_em: new Date().toISOString() }).eq('id', id)
   if (on.error) throw new Error(on.error.message)
-  await d.auditar(admin, 'ia_chave_ativar', { nome: k.data.nome, ultimos4: k.data.ultimos4 })
+  await d.auditar(admin, 'ia_chave_ativar', { provedor, nome: k.data.nome, ultimos4: k.data.ultimos4 })
   limparCacheIA()
   return { ok: true, ativa: true }
 }
@@ -178,11 +193,11 @@ export async function definirChaveAtiva(d: Deps, admin: string, corpo: { id?: un
 export async function removerChave(d: Deps, admin: string, corpo: { id?: unknown }) {
   const id = typeof corpo.id === 'string' && UUID.test(corpo.id) ? corpo.id : ''
   if (!id) throw new ErroConfig(400, 'Chave inválida.')
-  const k = await d.sb.from('ia_chaves').select('id,nome,ultimos4,ativa').eq('id', id).maybeSingle()
+  const k = await d.sb.from('ia_chaves').select('id,provedor,nome,ultimos4,ativa').eq('id', id).maybeSingle()
   if (!k.data) throw new ErroConfig(404, 'Chave não encontrada.')
   const r = await d.sb.from('ia_chaves').delete().eq('id', id)
   if (r.error) throw new Error(r.error.message)
-  await d.auditar(admin, 'ia_chave_remover', { nome: k.data.nome, ultimos4: k.data.ultimos4, estava_ativa: k.data.ativa })
+  await d.auditar(admin, 'ia_chave_remover', { provedor: k.data.provedor ?? 'openai', nome: k.data.nome, ultimos4: k.data.ultimos4, estava_ativa: k.data.ativa })
   limparCacheIA()
   return { ok: true }
 }

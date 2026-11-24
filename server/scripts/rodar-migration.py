@@ -81,6 +81,7 @@ MIGRATIONS = {
     "custofoto": "20261123140000_custo_foto_documento.sql",
     "enviofrio": "20261123160000_envio_manual_contato_frio.sql",
     "configia": "20261124140000_config_ia.sql",
+    "iaanthropic": "20261124150000_ia_chaves_anthropic.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
@@ -230,6 +231,11 @@ CONFERE = {
         (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('config_ia_modelo','ia_modelo_cliente','ia_chaves')) as tabelas_existem,
         (select count(*) from information_schema.role_table_grants g where g.table_schema='public' and g.table_name in ('config_ia_modelo','ia_modelo_cliente','ia_chaves')
            and g.grantee in ('anon','authenticated','PUBLIC')) as acessiveis_a_cliente_ou_anonimo,
+        (select case when to_regclass('public.ia_chaves') is null then null
+              else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.ia_chaves', false, true, '')))[1]::text end) as chaves_cadastradas""",
+    # Depende da `configia` (rodar antes). ANTES: "aceita_anthropic" = false; DEPOIS: true. "chaves_cadastradas" não pode mudar (a migration não mexe em dados).
+    "iaanthropic": """select
+        coalesce((select pg_get_constraintdef(c.oid) like '%anthropic%' from pg_constraint c where c.conrelid = to_regclass('public.ia_chaves') and c.conname = 'ia_chaves_provedor_check'), false) as aceita_anthropic,
         (select case when to_regclass('public.ia_chaves') is null then null
               else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.ia_chaves', false, true, '')))[1]::text end) as chaves_cadastradas""",
     "adminuso": """select

@@ -1,5 +1,6 @@
 import { env } from './env.ts'
-import { chaveDaIA, fabricaDe, MODELO_AUDIO_FABRICA, MODELO_FABRICA, modeloDe, tarefaDeEsquema } from './ia-config.ts'
+import { jsonAnthropic } from './anthropic.ts'
+import { chaveDaIA, fabricaDe, MODELO_AUDIO_FABRICA, MODELO_FABRICA, modeloDe, provedorDoModelo, tarefaDeEsquema } from './ia-config.ts'
 import { classificarFalhaIA, ErroIA, registrarFalhaIA, registrarOkIA, valeTentarDeNovoIA, type TipoFalhaIA } from './ia-estado.ts'
 
 /** Modelos de FÁBRICA (o que vale sem nada configurado na aba Configurações do admin). O modelo de cada mensagem é resolvido em ia-config.ts. */
@@ -99,6 +100,8 @@ export async function jsonEstruturado<T>(sistema: string, usuario: string | { ty
   const tarefa = tarefaDeEsquema(nome)
   const escolhido = await modeloDe(tarefa)
   const chamar = async (modelo: string) => {
+    // Modelo Claude: vai para a Anthropic (mesmo contrato de saída). Qualquer falha ali cai no modelo de fábrica da OpenAI, logo abaixo.
+    if (provedorDoModelo(modelo) === 'anthropic') return jsonAnthropic<T>(modelo, sistema, usuario as never, nome, esquema)
     const r = await pedir('/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -121,8 +124,9 @@ export async function jsonEstruturado<T>(sistema: string, usuario: string | { ty
     return await chamar(escolhido)
   } catch (e) {
     const fabrica = fabricaDe(tarefa)
-    if (escolhido !== fabrica && recusouOModelo(e)) {
-      console.error(`[ia-config] o modelo configurado "${escolhido}" foi recusado para ${tarefa}; usei o de fábrica "${fabrica}": ${(e as Error).message.slice(0, 160)}`)
+    // Outro provedor (Anthropic) caindo por QUALQUER motivo, ou a OpenAI recusando o nome do modelo: volta ao de fábrica. Cota esgotada na OpenAI não repete (não gasta à toa).
+    if (escolhido !== fabrica && (provedorDoModelo(escolhido) === 'anthropic' || recusouOModelo(e))) {
+      console.error(`[ia-config] o modelo configurado "${escolhido}" falhou para ${tarefa}; usei o de fábrica "${fabrica}": ${(e as Error).message.slice(0, 160)}`)
       return await chamar(fabrica)
     }
     throw e

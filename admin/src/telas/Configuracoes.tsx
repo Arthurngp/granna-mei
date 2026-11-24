@@ -11,8 +11,15 @@ interface Tarefa {
   detalhe: string
   global: string | null
 }
+type Provedor = 'openai' | 'anthropic'
+const NOME_PROVEDOR: Record<Provedor, string> = { openai: 'OpenAI', anthropic: 'Anthropic (Claude)' }
+interface EmUso {
+  origem: 'banco' | 'ambiente' | 'nenhuma'
+  nome: string | null
+}
 interface Chave {
   id: string
+  provedor: Provedor
   nome: string
   ultimos4: string
   ativa: boolean
@@ -34,6 +41,7 @@ interface Config {
   clientes: ModeloCliente[]
   chave_em_uso: 'banco' | 'ambiente'
   chave_em_uso_nome?: string | null
+  em_uso: { openai: EmUso; anthropic: EmUso }
 }
 interface ClienteBusca {
   id: string
@@ -57,6 +65,7 @@ export function Configuracoes() {
   const [tarefaCli, setTarefaCli] = useState('interpretacao')
   const [modeloCli, setModeloCli] = useState('')
   // chave
+  const [provedorChave, setProvedorChave] = useState<Provedor>('openai')
   const [nomeChave, setNomeChave] = useState('')
   const [valorChave, setValorChave] = useState('')
   const [confirmaRemover, setConfirmaRemover] = useState('')
@@ -105,7 +114,7 @@ export function Configuracoes() {
 
   const personalizadas = d.tarefas.filter((t) => t.global).length
   const heads: HeadDef[] = [
-    { rotulo: 'Chave de API em uso', valor: d.chave_em_uso === 'banco' ? d.chave_em_uso_nome || 'Cadastrada aqui' : 'Do servidor', nota: d.chave_em_uso === 'banco' ? 'cadastrada nesta tela' : 'a de sempre (variável do ambiente)', texto: true },
+    { rotulo: 'Chave da OpenAI em uso', valor: d.em_uso.openai.origem === 'banco' ? d.em_uso.openai.nome || 'Cadastrada aqui' : 'Do servidor', nota: d.em_uso.openai.origem === 'banco' ? 'cadastrada nesta tela' : 'a de sempre (variável do ambiente)', texto: true },
     { rotulo: 'Tarefas com modelo seu', valor: n(personalizadas), nota: `de ${n(d.tarefas.length)}; as outras usam o padrão` },
     { rotulo: 'Clientes com modelo próprio', valor: n(new Set(d.clientes.map((c) => c.user_id)).size), nota: 'valem no lugar do modelo de todos' },
   ]
@@ -129,8 +138,16 @@ export function Configuracoes() {
       <Cartao g={14}>
         <div className="cartao-cab"><h2>Modelo para todos os clientes</h2></div>
         <p className="texto-ajuda" style={{ margin: 0 }}>
-          Cada tarefa pode usar um modelo diferente. O padrão de fábrica é o que está valendo hoje. Ao salvar, o modelo é testado de verdade; se a OpenAI recusar, nada muda. Se um modelo escolhido for recusado depois, a Granninha usa o padrão na hora e a pessoa nem percebe.
+          Cada tarefa pode usar um modelo diferente. O padrão de fábrica é o que está valendo hoje. Ao salvar, o modelo é testado de verdade; se for recusado, nada muda. Se um modelo escolhido falhar depois, a Granninha usa o padrão na hora e a pessoa nem percebe.
         </p>
+        <p className="texto-ajuda" style={{ margin: 0 }}>
+          Modelos que começam com <b>claude</b> (por exemplo <code>claude-sonnet-5-5</code>) usam a Anthropic e pedem uma chave da Anthropic cadastrada abaixo. Qualquer outro nome usa a OpenAI. Áudio só funciona com a OpenAI.
+        </p>
+        {d.tarefas.some((t) => (t.global ?? '').toLowerCase().startsWith('claude')) || d.clientes.some((c) => c.modelo.toLowerCase().startsWith('claude')) ? (
+          <div className="vaviso ruim" role="status">
+            <span>Atenção: o custo mostrado na Visão geral usa o preço do modelo padrão. Com modelos Claude o custo real é maior do que o número exibido até a conta por modelo ser feita.</span>
+          </div>
+        ) : null}
         <div style={{ display: 'grid', gap: 14 }}>
           {d.tarefas.map((t) => {
             const valor = rascunho[t.id] ?? t.global ?? ''
@@ -263,13 +280,23 @@ export function Configuracoes() {
       <Cartao g={14}>
         <div className="cartao-cab"><h2>Chave de API</h2></div>
         <p className="texto-ajuda" style={{ margin: 0 }}>
-          Por enquanto só chaves da OpenAI (outros provedores, como a Anthropic, são a próxima etapa). A chave é testada, guardada cifrada e nasce <b>desligada</b>: você liga quando quiser. Se a chave ligada for recusada, a Granninha volta sozinha à chave do servidor.
+          Chaves da OpenAI e da Anthropic. Cada chave é testada, guardada cifrada e nasce <b>desligada</b>: você liga quando quiser, uma por provedor. Se a chave ligada da OpenAI for recusada, a Granninha volta sozinha à chave do servidor; se a da Anthropic falhar, a conversa cai no modelo padrão da OpenAI.
         </p>
         {!d.segredo && (
           <div className="vaviso ruim" role="alert">
             <span>O servidor ainda não tem o segredo para cifrar chaves (variável <code>IA_SEGREDO</code> na Coolify, com pelo menos 16 caracteres). Sem ele não dá para cadastrar chave por aqui.</span>
           </div>
         )}
+        <div className="item-ob" style={CAIXA}>
+          {(['openai', 'anthropic'] as const).map((p) => (
+            <small className="suave" key={p}>
+              {NOME_PROVEDOR[p]}:{' '}
+              <b>
+                {d.em_uso[p].origem === 'banco' ? `chave "${d.em_uso[p].nome}" (cadastrada aqui)` : d.em_uso[p].origem === 'ambiente' ? 'chave do servidor' : 'nenhuma chave (modelos Claude caem no padrão)'}
+              </b>
+            </small>
+          ))}
+        </div>
         {d.chaves.length > 0 && (
           <div className="linhas">
             {d.chaves.map((k) => (
@@ -279,7 +306,7 @@ export function Configuracoes() {
                     <KeyRound size={14} style={{ verticalAlign: -2 }} /> {k.nome} · ••••{k.ultimos4}
                   </b>
                   <span className="s">
-                    {k.ativa ? 'EM USO' : 'desligada'} · testada {dataHora(k.testada_em)}
+                    {NOME_PROVEDOR[k.provedor ?? 'openai']} · {k.ativa ? 'EM USO' : 'desligada'} · testada {dataHora(k.testada_em)}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -305,10 +332,17 @@ export function Configuracoes() {
           style={CAIXA}
           onSubmit={(e: FormEvent) => {
             e.preventDefault()
-            void fazer('nova', '/admin/ia/chave', { nome: nomeChave.trim(), chave: valorChave.trim() }, `Chave ${nomeChave.trim()} testada e guardada, desligada. Ligue quando quiser usar.`, () => { setNomeChave(''); setValorChave('') })
+            void fazer('nova', '/admin/ia/chave', { provedor: provedorChave, nome: nomeChave.trim(), chave: valorChave.trim() }, `Chave ${nomeChave.trim()} testada e guardada, desligada. Ligue quando quiser usar.`, () => { setNomeChave(''); setValorChave('') })
           }}
         >
           <b>Cadastrar uma chave nova</b>
+          <label className="campo">
+            <span>Provedor</span>
+            <select className="entrada" value={provedorChave} onChange={(e) => setProvedorChave(e.target.value as Provedor)} aria-label="Provedor da chave">
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic (Claude)</option>
+            </select>
+          </label>
           <label className="campo">
             <span>Nome (só para você reconhecer)</span>
             <input className="entrada" value={nomeChave} onChange={(e) => setNomeChave(e.target.value)} maxLength={60} placeholder="Ex.: OpenAI da agência" aria-label="Nome da chave" />

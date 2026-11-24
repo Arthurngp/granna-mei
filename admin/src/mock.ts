@@ -445,7 +445,7 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
 /* ---- Configurações de IA (mock em memória: a tela pode ser exercitada inteira sem servidor) ---- */
 const iaMock = {
   global: {} as Record<string, string>,
-  chaves: [{ id: 'k-1', nome: 'OpenAI da agência', ultimos4: 'a1b2', ativa: false, testada_em: new Date(Date.now() - 86_400_000).toISOString() }] as { id: string; nome: string; ultimos4: string; ativa: boolean; testada_em: string | null }[],
+  chaves: [{ id: 'k-1', provedor: 'openai', nome: 'OpenAI da agência', ultimos4: 'a1b2', ativa: false, testada_em: new Date(Date.now() - 86_400_000).toISOString() }] as { id: string; provedor: 'openai' | 'anthropic'; nome: string; ultimos4: string; ativa: boolean; testada_em: string | null }[],
   clientes: [{ user_id: 'c1', nome: 'Marina Costa', negocio: 'Studio Marina', tarefa: 'documento', modelo: 'gpt-5.4' }] as { user_id: string; nome: string; negocio: string; tarefa: string; modelo: string }[],
 }
 const TAREFAS_MOCK = [
@@ -460,14 +460,21 @@ export async function mockApi(caminho: string, init: RequestInit): Promise<unkno
   const c = init.body ? (JSON.parse(String(init.body)) as Record<string, string | boolean | null>) : {}
   const erro = (m: string) => Promise.reject(new Error(m))
   if (caminho === '/admin/ia') {
-    const ativa = iaMock.chaves.find((k) => k.ativa)
+    const emUso = (p: 'openai' | 'anthropic') => {
+      const a = iaMock.chaves.find((k) => k.ativa && k.provedor === p)
+      return a ? { origem: 'banco', nome: a.nome } : { origem: p === 'openai' ? 'ambiente' : 'nenhuma', nome: null }
+    }
+    const ativa = iaMock.chaves.find((k) => k.ativa && k.provedor === 'openai')
     return {
+      em_uso: { openai: emUso('openai'), anthropic: emUso('anthropic') },
       pronto: true, segredo: true, fabrica: { interpretacao: 'gpt-5.4-mini', documento: 'gpt-5.4-mini', ajuda: 'gpt-5.4-mini', resposta: 'gpt-5.4-mini', audio: 'gpt-4o-mini-transcribe' },
       tarefas: TAREFAS_MOCK.map((t) => ({ ...t, global: iaMock.global[t.id] ?? null })), chaves: iaMock.chaves, clientes: iaMock.clientes,
       chave_em_uso: ativa ? 'banco' : 'ambiente', chave_em_uso_nome: ativa?.nome ?? null,
     }
   }
   // Como o servidor: o modelo/chave "nao-existe" é recusado no teste e nada é salvo.
+  if (String(c.modelo ?? '').toLowerCase().startsWith('claude') && c.tarefa === 'audio') return erro('Transcrição de áudio só funciona com modelos da OpenAI: a Anthropic não transcreve áudio. Nada foi alterado.')
+  if (String(c.modelo ?? '').toLowerCase().startsWith('claude') && !iaMock.chaves.some((k) => k.ativa && k.provedor === 'anthropic')) return erro('O modelo "' + c.modelo + '" não respondeu (Nenhuma chave da Anthropic cadastrada. Cadastre uma em "Chave de API" antes de escolher um modelo Claude.). Nada foi alterado.')
   if (String(c.modelo ?? '').includes('nao-existe')) return erro('Este modelo não respondeu ao teste (OpenAI 404: model_not_found). Nada foi alterado.')
   if (caminho === '/admin/ia/modelo') {
     if (c.modelo) iaMock.global[String(c.tarefa)] = String(c.modelo)
@@ -481,11 +488,12 @@ export async function mockApi(caminho: string, init: RequestInit): Promise<unkno
   }
   if (caminho === '/admin/ia/chave') {
     if (String(c.chave).includes('ruim')) return erro('Esta chave não funcionou (OpenAI 401). Nada foi guardado.')
-    iaMock.chaves.push({ id: 'k-' + (iaMock.chaves.length + 1), nome: String(c.nome), ultimos4: String(c.chave).slice(-4), ativa: false, testada_em: new Date().toISOString() })
+    iaMock.chaves.push({ id: 'k-' + (iaMock.chaves.length + 1), provedor: (c.provedor as 'openai' | 'anthropic') ?? 'openai', nome: String(c.nome), ultimos4: String(c.chave).slice(-4), ativa: false, testada_em: new Date().toISOString() })
     return { ok: true }
   }
   if (caminho === '/admin/ia/chave/ativar') {
-    iaMock.chaves.forEach((k) => (k.ativa = c.ativa ? k.id === c.id : k.ativa && k.id !== c.id))
+    const alvo = iaMock.chaves.find((k) => k.id === c.id)
+    iaMock.chaves.forEach((k) => (k.ativa = k.provedor !== alvo?.provedor ? k.ativa : c.ativa ? k.id === c.id : k.ativa && k.id !== c.id))
     return { ok: true }
   }
   if (caminho === '/admin/ia/chave/remover') {
