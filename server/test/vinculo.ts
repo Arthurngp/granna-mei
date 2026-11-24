@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict'
 import { caso, fim } from './_falsos.ts'
 
-const { vincular, soltar, candidatosParaConta, candidatasParaLancamento, contaDoLancamento } = await import('../../src/lib/vinculo.ts')
+const { vincular, soltar, religar, candidatosParaConta, candidatasParaLancamento, contaDoLancamento } = await import('../../src/lib/vinculo.ts')
 
 type C = { id: string; tipo: 'pagar' | 'receber'; descricao: string; valor: number; vencimento: string; status: 'aberta' | 'paga'; fixaId?: string; pagoEm?: string; lancId?: string }
 type L = { id: string; tipo: 'entrada' | 'saida' | 'transferencia' | 'compra_cartao'; valor: number; descricao: string; carteiraId: string; data: string; hora: string; origem: string }
@@ -76,16 +76,52 @@ await caso('candidatos: para a conta de 120 aparece o pagamento de Internet de 1
   let a = estado()
   a = soltar(a, 'dez', false)
   const nov = a.contas.find((x) => x.id === 'nov')!
-  const ids = candidatosParaConta(a, nov, HOJE).map((x) => x.id)
+  const ids = candidatosParaConta(a, nov, HOJE).map((x) => x.l.id)
   assert.equal(ids[0], 'pg109', 'o mais provável vem primeiro')
   assert.ok(!ids.includes('venda') && !ids.includes('transf'), 'entrada e transferência não são candidatas a conta a pagar')
 })
 
-await caso('candidatos: quem já paga outra conta não é oferecido; conta paga não tem candidatos', async () => {
+await caso('candidatos: o pagamento que já paga OUTRA conta aparece (é o caso do Arthur), marcado com a conta que ele paga, e em primeiro por ser o mais provável', async () => {
   const a = estado()
   const nov = a.contas.find((x) => x.id === 'nov')!
-  assert.ok(!candidatosParaConta(a, nov, HOJE).some((x) => x.id === 'pg109'), 'pg109 já paga a de dezembro')
-  assert.deepEqual(candidatosParaConta(a, a.contas.find((x) => x.id === 'dez')!, HOJE), [])
+  const op = candidatosParaConta(a, nov, HOJE)
+  assert.equal(op[0].l.id, 'pg109', 'mesmo nome e valor perto: vem primeiro, mesmo ocupado')
+  assert.equal(op[0].ocupada?.id, 'dez', 'vem marcado: já paga a conta de dezembro')
+  assert.equal(op.find((x) => x.l.id === 'mercado')?.ocupada, undefined, 'lançamento livre não tem marca')
+  assert.deepEqual(candidatosParaConta(a, a.contas.find((x) => x.id === 'dez')!, HOJE), [], 'conta paga não tem candidatos')
+})
+
+await caso('busca: acha por nome ou por valor em TODOS os lançamentos do tipo certo, sem o limite de 60 dias, e ignora acento e caixa', async () => {
+  const a = estado()
+  a.lancamentos.push(l('antigo', 'Mensalidade Açaí', 77.5, '2026-03-02') as never)
+  const luz = a.contas.find((x) => x.id === 'luz')!
+  assert.deepEqual(candidatosParaConta(a, luz, HOJE, 'acai').map((x) => x.l.id), ['antigo'], 'achou o de março pelo nome sem acento')
+  assert.deepEqual(candidatosParaConta(a, luz, HOJE, 'MERCADO').map((x) => x.l.id), ['mercado'])
+  assert.deepEqual(candidatosParaConta(a, luz, HOJE, '109').map((x) => x.l.id), ['pg109'], 'achou pelo valor')
+  assert.deepEqual(candidatosParaConta(a, luz, HOJE, '77,5').map((x) => x.l.id), ['antigo'], 'valor com vírgula')
+  assert.deepEqual(candidatosParaConta(a, luz, HOJE, 'nada disso existe'), [])
+  assert.ok(!candidatosParaConta(a, luz, HOJE, 'venda').some((x) => x.l.id === 'venda'), 'entrada não aparece para conta a pagar')
+})
+
+await caso('religar: passa o pagamento de uma conta para a outra; a de antes volta a ficar em aberto e o lançamento FICA (o caso do Arthur em um passo)', async () => {
+  const a = estado()
+  const r = religar(a, 'nov', 'pg109')
+  const nov = r.contas.find((x) => x.id === 'nov')!
+  const dez = r.contas.find((x) => x.id === 'dez')!
+  assert.deepEqual([nov.status, nov.lancId, nov.valor], ['paga', 'pg109', 109])
+  assert.deepEqual([dez.status, dez.lancId], ['aberta', undefined], 'a de dezembro foi liberada')
+  assert.equal(r.lancamentos.length, a.lancamentos.length, 'nenhum lançamento criado nem apagado')
+  assert.equal(contaDoLancamento(r, 'pg109')!.id, 'nov', 'o pagamento paga UMA conta só')
+})
+
+await caso('religar: sem ligação anterior é o mesmo que vincular; o que não fecha devolve o MESMO estado sem desligar nada pela metade', async () => {
+  const a = estado()
+  assert.equal(religar(a, 'luz', 'mercado').contas.find((x) => x.id === 'luz')!.status, 'paga')
+  assert.equal(religar(a, 'joana', 'pg109'), a, 'saída não paga conta a receber: nada muda, a de dezembro continua paga')
+  assert.equal(religar(a, 'dez', 'mercado'), a, 'conta já paga não recebe outro pagamento')
+  assert.equal(religar(a, 'nov', 'transf'), a, 'transferência nunca')
+  assert.equal(religar(a, 'nov', 'nao-existe'), a)
+  assert.equal(contaDoLancamento(a, 'pg109')!.id, 'dez')
 })
 
 await caso('candidatas para o lançamento: oferece as contas em aberto de mesma direção, a de nome parecido primeiro, e nada se já está ligado', async () => {
@@ -102,7 +138,7 @@ await caso('conta muito antiga ou pagamento no futuro não entra nos candidatos 
   const a = estado()
   a.lancamentos.push(l('velho', 'Energia', 150, '2026-05-01') as never, l('futuro', 'Energia', 150, '2026-12-30') as never)
   const luz = a.contas.find((x) => x.id === 'luz')!
-  const ids = candidatosParaConta(a, luz, HOJE).map((x) => x.id)
+  const ids = candidatosParaConta(a, luz, HOJE).map((x) => x.l.id)
   assert.ok(!ids.includes('velho') && !ids.includes('futuro'))
 })
 

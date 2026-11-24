@@ -21,6 +21,7 @@ export default function Contas() {
   const [abertaId, setAbertaId] = useState<string | null>(null)
   /** Conta para a qual a pessoa está escolhendo "qual lançamento pagou isto". */
   const [vinculandoId, setVinculandoId] = useState<string | null>(null)
+  const [buscaVinculo, setBuscaVinculo] = useState('')
   const [carteira, setCarteira] = useState('')
   const h = hoje()
 
@@ -261,7 +262,7 @@ export default function Contas() {
                   >
                     {aberta.tipo === 'pagar' ? 'Marcar como paga' : 'Marcar como recebida'}
                   </button>
-                  <button type="button" className="btn btn-sec btn-bloco" onClick={() => setVinculandoId(aberta.id)}>
+                  <button type="button" className="btn btn-sec btn-bloco" onClick={() => { setBuscaVinculo(''); setVinculandoId(aberta.id) }}>
                     {aberta.tipo === 'pagar' ? 'Já paguei: ligar a um lançamento' : 'Já recebi: ligar a um lançamento'}
                   </button>
                 </>
@@ -377,20 +378,31 @@ export default function Contas() {
           </>
         )}
       </Folha>
-      <Folha aberta={!!vinculandoId} onFechar={() => setVinculandoId(null)} titulo="Qual lançamento pagou esta conta?">
+      <Folha aberta={!!vinculandoId} onFechar={() => { setVinculandoId(null); setBuscaVinculo('') }} titulo="Qual lançamento pagou esta conta?">
         {(() => {
           const alvo = s.contas.find((c) => c.id === vinculandoId)
           if (!alvo) return null
-          const candidatos = candidatosParaConta(s, alvo, hoje())
+          const opcoes = candidatosParaConta(s, alvo, hoje(), buscaVinculo)
+          const diaMes = (d: string) => d.split('-').reverse().slice(0, 2).join('/')
           return (
             <div className="pilha">
               <p className="suave">
                 {alvo.descricao}, {brl(alvo.valor)}, vence {diaCurto(alvo.vencimento)}. Escolha o lançamento que foi este pagamento: a conta fica {alvo.tipo === 'pagar' ? 'paga' : 'recebida'} com o valor e a data dele, e nada é lançado de novo.
               </p>
-              {candidatos.length === 0 ? (
-                <p className="suave">Não achei nenhum lançamento parecido nos últimos dois meses. Lance o pagamento pelo WhatsApp e volte aqui, ou use Marcar como {alvo.tipo === 'pagar' ? 'paga' : 'recebida'}.</p>
+              <input
+                className="entrada"
+                type="search"
+                aria-label="Buscar lançamento por nome ou valor"
+                placeholder="Buscar por nome ou valor"
+                value={buscaVinculo}
+                onChange={(e) => setBuscaVinculo(e.target.value)}
+              />
+              {opcoes.length === 0 ? (
+                <p className="suave">
+                  {buscaVinculo.trim() ? 'Nenhum lançamento com esse nome ou valor.' : 'Não achei nenhum lançamento parecido nos últimos dois meses. Use a busca acima, lance o pagamento pelo WhatsApp, ou marque como ' + (alvo.tipo === 'pagar' ? 'paga.' : 'recebida.')}
+                </p>
               ) : (
-                candidatos.map((l) => (
+                opcoes.map(({ l, ocupada }) => (
                   <button
                     key={l.id}
                     type="button"
@@ -398,15 +410,24 @@ export default function Contas() {
                     style={{ textAlign: 'left', width: '100%' }}
                     onClick={() => {
                       vincularPagamento(alvo.id, l.id)
-                      avisar(`${alvo.descricao}: ligada ao pagamento de ${brl(l.valor)}`, { rotulo: 'Desfazer', fn: () => soltarPagamento(alvo.id, false) })
+                      avisar(
+                        ocupada ? `${alvo.descricao}: este pagamento passou para esta conta. ${ocupada.descricao} de ${diaMes(ocupada.vencimento)} voltou para em aberto.` : `${alvo.descricao}: ligada ao pagamento de ${brl(l.valor)}`,
+                        { rotulo: 'Desfazer', fn: () => { soltarPagamento(alvo.id, false); if (ocupada) vincularPagamento(ocupada.id, l.id) } },
+                      )
                       setVinculandoId(null)
+                      setBuscaVinculo('')
                       setAbertaId(null)
                     }}
                   >
                     <b>{l.descricao}</b>
                     <div className="suave">
-                      {l.data.split('-').reverse().slice(0, 2).join('/')} · {s.carteiras.find((c) => c.id === l.carteiraId)?.nome ?? 'conta'} · <b className="num">{brl(l.valor)}</b>
+                      {diaMes(l.data)} · {s.carteiras.find((c) => c.id === l.carteiraId)?.nome ?? 'conta'} · <b className="num">{brl(l.valor)}</b>
                     </div>
+                    {ocupada && (
+                      <div className="suave" style={{ marginTop: 4, color: 'var(--indigo-2)' }}>
+                        Já paga a conta {ocupada.descricao} de {diaMes(ocupada.vencimento)}. Toque para passar para esta.
+                      </div>
+                    )}
                   </button>
                 ))
               )}
