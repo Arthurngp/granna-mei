@@ -1,4 +1,4 @@
-# Provas do Granna Mei
+# Provas da Granninha
 
 Scripts que rodam contra o banco de produção com usuários de teste (`teste-*@grannamei.test`), apagados no fim.
 Leem as chaves do Coolify em memória (token em `~/.zshrc`: `COOLIFY_URL`, `COOLIFY_API_TOKEN`); nada é gravado em arquivo.

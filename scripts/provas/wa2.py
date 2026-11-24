@@ -1,4 +1,4 @@
-"""Configura o gateway WA-AKG do Granna Mei depois do primeiro deploy:
+"""Configura o gateway WA-AKG da Granninha depois do primeiro deploy:
 fecha o cadastro, cria o usuário comum, gera a chave DELE (nunca a do admin), cria a sessão da Granninha
 com o robô desligado e o webhook assinado apontando para o serviço. Segredos só no arquivo 600 e no Coolify."""
 import os, json, sys, urllib.request, base64
@@ -35,7 +35,7 @@ with sync_playwright() as p:
     b = p.chromium.launch()
     ctx = b.new_context(http_credentials=BASIC)
     pg = entrar(ctx, cred['ADMIN_EMAIL'], cred['ADMIN_PASSWORD'])
-    r = chamar(pg, 'POST', '/api/settings/system', {'appName': 'Granna Mei WhatsApp', 'timezone': 'America/Sao_Paulo', 'enableRegistration': False})
+    r = chamar(pg, 'POST', '/api/settings/system', {'appName': 'Granninha WhatsApp', 'timezone': 'America/Sao_Paulo', 'enableRegistration': False})
     print('cadastro fechado:', r['s'])
     r = chamar(pg, 'POST', '/api/users', {'name': 'App Granninha', 'email': cred['WA_APP_USER_EMAIL'], 'password': cred['WA_APP_USER_PASSWORD'], 'role': 'USER'})
     print('usuário comum:', r['s'], (r['j'] or {}).get('message'))

@@ -1,6 +1,6 @@
-# Granna Mei
+# Granninha
 
-Painel do Granna Mei: o controle do dinheiro do MEI pelo WhatsApp, com a assistente Granninha.
+Painel da Granninha: o controle do dinheiro do MEI pelo WhatsApp, com a assistente Granninha.
 O lançamento acontece na conversa; o painel serve para ver, conferir e exportar.
 
 ## Rodar

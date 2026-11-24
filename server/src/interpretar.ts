@@ -168,13 +168,13 @@ function sistema(c: Contexto) {
 Hoje é ${DIAS[d.getDay()]}, ${c.hoje}.${c.ramo ? ` O negócio é do ramo: ${c.ramo}.` : ''} Responda só no formato pedido.
 
 INTENÇÃO
-- "acoes": a mensagem registra dinheiro (uma ou mais ações), ou pede para criar uma categoria.
+- "acoes": a mensagem registra dinheiro (uma ou mais ações), pede para criar uma categoria, ou MUDA algo que já está anotado: o valor ou o dia de uma conta fixa ("a internet agora é 109", "o aluguel agora vence dia 5"), o valor ou a data de uma conta em aberto ("a luz desse mês vence dia 28") ou encerra uma conta fixa ("cancelei a internet"). Frase que diz que o valor ou o dia de uma conta da lista MUDOU é sempre "acoes" (ajustar_fixa, ajustar_conta ou encerrar_fixa), nunca "ajuda" nem "outro".
 - "pergunta": quer saber algo dos próprios números ou do MEI dele ("quanto gastei", "o que vence", "quanto sobrou", "quanto falta pro limite do MEI", "quando vence o DAS", "quanto está a fatura"). Reescreva a pergunta clara em "pergunta".
 - "desfazer": quer anular o último registro ("desfazer", "apaga o último", "cancela isso", "errei, apaga").
 - "corrigir": quer mudar o último registro ("não foi 50, foi 60", "era dinheiro, não pix", "esse recebimento foi de prestação de serviço", "na verdade foi no Nubank", "era da casa, não do negócio", "muda a categoria para Material"). Descreva a correção em "correcao".
   Frase que fala de "esse", "essa", "isso", "o último" ou "o de agora" e só diz o que ele É (categoria, conta, meio, se é da casa) é "corrigir", NUNCA um registro novo: quem registra algo novo conta um fato novo ("recebi 290 do João").
 - "saudacao": só cumprimento ou agradecimento.
-- "ajuda": pede ajuda ou pergunta sobre a própria Granninha: o que ela faz, quem é, se é robô, como usar, se ela faz tal coisa ("como eu lanço uma conta?", "dá pra mandar áudio?", "você controla o cartão?"), ou diz que não entendeu como funciona. Pedido de ajuda para REGISTRAR algo COM valor ("me ajuda a lançar uma venda de 500", "anota pra mim 80 de luz") é "acoes", nunca "ajuda". Dúvida sobre a CONTA ou a assinatura da própria Granninha (preço, plano, cancelar, excluir a conta) também é "ajuda". Pergunta sobre os NÚMEROS do cliente ("quanto sobrou", "o que vence") é "pergunta", nunca "ajuda".
+- "ajuda": pede ajuda ou pergunta sobre a própria Granninha: o que ela faz, quem é, se é robô, como usar, se ela faz tal coisa ("como eu lanço uma conta?", "dá pra mandar áudio?", "você controla o cartão?"), ou diz que não entendeu como funciona. Pedido de ajuda para REGISTRAR algo COM valor ("me ajuda a lançar uma venda de 500", "anota pra mim 80 de luz") é "acoes", nunca "ajuda". Dúvida sobre a CONTA ou a assinatura da própria Granninha (preço, plano, cancelar, excluir a conta) também é "ajuda". Pergunta sobre os NÚMEROS do cliente ("quanto sobrou", "o que vence") é "pergunta", nunca "ajuda". Frase que AFIRMA um valor ou dia novo de uma conta da lista ("a internet agora é 109") não é pergunta sobre a Granninha: é "acoes".
 - "outro": nada a ver com dinheiro nem com a Granninha.
 
 TIPOS DE AÇÃO
