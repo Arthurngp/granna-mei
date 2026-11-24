@@ -114,6 +114,34 @@ await caso('o cache de 60 s é limpo quando o admin muda: a próxima mensagem j�
   assert.equal(interp().at(-1)!.modelo, 'modelo-novo')
 })
 
+/* ---------- modelos mais baratos da OpenAI (gpt-4o-mini, gpt-4.1...): não aceitam reasoning_effort ---------- */
+
+await caso('modelo gpt-4o-mini: o pedido NÃO leva reasoning_effort (a OpenAI recusaria) e a mensagem é atendida pelo próprio gpt-4o-mini, sem cair no padrão', async () => {
+  novo()
+  global('interpretacao', 'gpt-4o-mini')
+  const r = await msg('gastei 6 no pix')
+  assert.match(r, /saiu R\$ 6,00/)
+  assert.deepEqual(ia.chamadasFeitas.map((c) => c.modelo), ['gpt-4o-mini'], 'uma chamada só, no modelo escolhido (sem recusa e sem queda)')
+  assert.ok(!('reasoning_effort' in ia.ultimoCorpoOpenAI!), 'sem reasoning_effort')
+  assert.equal(ia.ultimoCorpoOpenAI!.response_format.type, 'json_schema', 'a saída estruturada continua exigida')
+})
+
+await caso('modelo gpt-5.x continua levando reasoning_effort baixo (o comportamento de sempre não muda)', async () => {
+  novo()
+  await msg('gastei 6 no pix')
+  assert.equal(ia.ultimoCorpoOpenAI!.reasoning_effort, 'low')
+  novo()
+  global('interpretacao', 'gpt-5.5')
+  await msg('gastei 6 no pix')
+  assert.equal(ia.ultimoCorpoOpenAI!.reasoning_effort, 'low')
+})
+
+await caso('regras de modelo: aceitaRaciocinio só para gpt-5.x e série o', async () => {
+  const { aceitaRaciocinio } = cfg
+  for (const m of ['gpt-5.4-mini', 'gpt-5.5', 'gpt-5', 'o3', 'o4-mini']) assert.equal(aceitaRaciocinio(m), true, m)
+  for (const m of ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'gpt-3.5-turbo', 'claude-sonnet-5-5']) assert.equal(aceitaRaciocinio(m), false, m)
+})
+
 /* ---------- fallback ---------- */
 
 await caso('modelo configurado que a OpenAI RECUSA (nome errado, sem acesso): repete na hora com o de fábrica e a mensagem é atendida', async () => {
@@ -382,6 +410,16 @@ await caso('integração com a IA falsa (teste de verdade): modelo que a IA recu
   await adm.adicionarChave(real, ADMIN, { nome: 'Boa', chave: CHAVE_BANCO })
   assert.equal(ia.chamadasFeitas.at(-1)!.chave, CHAVE_BANCO, 'a chave foi testada de verdade')
   assert.equal(E.tabelas.ia_chaves.length, 1)
+})
+
+await caso('o teste do admin (chamada mínima) também respeita isso: gpt-4o-mini e gpt-4.1-nano passam no "testar antes de salvar"; gpt-5.5 continua passando', async () => {
+  novo()
+  const real = adm.depsReais(sbReal, async () => {})
+  for (const m of ['gpt-4o-mini', 'gpt-4.1-nano', 'gpt-4.1', 'gpt-4o', 'gpt-5.5']) {
+    const r = await adm.salvarModelo(real, ADMIN, { tarefa: 'ajuda', modelo: m })
+    assert.equal(r.vale, m, m)
+  }
+  assert.equal(E.tabelas.config_ia_modelo.find((x) => x.tarefa === 'ajuda')!.modelo, 'gpt-5.5')
 })
 
 /* ---------- segredo de cifra: IA_SEGREDO ou derivado da chave de serviço (sem etapa extra para o dono) ---------- */

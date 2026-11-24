@@ -1,6 +1,6 @@
 import { env } from './env.ts'
 import { jsonAnthropic } from './anthropic.ts'
-import { chaveDaIA, fabricaDe, MODELO_AUDIO_FABRICA, MODELO_FABRICA, modeloDe, provedorDoModelo, tarefaDeEsquema } from './ia-config.ts'
+import { aceitaRaciocinio, chaveDaIA, fabricaDe, MODELO_AUDIO_FABRICA, MODELO_FABRICA, modeloDe, provedorDoModelo, tarefaDeEsquema } from './ia-config.ts'
 import { classificarFalhaIA, ErroIA, registrarFalhaIA, registrarOkIA, valeTentarDeNovoIA, type TipoFalhaIA } from './ia-estado.ts'
 
 /** Modelos de FÁBRICA (o que vale sem nada configurado na aba Configurações do admin). O modelo de cada mensagem é resolvido em ia-config.ts. */
@@ -64,7 +64,7 @@ export async function chamadaMinimaIA(modelo: string = MODELO, chaveInformada?: 
     const r = await fetch(BASE + '/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${chave}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: modelo, reasoning_effort: 'low', max_completion_tokens: 32, messages: [{ role: 'user', content: 'ok' }] }),
+      body: JSON.stringify({ model: modelo, ...(aceitaRaciocinio(modelo) ? { reasoning_effort: 'low' } : {}), max_completion_tokens: 32, messages: [{ role: 'user', content: 'ok' }] }),
       signal: AbortSignal.timeout(20_000),
     })
     if (r.ok) {
@@ -107,7 +107,7 @@ export async function jsonEstruturado<T>(sistema: string, usuario: string | { ty
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: modelo,
-        reasoning_effort: 'low',
+        ...(aceitaRaciocinio(modelo) ? { reasoning_effort: 'low' } : {}),
         messages: [
           { role: 'system', content: sistema },
           { role: 'user', content: usuario },

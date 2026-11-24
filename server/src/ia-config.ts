@@ -29,6 +29,11 @@ export const MODELO_FABRICA = process.env.OPENAI_MODELO ?? 'gpt-5.4-mini'
 export const MODELO_AUDIO_FABRICA = process.env.OPENAI_MODELO_AUDIO ?? 'gpt-4o-mini-transcribe'
 export type Provedor = 'openai' | 'anthropic'
 export const PROVEDORES: Provedor[] = ['openai', 'anthropic']
+/**
+ * Só os modelos de raciocínio (gpt-5.x e a série o) aceitam `reasoning_effort`. Os da família gpt-4o e gpt-4.1 respondem 400 "Unsupported parameter" se ele for enviado,
+ * então o pedido só leva esse campo quando o modelo o aceita (é o que permite escolher os modelos mais baratos na aba Configurações).
+ */
+export const aceitaRaciocinio = (modelo: string) => /^(gpt-5|o\d)/i.test(modelo)
 export const provedorDoModelo = (modelo: string): Provedor => (/^claude/i.test(modelo) ? 'anthropic' : 'openai')
 /** Modelo barato da Anthropic usado só para TESTAR uma chave nova (a chamada mínima de teste). */
 export const MODELO_TESTE_ANTHROPIC = process.env.ANTHROPIC_MODELO_TESTE ?? 'claude-haiku-5-5'
