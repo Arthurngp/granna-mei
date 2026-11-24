@@ -75,6 +75,7 @@ MIGRATIONS = {
     "retencaosequencia": "20261122150000_retencao_sequencia.sql",
     "fixasdia": "20261123020000_fixas_dia_ate_31.sql",
     "admindados": "20261124120000_admin_dados_reais.sql",
+    "adminuso": "20261124130000_admin_uso_real.sql",
     "recursos": "20261123030000_recursos_cliente.sql",
     "enviomanual": "20261123120000_envio_manual.sql",
     "custofoto": "20261123140000_custo_foto_documento.sql",
@@ -219,6 +220,18 @@ CONFERE = {
           where n.nspname='public' and p.proname in ('admin_clientes','admin_painel','admin_receita')) as sem_dia_utc,
         (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('admin_clientes','admin_painel','admin_receita','admin_origens')) as funcoes_admin_dados,
         has_function_privilege('anon', 'public.admin_painel()', 'execute') as anon_executa_painel""",
+    # Admin com "usou" de verdade: refaz admin_ativacao, admin_acoes, admin_retencao e admin_publico (só leitura) e cria 2 funções de apoio FECHADAS ao cliente.
+    # Depende da `admindados` (rodar antes). ANTES e DEPOIS mostram o que muda: "mensagens_que_nao_sao_uso" são mensagens de cliente que hoje contam como uso
+    # (SAIR, recusa por acesso ou limite, ruído, erro) e passam a não contar; "funcoes_de_apoio" vira 2; "cliente_executa_apoio" tem de ficar false.
+    "adminuso": """select
+        (select count(*) from public.mensagens m where m.user_id is not null and m.status not in ('ok','pergunta')) as mensagens_de_cliente_recusadas_ou_ruido,
+        (select count(*) from public.mensagens m where m.user_id is not null and m.status = 'pergunta'
+           and btrim(regexp_replace(coalesce(m.texto,''), '[.!?,;:]+', '', 'g')) ilike 'sair') as pedidos_de_sair,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('mensagens_de_uso','mensagem_conta_como_uso')) as funcoes_de_apoio,
+        coalesce((select has_function_privilege('authenticated', p.oid, 'execute') from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname='mensagens_de_uso' limit 1), false) as cliente_executa_apoio,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_ativacao'
+          and pg_get_functiondef(p.oid) like '%terminaram_sem_uso%') as ativacao_ja_nova""",
     "fixasdia": """select
         (select string_agg(pg_get_constraintdef(c.oid), ' | ') from pg_constraint c where c.conrelid = 'public.fixas'::regclass and c.contype = 'c'
           and c.conkey = array[(select attnum from pg_attribute where attrelid = 'public.fixas'::regclass and attname = 'dia')]) as regra_do_dia,

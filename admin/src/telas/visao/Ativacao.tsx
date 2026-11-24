@@ -10,6 +10,8 @@ interface Coorte {
   cadastros: number
   confirmaram: number
   com_mensagem: number
+  /** Terminaram as boas-vindas (passo 7) e nunca usaram. Vem contado do banco; ausente se a migration admin_uso_real ainda não rodou. */
+  terminaram_sem_uso?: number
   passos: Record<string, number>
 }
 interface Ativ {
@@ -112,7 +114,7 @@ export function Ativacao() {
               </p>
             </div>
             <div className="fato"><span>Confirmaram o WhatsApp</span><b>{n(dados.confirmaram)}<small>{pct(dados.confirmaram, total)}</small></b></div>
-            <div className="fato"><span>Terminaram e nunca usaram</span><b>{n(Math.max(0, terminaram - dados.com_mensagem))}</b></div>
+            <div className="fato"><span>Terminaram e nunca usaram</span><b>{dados.terminaram_sem_uso === undefined ? '–' : n(dados.terminaram_sem_uso)}</b></div>
             <div className="fato"><span>Tempo até o 1º uso</span><b>{tempo(dados.mediana_horas_ate_primeira)}</b></div>
           </>
         ) : (
