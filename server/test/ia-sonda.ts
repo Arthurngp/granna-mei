@@ -103,6 +103,15 @@ for (const [status, corpo, tipo] of [
   })
 }
 
+await caso('chamada mínima: 400 "limite de saída atingido" (o modelo gastou tudo pensando) é IA de pé, não falha da sonda (visto em produção em 24/11)', async () => {
+  resposta = { status: 400, corpo: { error: { message: 'Could not finish the message because max_tokens or model output limit was reached. Please try again with higher max_tokens.', type: 'invalid_request_error' } } }
+  const r = await chamadaMinimaIA()
+  assert.equal(r.ok, true)
+  // Mas um 400 de outro tipo continua sendo defeito nosso e aparece no /saude (caso acima, 'Unsupported parameter').
+  resposta = { status: 400, corpo: { error: { message: 'Unsupported parameter: max_completion_tokens' } } }
+  assert.equal((await chamadaMinimaIA()).ok, false)
+})
+
 await caso('chamada mínima: sem a chave da OpenAI vira sem_chave, sem chamar a rede; servidor fora vira fora', async () => {
   const guardada = process.env.OPENAI_API_KEY
   delete process.env.OPENAI_API_KEY
