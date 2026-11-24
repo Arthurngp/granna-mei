@@ -144,7 +144,7 @@ export async function salvarModeloCliente(d: Deps, admin: string, corpo: { user_
 export async function adicionarChave(d: Deps, admin: string, corpo: { nome?: unknown; chave?: unknown; provedor?: unknown }) {
   const provedor = (corpo.provedor ?? 'openai') as Provedor
   if (!PROVEDORES.includes(provedor)) throw new ErroConfig(400, 'Provedor desconhecido. Use OpenAI ou Anthropic.')
-  if (!segredoConfigurado()) throw new ErroConfig(400, 'O servidor ainda não tem o segredo para cifrar chaves (variável IA_SEGREDO na Coolify). Sem ele a chave não pode ser guardada com segurança.')
+  if (!segredoConfigurado()) throw new ErroConfig(400, 'O servidor não tem como cifrar a chave (defina IA_SEGREDO com 16+ caracteres na Coolify). Sem isso a chave não pode ser guardada com segurança.')
   const nome = typeof corpo.nome === 'string' ? corpo.nome.trim() : ''
   if (nome.length < 1 || nome.length > 60) throw new ErroConfig(400, 'Dê um nome à chave (até 60 letras).')
   const chave = typeof corpo.chave === 'string' ? corpo.chave.trim() : ''

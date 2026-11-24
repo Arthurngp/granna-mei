@@ -384,6 +384,77 @@ await caso('integração com a IA falsa (teste de verdade): modelo que a IA recu
   assert.equal(E.tabelas.ia_chaves.length, 1)
 })
 
+/* ---------- segredo de cifra: IA_SEGREDO ou derivado da chave de serviço (sem etapa extra para o dono) ---------- */
+
+const CHAVE_SERVICO = 'chave-de-servico-do-supabase-de-teste-0123456789'
+const comEnv = async (env: Record<string, string | undefined>, fn: () => Promise<void> | void) => {
+  const antes = { IA_SEGREDO: process.env.IA_SEGREDO, SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY }
+  for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[k] : (process.env[k] = v)
+  try {
+    await fn()
+  } finally {
+    for (const [k, v] of Object.entries(antes)) v === undefined ? delete process.env[k] : (process.env[k] = v)
+  }
+}
+
+await caso('sem IA_SEGREDO, o segredo vem da chave de serviço do servidor: cadastrar chave pela tela funciona sem nenhuma etapa extra', async () => {
+  novo()
+  await comEnv({ IA_SEGREDO: undefined, SUPABASE_SERVICE_ROLE_KEY: CHAVE_SERVICO }, async () => {
+    assert.equal(cfg.segredoConfigurado(), true)
+    const r = await adm.adicionarChave(deps(), ADMIN, { nome: 'Sem segredo manual', chave: CHAVE_BANCO })
+    assert.ok(r.id)
+    const linha = E.tabelas.ia_chaves[0]
+    assert.ok(!String(linha.chave_cifrada).includes(CHAVE_BANCO))
+    assert.equal(decifrar(String(linha.chave_cifrada)), CHAVE_BANCO)
+    assert.equal((await adm.listar(deps())).segredo, true, 'a tela não mostra o aviso de segredo ausente')
+  })
+})
+
+await caso('sem IA_SEGREDO e sem chave de serviço utilizável: continua recusando (nunca cifra com segredo fraco)', async () => {
+  novo()
+  await comEnv({ IA_SEGREDO: undefined, SUPABASE_SERVICE_ROLE_KEY: 'curta' }, async () => {
+    assert.equal(cfg.segredoConfigurado(), false)
+    assert.throws(() => cifrar('x'), /IA_SEGREDO/)
+    await assert.rejects(adm.adicionarChave(deps(), ADMIN, { nome: 'x', chave: CHAVE_BANCO }), (e: Error & { status?: number }) => e.status === 400 && /IA_SEGREDO/.test(e.message))
+    assert.equal((E.tabelas.ia_chaves ?? []).length, 0)
+  })
+})
+
+await caso('definir IA_SEGREDO depois NÃO perde a chave já guardada (decifra tentando os dois segredos); IA_SEGREDO passa a cifrar as novas', async () => {
+  novo()
+  let guardada = ''
+  await comEnv({ IA_SEGREDO: undefined, SUPABASE_SERVICE_ROLE_KEY: CHAVE_SERVICO }, () => void (guardada = cifrar(CHAVE_BANCO)))
+  await comEnv({ IA_SEGREDO: 'segredo-novo-definido-depois-na-coolify', SUPABASE_SERVICE_ROLE_KEY: CHAVE_SERVICO }, () => {
+    assert.equal(decifrar(guardada), CHAVE_BANCO, 'a antiga ainda abre')
+    const nova = cifrar(CHAVE_BANCO)
+    assert.equal(decifrar(nova), CHAVE_BANCO)
+  })
+  // a nova (cifrada com IA_SEGREDO) NÃO abre sem ele, e o erro não traz a chave
+  let comSegredo = ''
+  await comEnv({ IA_SEGREDO: 'segredo-novo-definido-depois-na-coolify', SUPABASE_SERVICE_ROLE_KEY: CHAVE_SERVICO }, () => void (comSegredo = cifrar(CHAVE_BANCO)))
+  await comEnv({ IA_SEGREDO: undefined, SUPABASE_SERVICE_ROLE_KEY: CHAVE_SERVICO }, () => assert.throws(() => decifrar(comSegredo)))
+})
+
+await caso('IA_SEGREDO curto demais (menos de 16) é ignorado: cifra com o derivado da chave de serviço, nunca com segredo fraco', async () => {
+  novo()
+  let guardada = ''
+  await comEnv({ IA_SEGREDO: 'curto', SUPABASE_SERVICE_ROLE_KEY: CHAVE_SERVICO }, () => void (guardada = cifrar(CHAVE_BANCO)))
+  await comEnv({ IA_SEGREDO: undefined, SUPABASE_SERVICE_ROLE_KEY: CHAVE_SERVICO }, () => assert.equal(decifrar(guardada), CHAVE_BANCO))
+})
+
+await caso('chave de serviço trocada (rotação): a chave guardada deixa de abrir e a Granninha segue com a do ambiente, sem parar', async () => {
+  novo()
+  let guardada = ''
+  await comEnv({ IA_SEGREDO: undefined, SUPABASE_SERVICE_ROLE_KEY: CHAVE_SERVICO }, () => void (guardada = cifrar(CHAVE_BANCO)))
+  E.tabelas.ia_chaves = [{ id: 'k1', provedor: 'openai', ativa: true, chave_cifrada: guardada, atualizado_em: new Date().toISOString() }]
+  await comEnv({ IA_SEGREDO: undefined, SUPABASE_SERVICE_ROLE_KEY: 'outra-chave-de-servico-depois-da-rotacao-99999' }, async () => {
+    limparCacheIA()
+    const r = await msg('gastei 6 no pix')
+    assert.match(r, /saiu R\$ 6,00/)
+    assert.equal(interp()[0].chave, CHAVE_AMBIENTE)
+  })
+})
+
 void U2
 fim()
 process.exit(0)
