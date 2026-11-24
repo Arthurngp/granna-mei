@@ -52,7 +52,7 @@ export function Granninha() {
 
   const s = p.saude
   const minutos = s ? (Date.now() - new Date(s.atualizado_em).getTime()) / 60_000 : Infinity
-  const conectado = s?.whatsapp_estado === 'CONNECTED'
+  const conectado = s?.whatsapp_estado === 'CONNECTED' && minutos <= 3
   // Sem batimento há mais de 3 minutos = o serviço parou. Número fora de CONNECTED = clientes sem atendimento.
   const problema = !s ? 'O serviço da Granninha ainda não mandou nenhum sinal.' : minutos > 3 ? `O serviço da Granninha está sem dar sinal há ${Math.round(minutos)} minutos.` : !conectado ? `O WhatsApp da Granninha não está conectado (${s.whatsapp_estado}). Os clientes estão sem atendimento.` : null
 

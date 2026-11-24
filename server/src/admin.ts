@@ -94,7 +94,7 @@ export async function rotaAdmin(req: IncomingMessage, res: ServerResponse, camin
     // Trocar o número zera o que já foi avisado: o aviso do problema atual tem que chegar no destino novo.
     const up = await sb.from('granninha_saude').upsert({ id: 1, alerta_whats: numero, alerta_ligado: ligado, alerta_tipo: null, alerta_em: null })
     falhou(up.error, 'gravar config de alerta')
-    await sb.from('admin_auditoria').insert({ admin_id: admin, acao: 'alerta', detalhe: ligado ? `ligado para …${numero.slice(-4)}` : 'desligado' })
+    falhou((await sb.from('admin_auditoria').insert({ admin_id: admin, acao: 'alerta', detalhes: { situacao: ligado ? `ligado para …${numero.slice(-4)}` : 'desligado' } })).error, 'auditar o alerta')
     json(res, 200, { ok: true, alerta_whats: numero, alerta_ligado: ligado })
     return true
   }

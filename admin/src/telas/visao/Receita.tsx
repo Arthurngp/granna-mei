@@ -38,8 +38,8 @@ export function Receita() {
 
   const heads: HeadDef[] | undefined = d
     ? [
-        { rotulo: 'Receita paga', valor: reais(d.faturas_pagas.total), nota: d.faturas_pagas.qtd === 0 ? 'nenhuma fatura paga ainda' : `${n(d.faturas_pagas.qtd)} faturas pagas` },
-        { rotulo: 'Contas ativas', valor: n(ativas), nota: d.faturas_pagas.qtd === 0 ? 'liberadas à mão, sem fatura' : 'ativas ou liberadas' },
+        { rotulo: 'Total recebido (bruto, desde o início)', valor: reais(d.faturas_pagas.total), nota: d.faturas_pagas.qtd === 0 ? 'nenhuma fatura paga ainda' : `${n(d.faturas_pagas.qtd)} faturas pagas` },
+        { rotulo: 'Contas ativas', valor: n(ativas), nota: d.faturas_pagas.qtd === 0 ? 'liberadas à mão, nenhuma fatura paga' : 'pagantes ou liberadas à mão' },
         { rotulo: 'Em teste, com acesso', valor: n(d.trial_ate_fim), nota: 'entram em cobrança quando o teste acabar' },
         { rotulo: 'IA por cliente no mês', valor: porCliente !== null ? reais(porCliente) : '–', nota: porCliente !== null ? `${pct(porCliente, PRECO_MENSAL)} do plano mensal` : 'sem uso no mês' },
       ]
