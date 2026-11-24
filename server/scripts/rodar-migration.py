@@ -74,6 +74,7 @@ MIGRATIONS = {
     "retencaoacompanhar": "20261122120000_retencao_acompanhar.sql",
     "retencaosequencia": "20261122150000_retencao_sequencia.sql",
     "fixasdia": "20261123020000_fixas_dia_ate_31.sql",
+    "admindados": "20261124120000_admin_dados_reais.sql",
     "recursos": "20261123030000_recursos_cliente.sql",
     "enviomanual": "20261123120000_envio_manual.sql",
     "custofoto": "20261123140000_custo_foto_documento.sql",
@@ -206,6 +207,18 @@ CONFERE = {
               else (xpath('/row/c/text()', query_to_xml('select lancamentos as c from public.config_limite where id', false, true, '')))[1]::text end) as padrao_hoje""",
     # Conta fixa até o dia 31. Mostra a regra que o banco aplica HOJE à coluna dia (antes: between 1 and 28; depois: between 1 and 31) e quantas fixas já passam de 28
     # (tem que ser 0 antes e pode ser maior que 0 depois). Só leitura.
+    # Admin com números verdadeiros: só refaz funções de LEITURA (admin_clientes, admin_painel, admin_receita, admin_origens). Não lê nem altera dado.
+    # ANTES e DEPOIS mostram o que o admin passa a contar: "clientes_de_verdade" é o que o card Clientes deve mostrar; "bloqueadas_do_admin" é a conta
+    # do próprio admin que hoje aparece como "Sem acesso"; "sem_dia_utc" vira true quando as funções deixam de usar o dia UTC (current_date).
+    "admindados": """select
+        (select count(*) from public.perfis) as perfis_total,
+        (select count(*) from public.perfis where papel='cliente' and exclusao_em is null) as clientes_de_verdade,
+        (select count(*) from public.assinaturas a join public.perfis p on p.id=a.user_id where p.papel='admin' and a.status='bloqueada') as bloqueadas_do_admin,
+        (select count(*) from public.perfis where papel='cliente' and exclusao_em is not null) as clientes_com_exclusao_pedida,
+        (select bool_and(pg_get_functiondef(p.oid) not like '%current_date%') from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname in ('admin_clientes','admin_painel','admin_receita')) as sem_dia_utc,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('admin_clientes','admin_painel','admin_receita','admin_origens')) as funcoes_admin_dados,
+        has_function_privilege('anon', 'public.admin_painel()', 'execute') as anon_executa_painel""",
     "fixasdia": """select
         (select string_agg(pg_get_constraintdef(c.oid), ' | ') from pg_constraint c where c.conrelid = 'public.fixas'::regclass and c.contype = 'c'
           and c.conkey = array[(select attnum from pg_attribute where attrelid = 'public.fixas'::regclass and attname = 'dia')]) as regra_do_dia,
