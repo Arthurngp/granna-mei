@@ -6,6 +6,7 @@ import { linkWhats } from '../lib/config'
 import { faturas, type FaturaResumo } from '../lib/cartao'
 import { brl, capitaliza, centavosDe, diaCurto, diaExtenso, difDias, dinheiroCampo, hoje, prazo, somaDias } from '../lib/format'
 import { mudarFixa, mudarValorConta } from '../lib/fixas'
+import { candidatosParaConta } from '../lib/vinculo'
 import { novoId, useApp } from '../lib/store'
 import type { Conta, Lancamento } from '../lib/tipos'
 
@@ -13,11 +14,13 @@ const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'o
 const mesBR = (f: string) => `${MESES[Number(f.slice(5, 7)) - 1]}/${f.slice(2, 4)}`
 
 export default function Contas() {
-  const { s, mut, pagarConta, reabrirConta } = useApp()
+  const { s, mut, pagarConta, reabrirConta, vincularPagamento, soltarPagamento } = useApp()
   const avisar = useAviso()
   const [tipo, setTipo] = useState<'pagar' | 'receber'>('pagar')
   const [verPagas, setVerPagas] = useState(false)
   const [abertaId, setAbertaId] = useState<string | null>(null)
+  /** Conta para a qual a pessoa está escolhendo "qual lançamento pagou isto". */
+  const [vinculandoId, setVinculandoId] = useState<string | null>(null)
   const [carteira, setCarteira] = useState('')
   const h = hoje()
 
@@ -90,8 +93,8 @@ export default function Contas() {
 
   const marcar = (c: Conta, carteiraId?: string) => {
     if (c.status === 'paga') {
-      reabrirConta(c.id)
-      avisar(`${c.descricao}: voltou para em aberto`)
+      // Voltar para em aberto pode apagar o pagamento lançado: a pessoa escolhe na ficha (manter ou apagar), nunca por baixo dos panos.
+      setAbertaId(c.id)
       return
     }
     pagarConta(c.id, carteiraId)
@@ -246,16 +249,51 @@ export default function Contas() {
         pe={
           aberta && (
             <>
-              <button
-                type="button"
-                className={`btn btn-bloco ${aberta.status === 'paga' ? 'btn-sec' : 'btn-pri'}`}
-                onClick={() => {
-                  marcar(aberta, carteira || undefined)
-                  setAbertaId(null)
-                }}
-              >
-                {aberta.status === 'paga' ? 'Voltar para em aberto' : aberta.tipo === 'pagar' ? 'Marcar como paga' : 'Marcar como recebida'}
-              </button>
+              {aberta.status === 'aberta' ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-pri btn-bloco"
+                    onClick={() => {
+                      marcar(aberta, carteira || undefined)
+                      setAbertaId(null)
+                    }}
+                  >
+                    {aberta.tipo === 'pagar' ? 'Marcar como paga' : 'Marcar como recebida'}
+                  </button>
+                  <button type="button" className="btn btn-sec btn-bloco" onClick={() => setVinculandoId(aberta.id)}>
+                    {aberta.tipo === 'pagar' ? 'Já paguei: ligar a um lançamento' : 'Já recebi: ligar a um lançamento'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-sec btn-bloco"
+                    onClick={() => {
+                      soltarPagamento(aberta.id, false)
+                      avisar(`${aberta.descricao}: voltou para em aberto. O pagamento continua lançado.`, { rotulo: 'Desfazer', fn: () => vincularPagamento(aberta.id, aberta.lancId ?? '') })
+                      setAbertaId(null)
+                    }}
+                  >
+                    {aberta.lancId && s.lancamentos.some((l) => l.id === aberta.lancId) ? 'Reabrir a conta e manter o pagamento' : 'Voltar para em aberto'}
+                  </button>
+                  {aberta.lancId && s.lancamentos.some((l) => l.id === aberta.lancId) && (
+                    <button
+                      type="button"
+                      className="btn btn-txt"
+                      style={{ color: 'var(--out)' }}
+                      onClick={() => {
+                        soltarPagamento(aberta.id, true)
+                        avisar(`${aberta.descricao}: voltou para em aberto e o pagamento foi apagado`)
+                        setAbertaId(null)
+                      }}
+                    >
+                      Reabrir e apagar o pagamento
+                    </button>
+                  )}
+                </>
+              )}
             </>
           )
         }
@@ -291,6 +329,17 @@ export default function Contas() {
                 <span>Categoria</span>
                 <span>{s.categorias.find((c) => c.id === aberta.categoriaId)?.nome ?? 'Sem categoria'}</span>
               </div>
+              {aberta.status === 'paga' && aberta.lancId && (() => {
+                const l = s.lancamentos.find((x) => x.id === aberta.lancId)
+                return l ? (
+                  <div>
+                    <span>Pago com</span>
+                    <span>
+                      {l.descricao} · {l.data.split('-').reverse().slice(0, 2).join('/')} · {brl(l.valor)}
+                    </span>
+                  </div>
+                ) : null
+              })()}
               {aberta.fixaId && (
                 <div>
                   <span>Repetição</span>
@@ -327,6 +376,43 @@ export default function Contas() {
             )}
           </>
         )}
+      </Folha>
+      <Folha aberta={!!vinculandoId} onFechar={() => setVinculandoId(null)} titulo="Qual lançamento pagou esta conta?">
+        {(() => {
+          const alvo = s.contas.find((c) => c.id === vinculandoId)
+          if (!alvo) return null
+          const candidatos = candidatosParaConta(s, alvo, hoje())
+          return (
+            <div className="pilha">
+              <p className="suave">
+                {alvo.descricao}, {brl(alvo.valor)}, vence {diaCurto(alvo.vencimento)}. Escolha o lançamento que foi este pagamento: a conta fica {alvo.tipo === 'pagar' ? 'paga' : 'recebida'} com o valor e a data dele, e nada é lançado de novo.
+              </p>
+              {candidatos.length === 0 ? (
+                <p className="suave">Não achei nenhum lançamento parecido nos últimos dois meses. Lance o pagamento pelo WhatsApp e volte aqui, ou use Marcar como {alvo.tipo === 'pagar' ? 'paga' : 'recebida'}.</p>
+              ) : (
+                candidatos.map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    className="item-ob"
+                    style={{ textAlign: 'left', width: '100%' }}
+                    onClick={() => {
+                      vincularPagamento(alvo.id, l.id)
+                      avisar(`${alvo.descricao}: ligada ao pagamento de ${brl(l.valor)}`, { rotulo: 'Desfazer', fn: () => soltarPagamento(alvo.id, false) })
+                      setVinculandoId(null)
+                      setAbertaId(null)
+                    }}
+                  >
+                    <b>{l.descricao}</b>
+                    <div className="suave">
+                      {l.data.split('-').reverse().slice(0, 2).join('/')} · {s.carteiras.find((c) => c.id === l.carteiraId)?.nome ?? 'conta'} · <b className="num">{brl(l.valor)}</b>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          )
+        })()}
       </Folha>
       <Folha
         aberta={!!faturaSel}

@@ -185,7 +185,7 @@ TIPOS DE AÇÃO
 - "ajustar_conta": a pessoa muda o valor ou a data de UMA conta em aberto da lista CONTAS EM ABERTO, só dessa vez ("a luz desse mês vence dia 28", "adia a conta do João para sexta", "a conta de luz veio 180 e não 150", "muda o vencimento da Santander para 30"). Preencha "conta_id" (da lista; se há várias do mesmo nome, a de vencimento mais próximo), "valor" (o valor NOVO, só se ela disse) e "vencimento" (a data NOVA em AAAA-MM-DD, só se ela disse). Se ela diz que passa a ser assim TODO MÊS, é "ajustar_fixa". Não é pagamento.
 - "encerrar_fixa": a pessoa não paga ou não recebe mais uma conta fixa da lista CONTAS FIXAS ("cancelei a internet", "não pago mais o aluguel da sala", "tira a internet das contas fixas"). Preencha "fixa_id". Só quando ela deixa claro que acabou; "paguei" nunca é encerrar.
 - "parcelado": compra ou venda em parcelas ("em 4x", "4 vezes de 300"). "valor" = TOTAL; "parcelas" = quantidade. Se foi no cartão, meio = "credito".
-- "baixar_conta": pagou ou recebeu uma conta que JÁ está na lista abaixo e que a pessoa NOMEOU ("paguei a água", "a Mariana pagou"). Preencha "conta_id"; "valor" só se a pessoa disse um valor. Se nenhuma conta da lista tem o nome do que a pessoa disse, NÃO é baixa: é lançamento (e se faltar o valor, pergunte). Se o valor dito é diferente do valor da conta, é lançamento novo, não baixa. Baixa de conta sem valor dito NÃO precisa perguntar o valor: usa o valor da conta.
+- "baixar_conta": pagou ou recebeu uma conta que JÁ está na lista abaixo e que a pessoa NOMEOU ("paguei a água", "a Mariana pagou"). Preencha "conta_id"; "valor" só se a pessoa disse um valor. Se nenhuma conta da lista tem o nome do que a pessoa disse, NÃO é baixa: é lançamento (e se faltar o valor, pergunte). Se o valor dito é diferente do valor da conta, é lançamento novo, não baixa. Baixa de conta sem valor dito NÃO precisa perguntar o valor: usa o valor da conta. Se há VÁRIAS contas em aberto com o mesmo nome (uma por mês), escolha a de vencimento mais antigo, a não ser que a pessoa diga a data ou o mês da outra.
 - "transferencia": dinheiro passando de uma carteira do próprio dono para outra ("depositei o dinheiro do caixa no banco", "a maquininha caiu no banco", "guardei 500 na XP"). Use carteira_id (origem) e carteira_destino_id.
 - "pagar_fatura": pagou a fatura do cartão de crédito ("paguei a fatura do Nubank", "paguei 800 do cartão"). carteira_destino_id = o cartão (null se não disse qual); carteira_id = a conta de onde saiu o dinheiro, só se disse; "valor" só se disse. Pagar fatura sem valor dito NÃO precisa perguntar o valor (nem preencher "falta"): o sistema usa o valor da fatura.
 - "criar_categoria": pede para criar uma categoria ("criar categoria Combustível", "cria a categoria Embalagens"). "descricao" = nome da categoria; movimento = saida (gasto) ou entrada (recebimento), saida se não ficar claro.
@@ -193,6 +193,7 @@ TIPOS DE AÇÃO
 REGRAS
 - "valor" é exatamente o que a pessoa disse. NUNCA invente valor. Se não disse valor e ele é necessário, use null e preencha "falta" com uma pergunta curta ("Qual foi o valor da luz?").
 - "50 conto", "30 pila", "2k", "1,2 mil" são valores. "4x" é número de parcelas, não valor.
+- Número que é DATA ("dia 20", "do dia 20/12", "dia 5", "20/12") nunca é valor: se a frase só tem números de data, "valor" é null.
 - "data": só se a pessoa disse quando (ontem, sexta, dia 3). Senão null. Datas no formato AAAA-MM-DD; dia da semana sem "que vem" é o mais recente que já passou (ou hoje).
 - "vencimento": para conta; "dia 20" é o próximo dia 20; "sexta" é a próxima sexta.
 - categoria_id: escolha a mais adequada da lista, ou null se nenhuma servir. Gasto da casa ou da família (mercado de casa, escola dos filhos, conta de casa, presente) é "pessoal": true e categoria do tipo gasto pessoal.
@@ -515,6 +516,18 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
       continue
     }
 
+    // Baixa de conta com a frase só tendo número de DATA ("paguei a internet do dia 20/12"): a IA às vezes copia o 20 ou o 12 como valor. Valor que não
+    // está na frase é inventado: some, e a baixa usa o valor da conta (que é o que a frase pede quando não diz quanto).
+    if (a.tipo_acao === 'baixar_conta' && a.valor !== null && !temNumeroDeValor(texto.replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, ' ').replace(/\bdia\s+\d{1,2}\b/gi, ' '))) a.valor = null
+    // "Paguei a internet" (sem valor) com uma conta de Internet em aberto que a frase nomeia é BAIXA dessa conta (a mais antiga, que vem primeiro na lista), e não um
+    // lançamento sem valor que obrigaria a perguntar "quanto foi?". A IA às vezes devolve lançamento nesse caso.
+    if (a.tipo_acao === 'lancamento' && a.valor === null && a.movimento && a.meio !== 'credito') {
+      const alvoSemValor = c.contasAbertas.find((x) => x.tipo === (a.movimento === 'entrada' ? 'receber' : 'pagar') && mesmaCoisa(a.descricao, x.descricao) && nomeada(texto, x.descricao))
+      if (alvoSemValor) {
+        a.tipo_acao = 'baixar_conta'
+        a.conta_id = alvoSemValor.id
+      }
+    }
     const precisaValor = a.tipo_acao !== 'baixar_conta'
     if (precisaValor && (a.valor === null || !(a.valor > 0))) return { acoes: [], perguntar: `Qual foi o valor${a.descricao ? ` de "${a.descricao}"` : ''}?` }
     // Só desconfia quando o texto tem número que PODE ser valor: nome de conta com dígito
@@ -523,6 +536,17 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
       return { acoes: [], perguntar: `Só para conferir: o valor de "${a.descricao}" é quanto?` }
     }
     let conta = c.contasAbertas.find((x) => x.id === a.conta_id)
+    // Várias contas em aberto com o MESMO nome (uma por mês, de conta fixa): dar baixa na que tem o valor igual, sem olhar a data, quitava a conta errada
+    // (caso do Arthur em 24/11: pagou R$ 109 da Internet de 20/11 e a baixa caiu na de 20/12, que valia 109; a de 20/11 ficou atrasada). Se a IA não pegou
+    // a mais antiga e a frase não cita a data da escolhida, pergunta qual.
+    if (a.tipo_acao === 'baixar_conta' && conta) {
+      const ddmm = (v: string) => v.split('-').reverse().slice(0, 2).join('/')
+      const irmas = c.contasAbertas.filter((x) => x.tipo === conta!.tipo && tira(x.descricao).trim() === tira(conta!.descricao).trim())
+      if (irmas.length > 1 && irmas[0].id !== conta.id && !texto.includes(ddmm(conta.vencimento))) {
+        const nome = limparTextoCliente(conta.descricao, 60)
+        return { acoes: [], perguntar: `Você tem mais de uma conta "${nome}" em aberto (vencem ${irmas.slice(0, 4).map((x) => `${ddmm(x.vencimento)}, ${brlSimples(x.valor)}`).join('; ')}). Qual você ${conta.tipo === 'receber' ? 'recebeu' : 'pagou'}? Me diga a data de vencimento.` }
+      }
+    }
     // Valor diferente do da conta em aberto que a frase nomeia: não decide sozinha, o fluxo pergunta (dar baixa ou lançar como outro gasto).
     let baixaDif: Acao['baixaDiferente']
     if (a.valor !== null && a.valor > 0) {

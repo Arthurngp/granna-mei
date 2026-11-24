@@ -247,6 +247,42 @@ caso('comprovante com legenda sem valor: o valor do documento completa a única 
   const r = conferir('entrada de serviço no meu banco', CTX, resp(acao({ valor: null, movimento: 'entrada', descricao: 'Serviço' })), { documento: { valor: 100, movimento: 'entrada' } })
   assert.equal(r.acoes[0].valor, 100)
 })
+// Caso de origem (24/11/2026): "paguei a internet do dia 20/12" com a IA copiando o 20 da data como valor.
+const DUAS_NET: Contexto = {
+  ...CTX,
+  contasAbertas: [
+    { id: 'net-nov', descricao: 'Internet', valor: 120, vencimento: '2026-11-20', tipo: 'pagar' },
+    { id: 'net-dez', descricao: 'Internet', valor: 109, vencimento: '2026-12-20', tipo: 'pagar' },
+  ],
+}
+caso('baixa citando só a DATA ("do dia 20/12"): o valor que a IA copiou da data some e vale o da conta', () => {
+  const r = conferir('paguei a internet do dia 20/12', DUAS_NET, resp(acao({ tipo_acao: 'baixar_conta', conta_id: 'net-dez', valor: 20, descricao: 'Internet' })))
+  assert.equal(r.perguntar, null)
+  assert.equal(r.acoes.length, 1)
+  assert.equal(r.acoes[0].tipo_acao, 'baixar_conta')
+  assert.equal(r.acoes[0].conta_id, 'net-dez')
+  assert.equal(r.acoes[0].baixaDiferente, undefined, 'sem valor ditado não há "valor diferente"')
+})
+caso('baixa com valor de verdade e data na mesma frase ("paguei 109 da internet de 20/12") mantém o valor dito', () => {
+  const r = conferir('paguei 109 da internet de 20/12', DUAS_NET, resp(acao({ tipo_acao: 'baixar_conta', conta_id: 'net-dez', valor: 109, descricao: 'Internet' })))
+  assert.equal(r.perguntar, null)
+  assert.equal(r.acoes[0].valor, 109)
+})
+caso('várias contas de mesmo nome: a IA pegou a de dezembro e a frase não cita a data: pergunta qual', () => {
+  const r = conferir('paguei 109 da internet', DUAS_NET, resp(acao({ tipo_acao: 'baixar_conta', conta_id: 'net-dez', valor: 109, descricao: 'Internet' })))
+  assert.match(r.perguntar!, /mais de uma conta "Internet" em aberto \(vencem 20\/11, R\$ 120,00; 20\/12, R\$ 109,00\)/)
+  assert.equal(r.acoes.length, 0)
+})
+caso('"paguei a internet" (sem valor) com conta de Internet em aberto: é baixa da mais antiga, não "quanto foi?"', () => {
+  const r = conferir('paguei a internet', DUAS_NET, resp(acao({ tipo_acao: 'lancamento', movimento: 'saida', valor: null, descricao: 'Internet' })))
+  assert.equal(r.perguntar, null)
+  assert.equal(r.acoes[0].tipo_acao, 'baixar_conta')
+  assert.equal(r.acoes[0].conta_id, 'net-nov', 'a mais antiga')
+})
+caso('"paguei o aluguel" sem valor e SEM conta de aluguel em aberto continua perguntando o valor', () => {
+  const r = conferir('paguei o aluguel', DUAS_NET, resp(acao({ tipo_acao: 'lancamento', movimento: 'saida', valor: null, descricao: 'Aluguel' })))
+  assert.match(r.perguntar!, /Qual foi o valor/)
+})
 caso('comprovante não deixa a IA trocar entrada por saída', () => {
   const r = conferir('150', CTX, resp(acao({ valor: 150, movimento: 'saida' })), { documento: { valor: 150, movimento: 'entrada' } })
   assert.equal(r.acoes[0].movimento, 'entrada')
