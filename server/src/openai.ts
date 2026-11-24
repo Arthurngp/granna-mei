@@ -54,7 +54,7 @@ export async function chamadaMinimaIA(): Promise<{ ok: true; uso: Uso } | { ok: 
     const r = await fetch(BASE + '/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${chave}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODELO, reasoning_effort: 'low', max_completion_tokens: 16, messages: [{ role: 'user', content: 'ok' }] }),
+      body: JSON.stringify({ model: MODELO, reasoning_effort: 'low', max_completion_tokens: 32, messages: [{ role: 'user', content: 'ok' }] }),
       signal: AbortSignal.timeout(20_000),
     })
     if (r.ok) {
@@ -62,6 +62,9 @@ export async function chamadaMinimaIA(): Promise<{ ok: true; uso: Uso } | { ok: 
       return { ok: true, uso: { entrada: j.usage?.prompt_tokens ?? 0, saida: j.usage?.completion_tokens ?? 0 } }
     }
     const corpo = (await r.text()).slice(0, 300)
+    // O modelo gastou todo o limite de saída pensando e a OpenAI respondeu 400 "max_tokens or model output limit was reached": a IA ESTÁ de pé (aceitou o
+    // pedido e gerou). Visto em produção em 24/11: a sonda marcava "outro" e sujava o /saude sem haver problema nenhum.
+    if (r.status === 400 && /output limit was reached|max_tokens or model output limit/i.test(corpo)) return { ok: true, uso: { entrada: 0, saida: 0 } }
     return { ok: false, tipo: classificarFalhaIA(r.status, corpo), detalhe: `OpenAI ${r.status}: ${corpo}` }
   } catch (e) {
     return { ok: false, tipo: 'fora', detalhe: (e as Error).message }
