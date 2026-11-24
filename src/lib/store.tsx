@@ -7,6 +7,7 @@ import { carregar, carregarAssinatura, enviar } from './remoto'
 import { categoriasPadrao, estadoDemo, estadoVazio, VERSAO } from './seed'
 import { lerOrigem } from './origem'
 import { supabase, temBanco } from './supabase'
+import { soltar, vincular } from './vinculo'
 import type { Conta, Estado, Lancamento, StatusAssinatura } from './tipos'
 
 /**
@@ -63,6 +64,10 @@ interface Ctx {
   sair: () => void
   pagarConta: (id: string, carteiraId?: string) => void
   reabrirConta: (id: string) => void
+  /** Liga um pagamento já lançado à conta em aberto que ele pagou (a conta fica paga, com o valor e a data do pagamento). */
+  vincularPagamento: (contaId: string, lancId: string) => void
+  /** Volta a conta para em aberto. Por padrão o lançamento FICA (o dinheiro que saiu continua lançado); com `apagarPagamento` ele é apagado junto. */
+  soltarPagamento: (contaId: string, apagarPagamento?: boolean) => void
   excluirLancamento: (id: string) => void
   simularStatus: (st: StatusAssinatura) => void
   carregarExemplo: () => void
@@ -306,6 +311,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       pagarConta,
       reabrirConta,
+      vincularPagamento: (contaId, lancId) => mut((a) => vincular(a, contaId, lancId)),
+      soltarPagamento: (contaId, apagarPagamento = false) => mut((a) => soltar(a, contaId, apagarPagamento)),
       excluirLancamento: (id) =>
         mut((a) => ({
           ...a,

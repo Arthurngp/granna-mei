@@ -34,10 +34,11 @@ const ctx: Contexto = {
   ],
 }
 
+const UMA_CARTEIRA: Contexto = { ...ctx, carteiras: [ctx.carteiras[0]] }
 let falhas = 0
-const caso = async (frase: string, confere: (a: Awaited<ReturnType<typeof interpretar>>) => void) => {
+const caso = async (frase: string, confere: (a: Awaited<ReturnType<typeof interpretar>>) => void, contexto: Contexto = ctx) => {
   try {
-    const r = await interpretar(frase, ctx)
+    const r = await interpretar(frase, contexto)
     confere(r)
     console.log('  ok   ', frase, '->', r.acoes.map((a) => `${a.tipo_acao}${a.fixa_id ? ' fixa=' + a.fixa_id : ''}${a.conta_id ? ' conta=' + a.conta_id : ''}${a.valor != null ? ' valor=' + a.valor : ''}${a.dia_do_mes ? ' dia=' + a.dia_do_mes : ''}${a.vencimento ? ' venc=' + a.vencimento : ''}`).join(' | ') || r.perguntar)
   } catch (e) {
@@ -89,6 +90,19 @@ await caso('a Joana me paga 300 todo dia 5', (r) => {
   assert.equal(a.movimento, 'entrada')
   assert.equal(a.dia_do_mes, 5)
 })
+// Duas contas Internet em aberto (20/11 e 20/12): sem data dita, a baixa é na mais antiga; citando a data, na que ela citou (caso do Arthur, 24/11).
+await caso('paguei a internet', (r) => {
+  const a = um(r)
+  assert.equal(a.tipo_acao, 'baixar_conta')
+  assert.equal(a.conta_id, 'c-net-1', 'sem data dita, a mais antiga')
+}, UMA_CARTEIRA)
+await caso('paguei a internet do dia 20/12', (r) => {
+  const a = um(r)
+  assert.equal(a.tipo_acao, 'baixar_conta')
+  assert.equal(a.conta_id, 'c-net-2', 'a pessoa citou a data de dezembro')
+  assert.equal(a.valor, null, 'o 20/12 é data, não valor')
+}, UMA_CARTEIRA)
+
 await caso('paguei 40 de gasolina no pix', (r) => {
   // Gasolina é gasto que pode ser da casa ou do negócio: ela pergunta (comportamento esperado) ou lança o valor 40.
   assert.ok(r.acoes.some((a) => a.tipo_acao === 'lancamento' && a.valor === 40) || /negócio ou da casa/.test(r.perguntar ?? ''))

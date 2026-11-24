@@ -7,6 +7,7 @@ import { linkWhats } from '../lib/config'
 import { linkComprovante } from '../lib/remoto'
 import { brl, capitaliza, diaExtenso, mesAtual, nomeMes } from '../lib/format'
 import { useApp } from '../lib/store'
+import { candidatasParaLancamento, contaDoLancamento } from '../lib/vinculo'
 import type { Lancamento } from '../lib/tipos'
 
 type Filtro = 'tudo' | 'entrada' | 'saida' | 'compra_cartao' | 'transferencia' | 'anexo'
@@ -22,7 +23,7 @@ const FILTROS: { v: Filtro; r: string }[] = [
 const semAcento = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 
 export default function Lancamentos() {
-  const { s, mut, excluirLancamento } = useApp()
+  const { s, mut, excluirLancamento, vincularPagamento, soltarPagamento } = useApp()
   const avisar = useAviso()
   const [ym, setYm] = useState(mesAtual())
   const [filtro, setFiltro] = useState<Filtro>('tudo')
@@ -30,6 +31,8 @@ export default function Lancamentos() {
   const [busca, setBusca] = useState('')
   const [abertoId, setAbertoId] = useState<string | null>(null)
   const [confirma, setConfirma] = useState(false)
+  /** Mostrando a lista de contas em aberto que este lançamento pode ter pago. */
+  const [ligando, setLigando] = useState(false)
 
   const doMesAtual = useMemo(() => doMes(s.lancamentos, ym), [s.lancamentos, ym])
   const lista = useMemo(() => {
@@ -67,6 +70,7 @@ export default function Lancamentos() {
   const fechar = () => {
     setAbertoId(null)
     setConfirma(false)
+    setLigando(false)
   }
   const mudar = (id: string, p: Partial<Lancamento>) => mut((a) => ({ ...a, lancamentos: a.lancamentos.map((l) => (l.id === id ? { ...l, ...p } : l)) }))
 
@@ -301,6 +305,63 @@ export default function Lancamentos() {
                 </span>
               </div>
             </div>
+            {(aberto.tipo === 'saida' || aberto.tipo === 'entrada') && (() => {
+              const contaLigada = contaDoLancamento(s, aberto.id)
+              if (contaLigada) {
+                return (
+                  <div className="fatos" style={{ marginTop: 14 }}>
+                    <div>
+                      <span>{aberto.tipo === 'saida' ? 'Pagou a conta' : 'Recebeu a conta'}</span>
+                      <span>
+                        {contaLigada.descricao} · venc. {contaLigada.vencimento.split('-').reverse().slice(0, 2).join('/')}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-txt"
+                      onClick={() => {
+                        soltarPagamento(contaLigada.id, false)
+                        avisar(`${contaLigada.descricao}: voltou para em aberto. O lançamento continua aqui.`)
+                      }}
+                    >
+                      Desligar desta conta (o lançamento fica)
+                    </button>
+                  </div>
+                )
+              }
+              const candidatas = candidatasParaLancamento(s, aberto)
+              if (!candidatas.length) return null
+              return ligando ? (
+                <div className="pilha" style={{ marginTop: 14 }}>
+                  <p className="suave pq">Qual conta em aberto este {aberto.tipo === 'saida' ? 'pagamento' : 'recebimento'} quitou? Ela fica {aberto.tipo === 'saida' ? 'paga' : 'recebida'} com o valor e a data deste lançamento, e nada é lançado de novo.</p>
+                  {candidatas.slice(0, 6).map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="item-ob"
+                      style={{ textAlign: 'left', width: '100%' }}
+                      onClick={() => {
+                        vincularPagamento(c.id, aberto.id)
+                        avisar(`${c.descricao} ligada a este lançamento`, { rotulo: 'Desfazer', fn: () => soltarPagamento(c.id, false) })
+                        setLigando(false)
+                      }}
+                    >
+                      <b>{c.descricao}</b>
+                      <div className="suave">
+                        vence {c.vencimento.split('-').reverse().slice(0, 2).join('/')} · <b className="num">{brl(c.valor)}</b>
+                      </div>
+                    </button>
+                  ))}
+                  <button type="button" className="btn btn-txt" onClick={() => setLigando(false)}>
+                    Cancelar
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className="btn btn-sec btn-bloco" style={{ marginTop: 14 }} onClick={() => setLigando(true)}>
+                  É pagamento de uma conta em aberto?
+                </button>
+              )
+            })()}
             {aberto.tipo === 'compra_cartao' && <p className="suave pq" style={{ marginTop: 10 }}>Compra no cartão entra nos gastos do mês em que você paga a fatura.</p>}
             {aberto.pessoal && <p className="suave pq" style={{ marginTop: 10 }}>Gasto pessoal sai do caixa, mas não entra na conta do lucro da empresa.</p>}
             {aberto.anexoPath && (
