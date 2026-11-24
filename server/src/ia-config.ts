@@ -45,18 +45,37 @@ export const contextoIA = new AsyncLocalStorage<{ userId: string }>()
 
 /* ---------------- cifra da chave ---------------- */
 
-let chaveDerivada: { segredo: string; chave: Buffer } | null = null
-function chaveDaCifra(): Buffer | null {
-  const segredo = process.env.IA_SEGREDO
-  if (!segredo || segredo.length < 16) return null
-  if (chaveDerivada?.segredo !== segredo) chaveDerivada = { segredo, chave: scryptSync(segredo, 'granninha-ia-chaves-v1', 32) }
-  return chaveDerivada.chave
+/**
+ * Segredos que cifram as chaves, em ordem de preferência:
+ *  1. IA_SEGREDO (se o dono definir na Coolify, 16+ caracteres);
+ *  2. derivado de SUPABASE_SERVICE_ROLE_KEY, que o servidor já tem: assim a aba Configurações funciona sem nenhuma etapa extra.
+ * Em AMBOS os casos o segredo vive só no ambiente do servidor, nunca no banco: uma cópia do banco sozinha não abre nenhuma chave.
+ * Cifra-se com o primeiro; decifra-se tentando todos, então definir IA_SEGREDO depois não perde chave já guardada.
+ * Se a chave de serviço for trocada (rotação), as chaves guardadas deixam de abrir: a Granninha usa a do ambiente e o dono cadastra de novo.
+ */
+function segredos(): string[] {
+  const lista: string[] = []
+  const a = process.env.IA_SEGREDO
+  if (a && a.length >= 16) lista.push(a)
+  const b = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (b && b.length >= 16) lista.push('chave-de-servico:' + b)
+  return lista
 }
-export const segredoConfigurado = () => chaveDaCifra() !== null
+const derivadas = new Map<string, Buffer>()
+function derivar(segredo: string): Buffer {
+  let k = derivadas.get(segredo)
+  if (!k) {
+    k = scryptSync(segredo, 'granninha-ia-chaves-v1', 32)
+    derivadas.set(segredo, k)
+  }
+  return k
+}
+export const segredoConfigurado = () => segredos().length > 0
 
 export function cifrar(texto: string): string {
-  const k = chaveDaCifra()
-  if (!k) throw new Error('IA_SEGREDO não está configurado no servidor (mínimo de 16 caracteres): sem ele a chave não pode ser guardada.')
+  const [segredo] = segredos()
+  if (!segredo) throw new Error('O servidor não tem como cifrar a chave (defina IA_SEGREDO com 16+ caracteres na Coolify): sem isso a chave não pode ser guardada.')
+  const k = derivar(segredo)
   const iv = randomBytes(12)
   const c = createCipheriv('aes-256-gcm', k, iv)
   const ct = Buffer.concat([c.update(texto, 'utf8'), c.final()])
@@ -64,13 +83,21 @@ export function cifrar(texto: string): string {
 }
 
 export function decifrar(cifrado: string): string {
-  const k = chaveDaCifra()
-  if (!k) throw new Error('IA_SEGREDO ausente')
+  const lista = segredos()
+  if (!lista.length) throw new Error('IA_SEGREDO ausente (e não há chave de serviço para derivar o segredo)')
   const [v, iv, tag, ct] = cifrado.split(':')
   if (v !== 'v1' || !iv || !tag || !ct) throw new Error('formato de chave cifrada desconhecido')
-  const d = createDecipheriv('aes-256-gcm', k, Buffer.from(iv, 'base64'))
-  d.setAuthTag(Buffer.from(tag, 'base64'))
-  return Buffer.concat([d.update(Buffer.from(ct, 'base64')), d.final()]).toString('utf8')
+  let ultimo: unknown
+  for (const segredo of lista) {
+    try {
+      const d = createDecipheriv('aes-256-gcm', derivar(segredo), Buffer.from(iv, 'base64'))
+      d.setAuthTag(Buffer.from(tag, 'base64'))
+      return Buffer.concat([d.update(Buffer.from(ct, 'base64')), d.final()]).toString('utf8')
+    } catch (e) {
+      ultimo = e // este segredo não abre: tenta o próximo (IA_SEGREDO definido depois, ou chave de serviço trocada)
+    }
+  }
+  throw ultimo instanceof Error ? ultimo : new Error('não consegui abrir a chave guardada')
 }
 
 /* ---------------- leitura (com cache e sem nunca lançar) ---------------- */
