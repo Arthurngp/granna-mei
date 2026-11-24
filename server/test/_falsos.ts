@@ -197,6 +197,8 @@ export const ia = {
   /** Erro HTTP que a Anthropic falsa responde (ex.: 529 overloaded). */
   /** Quantas chamadas a Anthropic falsa atendeu. */
   pedidosAnthropic: 0,
+  /** Último corpo JSON recebido pela OpenAI falsa (para provar o que foi enviado). */
+  ultimoCorpoOpenAI: null as null | Record<string, any>,
   erroAnthropic: null as { status: number; corpo: string } | null,
   /** Último corpo recebido pela Anthropic falsa (para provar o formato enviado). */
   ultimoAnthropic: null as null | Record<string, any>,
@@ -269,6 +271,12 @@ const iaServer = createServer(async (req, res) => {
   }
   const b = JSON.parse(txt)
   ia.chamadasFeitas.push({ nome: b.response_format?.json_schema?.name ?? 'minima', modelo: String(b.model), chave: bearer })
+  ia.ultimoCorpoOpenAI = b
+  // Como a OpenAI de verdade: gpt-4o e gpt-4.1 recusam reasoning_effort (só gpt-5.x e a série o aceitam).
+  if ('reasoning_effort' in b && !/^(gpt-5|o\d)/i.test(String(b.model))) {
+    res.writeHead(400, { 'Content-Type': 'application/json' })
+    return res.end(JSON.stringify({ error: { message: `Unsupported parameter: 'reasoning_effort' is not supported with this model.`, type: 'invalid_request_error', param: 'reasoning_effort', code: 'unsupported_parameter' } }))
+  }
   if (ia.recusarModelos.has(String(b.model))) {
     res.writeHead(404, { 'Content-Type': 'application/json' })
     return res.end(JSON.stringify({ error: { message: `The model \`${b.model}\` does not exist or you do not have access to it.`, type: 'invalid_request_error', code: 'model_not_found' } }))
@@ -399,6 +407,7 @@ export function semear() {
   ia.recusarChaves = new Set()
   ia.erroAnthropic = null
   ia.pedidosAnthropic = 0
+  ia.ultimoCorpoOpenAI = null
   ia.ultimoAnthropic = null
   ia.queda = false
   ia.erro = null

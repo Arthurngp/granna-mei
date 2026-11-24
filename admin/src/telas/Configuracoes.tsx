@@ -49,17 +49,22 @@ interface ClienteBusca {
   negocio: string
 }
 
-/** Modelos sugeridos no dropdown. Qualquer outro nome vale ("Outro"): ele é testado de verdade antes de ser salvo. */
-const SUGESTOES: { grupo: string; modelos: string[]; audio?: boolean }[] = [
-  { grupo: 'OpenAI', modelos: ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.5'] },
-  { grupo: 'Anthropic (Claude)', modelos: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-2'] },
-  { grupo: 'Transcrição de áudio (OpenAI)', modelos: ['gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1'], audio: true },
+/**
+ * Modelos sugeridos no dropdown. Só aparecem os de um provedor que TEM chave de verdade no sistema (a da OpenAI vem do servidor; a da Anthropic só depois de
+ * cadastrada e ligada aqui). "Outro" aceita qualquer nome, e o servidor testa antes de salvar (e recusa modelo de provedor sem chave).
+ */
+const SUGESTOES: { grupo: string; provedor: Provedor; modelos: string[]; audio?: boolean }[] = [
+  { grupo: 'OpenAI · mais baratos', provedor: 'openai', modelos: ['gpt-4.1-nano', 'gpt-4o-mini', 'gpt-4.1-mini'] },
+  { grupo: 'OpenAI · padrão e mais capazes', provedor: 'openai', modelos: ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.5', 'gpt-4.1', 'gpt-4o'] },
+  { grupo: 'Anthropic (Claude)', provedor: 'anthropic', modelos: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-2'] },
+  { grupo: 'Transcrição de áudio (OpenAI)', provedor: 'openai', modelos: ['gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1'], audio: true },
 ]
-const gruposDe = (tarefa: string) => SUGESTOES.filter((g) => (tarefa === 'audio' ? g.audio : !g.audio))
+const gruposDe = (tarefa: string, ativos: Provedor[]) => SUGESTOES.filter((g) => (tarefa === 'audio' ? g.audio : !g.audio) && ativos.includes(g.provedor))
 
 /** Dropdown de modelo: "" = padrão de fábrica; lista sugerida; "Outro" abre um campo para digitar qualquer nome. */
-function ModeloCampo({ tarefa, valor, padrao, onChange, rotulo, desabilitado }: { tarefa: string; valor: string; padrao: string; onChange: (v: string) => void; rotulo: string; desabilitado?: boolean }) {
-  const conhecidos = gruposDe(tarefa).flatMap((g) => g.modelos)
+function ModeloCampo({ tarefa, valor, padrao, onChange, rotulo, desabilitado, ativos }: { tarefa: string; valor: string; padrao: string; onChange: (v: string) => void; rotulo: string; desabilitado?: boolean; ativos: Provedor[] }) {
+  const grupos = gruposDe(tarefa, ativos)
+  const conhecidos = grupos.flatMap((g) => g.modelos)
   const [outro, setOutro] = useState(valor !== '' && !conhecidos.includes(valor))
   const modoOutro = outro || (valor !== '' && !conhecidos.includes(valor))
   return (
@@ -80,7 +85,7 @@ function ModeloCampo({ tarefa, valor, padrao, onChange, rotulo, desabilitado }: 
         }}
       >
         <option value="">Padrão de fábrica ({padrao})</option>
-        {gruposDe(tarefa).map((g) => (
+        {grupos.map((g) => (
           <optgroup key={g.grupo} label={g.grupo}>
             {g.modelos.map((m) => (
               <option key={m} value={m}>
@@ -182,6 +187,8 @@ export function Configuracoes() {
     { rotulo: 'Tarefas com modelo seu', valor: n(personalizadas), nota: `de ${n(d.tarefas.length)}; as outras usam o padrão` },
     { rotulo: 'Clientes com modelo próprio', valor: n(new Set(d.clientes.map((c) => c.user_id)).size), nota: 'valem no lugar do modelo de todos' },
   ]
+  /** Provedores com chave de verdade (do servidor ou cadastrada e ligada aqui): só os modelos deles aparecem nos dropdowns. */
+  const ativos = (['openai', 'anthropic'] as const).filter((p) => d.em_uso[p].origem !== 'nenhuma')
   const nomeTarefa = (id: string) => d.tarefas.find((t) => t.id === id)?.rotulo ?? id
 
   return (
@@ -205,7 +212,7 @@ export function Configuracoes() {
             <h2>Modelo para todos os clientes</h2>
           </div>
           <p className="texto-ajuda cfg-texto" style={{ margin: '0 0 6px' }}>
-            Escolha o modelo de cada tarefa. Ao salvar, ele é testado de verdade; se for recusado, nada muda, e se falhar depois a Granninha usa o padrão na hora, sem a pessoa perceber. Modelos <b>claude</b> usam a Anthropic (pedem uma chave dela, mais abaixo); áudio só funciona com a OpenAI.
+            Escolha o modelo de cada tarefa. Ao salvar, ele é testado de verdade; se for recusado, nada muda, e se falhar depois a Granninha usa o padrão na hora, sem a pessoa perceber. {ativos.includes('anthropic') ? <>Modelos <b>claude</b> usam a Anthropic; áudio só funciona com a OpenAI.</> : <>Os modelos da Anthropic (Claude) só aparecem aqui depois que você cadastrar e ligar uma chave da Anthropic, em “Chave de API”. Áudio só funciona com a OpenAI.</>}
           </p>
           {d.tarefas.some((t) => (t.global ?? '').toLowerCase().startsWith('claude')) || d.clientes.some((c) => c.modelo.toLowerCase().startsWith('claude')) ? (
             <div className="vaviso ruim" role="status">
@@ -226,7 +233,7 @@ export function Configuracoes() {
                       Hoje: <b>{t.global ?? d.fabrica[t.id]}</b> ({t.global ? 'escolhido por você' : 'padrão de fábrica'})
                     </small>
                   </div>
-                  <ModeloCampo key={t.id + (t.global ?? '')} tarefa={t.id} valor={valor} padrao={d.fabrica[t.id]} rotulo={`Modelo para ${t.rotulo}`} desabilitado={ocupado !== ''} onChange={(v) => setRascunho({ ...rascunho, [t.id]: v })} />
+                  <ModeloCampo key={t.id + (t.global ?? '')} tarefa={t.id} valor={valor} padrao={d.fabrica[t.id]} rotulo={`Modelo para ${t.rotulo}`} desabilitado={ocupado !== ''} ativos={ativos} onChange={(v) => setRascunho({ ...rascunho, [t.id]: v })} />
                   <button
                     type="button"
                     className="btn btn-pri cfg-botao"
@@ -311,7 +318,7 @@ export function Configuracoes() {
             </label>
             <div className="campo">
               <span>Modelo</span>
-              <ModeloCampo key={tarefaCli} tarefa={tarefaCli} valor={modeloCli} padrao={d.fabrica[tarefaCli]} rotulo="Modelo individual" onChange={setModeloCli} />
+              <ModeloCampo key={tarefaCli} tarefa={tarefaCli} valor={modeloCli} padrao={d.fabrica[tarefaCli]} rotulo="Modelo individual" ativos={ativos} onChange={setModeloCli} />
             </div>
             <div>
               <button
