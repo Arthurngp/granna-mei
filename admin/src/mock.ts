@@ -441,3 +441,56 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
       throw new Error(`mock sem ${nome}`)
   }
 }
+
+/* ---- Configurações de IA (mock em memória: a tela pode ser exercitada inteira sem servidor) ---- */
+const iaMock = {
+  global: {} as Record<string, string>,
+  chaves: [{ id: 'k-1', nome: 'OpenAI da agência', ultimos4: 'a1b2', ativa: false, testada_em: new Date(Date.now() - 86_400_000).toISOString() }] as { id: string; nome: string; ultimos4: string; ativa: boolean; testada_em: string | null }[],
+  clientes: [{ user_id: 'c1', nome: 'Marina Costa', negocio: 'Studio Marina', tarefa: 'documento', modelo: 'gpt-5.4' }] as { user_id: string; nome: string; negocio: string; tarefa: string; modelo: string }[],
+}
+const TAREFAS_MOCK = [
+  { id: 'interpretacao', rotulo: 'Entender a mensagem', detalhe: 'Lê o que a pessoa escreveu e monta o registro (a tarefa mais importante).' },
+  { id: 'documento', rotulo: 'Ler comprovante, foto e PDF', detalhe: 'Precisa enxergar imagem.' },
+  { id: 'ajuda', rotulo: 'Responder dúvidas de uso', detalhe: 'O que a Granninha faz e como usar.' },
+  { id: 'resposta', rotulo: 'Responder perguntas sobre os números', detalhe: 'Quanto sobrou, o que vence, resumo.' },
+  { id: 'audio', rotulo: 'Transcrever áudio', detalhe: 'Modelo de transcrição, não de chat.' },
+]
+export async function mockApi(caminho: string, init: RequestInit): Promise<unknown> {
+  await new Promise((r) => setTimeout(r, 200))
+  const c = init.body ? (JSON.parse(String(init.body)) as Record<string, string | boolean | null>) : {}
+  const erro = (m: string) => Promise.reject(new Error(m))
+  if (caminho === '/admin/ia') {
+    const ativa = iaMock.chaves.find((k) => k.ativa)
+    return {
+      pronto: true, segredo: true, fabrica: { interpretacao: 'gpt-5.4-mini', documento: 'gpt-5.4-mini', ajuda: 'gpt-5.4-mini', resposta: 'gpt-5.4-mini', audio: 'gpt-4o-mini-transcribe' },
+      tarefas: TAREFAS_MOCK.map((t) => ({ ...t, global: iaMock.global[t.id] ?? null })), chaves: iaMock.chaves, clientes: iaMock.clientes,
+      chave_em_uso: ativa ? 'banco' : 'ambiente', chave_em_uso_nome: ativa?.nome ?? null,
+    }
+  }
+  // Como o servidor: o modelo/chave "nao-existe" é recusado no teste e nada é salvo.
+  if (String(c.modelo ?? '').includes('nao-existe')) return erro('Este modelo não respondeu ao teste (OpenAI 404: model_not_found). Nada foi alterado.')
+  if (caminho === '/admin/ia/modelo') {
+    if (c.modelo) iaMock.global[String(c.tarefa)] = String(c.modelo)
+    else delete iaMock.global[String(c.tarefa)]
+    return { ok: true }
+  }
+  if (caminho === '/admin/ia/cliente') {
+    iaMock.clientes = iaMock.clientes.filter((x) => !(x.user_id === c.user_id && x.tarefa === c.tarefa))
+    if (c.modelo) iaMock.clientes.push({ user_id: String(c.user_id), nome: 'Cliente escolhido', negocio: '', tarefa: String(c.tarefa), modelo: String(c.modelo) })
+    return { ok: true }
+  }
+  if (caminho === '/admin/ia/chave') {
+    if (String(c.chave).includes('ruim')) return erro('Esta chave não funcionou (OpenAI 401). Nada foi guardado.')
+    iaMock.chaves.push({ id: 'k-' + (iaMock.chaves.length + 1), nome: String(c.nome), ultimos4: String(c.chave).slice(-4), ativa: false, testada_em: new Date().toISOString() })
+    return { ok: true }
+  }
+  if (caminho === '/admin/ia/chave/ativar') {
+    iaMock.chaves.forEach((k) => (k.ativa = c.ativa ? k.id === c.id : k.ativa && k.id !== c.id))
+    return { ok: true }
+  }
+  if (caminho === '/admin/ia/chave/remover') {
+    iaMock.chaves = iaMock.chaves.filter((k) => k.id !== c.id)
+    return { ok: true }
+  }
+  return erro('Rota desconhecida no modo de exemplo')
+}

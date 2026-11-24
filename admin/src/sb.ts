@@ -22,6 +22,7 @@ export async function rpc<T>(nome: string, args: Record<string, unknown> = {}): 
 }
 
 export async function api<T>(caminho: string, init: RequestInit = {}): Promise<T> {
+  if (MOCK) return (await import('./mock')).mockApi(caminho, init) as T
   const { data } = await sb.auth.getSession()
   const r = await fetch(API + caminho, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.session?.access_token ?? ''}`, ...(init.headers ?? {}) } })
   const j = await r.json().catch(() => ({}))
