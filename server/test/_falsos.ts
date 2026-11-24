@@ -194,6 +194,12 @@ export const ia = {
   /** Modelos que a IA falsa recusa (404 como a OpenAI faz com nome inexistente) e chaves que ela recusa (401). */
   recusarModelos: new Set<string>(),
   recusarChaves: new Set<string>(),
+  /** Erro HTTP que a Anthropic falsa responde (ex.: 529 overloaded). */
+  /** Quantas chamadas a Anthropic falsa atendeu. */
+  pedidosAnthropic: 0,
+  erroAnthropic: null as { status: number; corpo: string } | null,
+  /** Último corpo recebido pela Anthropic falsa (para provar o formato enviado). */
+  ultimoAnthropic: null as null | Record<string, any>,
   queda: false,
   /** Faz a IA falsa responder um erro HTTP específico (ex.: 429 insufficient_quota). */
   erro: null as { status: number; corpo: string } | null,
@@ -204,6 +210,30 @@ export const ia = {
   /** O que a leitura de foto/PDF devolve (formato Leitura de midia.ts). */
   documento: { tipo: 'comprovante', meio: 'pix', vencimento: null, resumo: 'Comprovante de R$ 50', transacoes: [{ descricao: 'Gasolina', valor: 50, movimento: 'saida', data: null }] } as Record<string, unknown>,
 }
+/** O que a IA falsa devolve para cada esquema (usada pela OpenAI falsa e pela Anthropic falsa, para as duas provarem o mesmo comportamento). */
+function saidaFalsa(nome: string, sistema: string, usuario: string): unknown {
+  let saida: unknown
+  if (nome === 'interpretacao') {
+    ia.chamadas.interpretacao++
+    ia.ultimoSistema = sistema
+    saida = ia.regras.find(([re]) => re.test(usuario))?.[1] ?? SEM_ACAO
+  } else if (nome === 'documento') {
+    ia.chamadas.documento++
+    saida = ia.documento
+  } else if (nome === 'ajuda') {
+    ia.chamadas.ajuda++
+    ia.ultimaAjuda = { sistema: sistema, usuario }
+    saida = { resposta: ia.respostaAjuda }
+  } else if (nome === 'resposta') {
+    ia.chamadas.resposta++
+    ia.ultimoSistemaPergunta = sistema
+    const m = /RESUMO \(JSON\):\n([\s\S]*?)\n\nPERGUNTA:/.exec(usuario)
+    ia.ultimoResumo = m ? JSON.parse(m[1]) : null
+    saida = { resposta: 'RESPOSTA-DA-IA' }
+  } else throw new Error('esquema de IA desconhecido: ' + nome)
+  return saida
+}
+
 const iaServer = createServer(async (req, res) => {
   const txt = await new Promise<string>((ok) => {
     let t = ''
@@ -249,28 +279,59 @@ const iaServer = createServer(async (req, res) => {
     return res.end(JSON.stringify({ choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 7, completion_tokens: 3 } }))
   }
   const nome = b.response_format.json_schema.name as string
-  const usuario = String(b.messages[1].content)
-  let saida: unknown
-  if (nome === 'interpretacao') {
-    ia.chamadas.interpretacao++
-    ia.ultimoSistema = String(b.messages[0].content)
-    saida = ia.regras.find(([re]) => re.test(usuario))?.[1] ?? SEM_ACAO
-  } else if (nome === 'documento') {
-    ia.chamadas.documento++
-    saida = ia.documento
-  } else if (nome === 'ajuda') {
-    ia.chamadas.ajuda++
-    ia.ultimaAjuda = { sistema: String(b.messages[0].content), usuario }
-    saida = { resposta: ia.respostaAjuda }
-  } else if (nome === 'resposta') {
-    ia.chamadas.resposta++
-    ia.ultimoSistemaPergunta = String(b.messages[0].content)
-    const m = /RESUMO \(JSON\):\n([\s\S]*?)\n\nPERGUNTA:/.exec(usuario)
-    ia.ultimoResumo = m ? JSON.parse(m[1]) : null
-    saida = { resposta: 'RESPOSTA-DA-IA' }
-  } else throw new Error('esquema de IA desconhecido: ' + nome)
+  const saida = saidaFalsa(nome, String(b.messages[0].content), String(b.messages[1].content))
   res.writeHead(200, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(saida) } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }))
+})
+
+
+/** Anthropic falsa: valida o formato REAL da Messages API (cabeçalhos, max_tokens, tool_choice, blocos de imagem/PDF) e responde como ela. */
+const anthServer = createServer(async (req, res) => {
+  const txt = await new Promise<string>((ok) => {
+    let t = ''
+    req.on('data', (c) => (t += c))
+    req.on('end', () => ok(t))
+  })
+  const responder = (status: number, corpo: unknown) => {
+    res.writeHead(status, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(corpo))
+  }
+  const erro = (status: number, tipo: string, mensagem: string) => responder(status, { type: 'error', error: { type: tipo, message: mensagem } })
+  const chave = String(req.headers['x-api-key'] ?? '')
+  if (req.method !== 'POST' || !(req.url ?? '').endsWith('/messages')) return erro(404, 'not_found_error', 'rota desconhecida')
+  if (ia.erroAnthropic) return responder(ia.erroAnthropic.status, JSON.parse(ia.erroAnthropic.corpo))
+  if (ia.recusarChaves.has(chave) || !chave) {
+    ia.chamadasFeitas.push({ nome: 'anthropic:recusada', modelo: '', chave })
+    return erro(401, 'authentication_error', `invalid x-api-key: ${chave}`) // ecoa a chave de propósito: o teste prova que o servidor nunca a devolve
+  }
+  if (req.headers['anthropic-version'] !== '2023-06-01') return erro(400, 'invalid_request_error', 'anthropic-version ausente')
+  const b = JSON.parse(txt)
+  ia.ultimoAnthropic = b
+  if (typeof b.max_tokens !== 'number') return erro(400, 'invalid_request_error', 'max_tokens: Field required')
+  if (!Array.isArray(b.messages) || b.messages[0]?.role !== 'user') return erro(400, 'invalid_request_error', 'messages: o primeiro papel deve ser user')
+  const conteudo = b.messages[0].content
+  const blocos: any[] = Array.isArray(conteudo) ? conteudo : [{ type: 'text', text: String(conteudo) }]
+  for (const bl of blocos) {
+    if (bl.type === 'image' && !(bl.source?.type === 'base64' && /^image\//.test(bl.source.media_type) && bl.source.data)) return erro(400, 'invalid_request_error', 'messages.0.content: bloco de imagem inválido')
+    if (bl.type === 'document' && !(bl.source?.type === 'base64' && bl.source.media_type === 'application/pdf' && bl.source.data)) return erro(400, 'invalid_request_error', 'messages.0.content: bloco de documento inválido')
+    if (!['text', 'image', 'document'].includes(bl.type)) return erro(400, 'invalid_request_error', 'messages.0.content: tipo desconhecido ' + bl.type)
+  }
+  if (ia.recusarModelos.has(String(b.model))) {
+    ia.chamadasFeitas.push({ nome: 'anthropic:' + (b.tool_choice?.name ?? 'minima'), modelo: String(b.model), chave })
+    return erro(404, 'not_found_error', `model: ${b.model}`)
+  }
+  const nome = b.tool_choice?.name as string | undefined
+  ia.chamadasFeitas.push({ nome: 'anthropic:' + (nome ?? 'minima'), modelo: String(b.model), chave })
+  ia.pedidosAnthropic++
+  if (!nome) return responder(200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 8, output_tokens: 2 } })
+  if (!b.tools?.some((t: any) => t.name === nome && t.input_schema?.type === 'object')) return erro(400, 'invalid_request_error', 'tools: input_schema inválido')
+  const usuario = blocos.filter((x) => x.type === 'text').map((x) => x.text).join('\n')
+  if (nome === 'interpretacao') ia.chamadas.interpretacao++
+  else if (nome === 'documento') ia.chamadas.documento++
+  else if (nome === 'ajuda') ia.chamadas.ajuda++
+  else if (nome === 'resposta') ia.chamadas.resposta++
+  const saida = saidaFalsa(nome, String(b.system), usuario)
+  responder(200, { content: [{ type: 'tool_use', id: 'toolu_1', name: nome, input: saida }], usage: { input_tokens: 21, output_tokens: 9 } })
 })
 
 /* ---------------- gateway falso (só a mídia recebida) ---------------- */
@@ -293,6 +354,7 @@ const gw = createServer((req, res) => {
 
 await new Promise<void>((ok) => db.listen(0, '127.0.0.1', ok))
 await new Promise<void>((ok) => iaServer.listen(0, '127.0.0.1', ok))
+await new Promise<void>((ok) => anthServer.listen(0, '127.0.0.1', ok))
 await new Promise<void>((ok) => gw.listen(0, '127.0.0.1', ok))
 process.env.WA_GATEWAY_URL = `http://127.0.0.1:${(gw.address() as AddressInfo).port}`
 process.env.WA_GATEWAY_API_KEY = 'falsa'
@@ -304,6 +366,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = 'falsa'
 if (process.env.IA_REAL !== '1') {
   process.env.OPENAI_API_KEY = 'falsa'
   process.env.OPENAI_BASE_URL = `http://127.0.0.1:${(iaServer.address() as AddressInfo).port}`
+  process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${(anthServer.address() as AddressInfo).port}`
 }
 process.env.PAINEL_URL = 'https://granninha.amplasoft.me/painel'
 delete process.env.WA_SOMENTE_NUMEROS
@@ -334,6 +397,9 @@ export function semear() {
   ia.chamadasFeitas = []
   ia.recusarModelos = new Set()
   ia.recusarChaves = new Set()
+  ia.erroAnthropic = null
+  ia.pedidosAnthropic = 0
+  ia.ultimoAnthropic = null
   ia.queda = false
   ia.erro = null
   ia.pedidos = 0

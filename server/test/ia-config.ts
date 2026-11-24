@@ -148,21 +148,21 @@ await caso('modelo de áudio recusado: volta ao de fábrica e transcreve', async
 
 await caso('chave cadastrada e ATIVA: é a usada, decifrada só no servidor', async () => {
   novo()
-  E.tabelas.ia_chaves = [{ id: 'k1', ativa: true, chave_cifrada: cifrar(CHAVE_BANCO), atualizado_em: new Date().toISOString() }]
+  E.tabelas.ia_chaves = [{ id: 'k1', provedor: 'openai', ativa: true, chave_cifrada: cifrar(CHAVE_BANCO), atualizado_em: new Date().toISOString() }]
   await msg('gastei 6 no pix')
   assert.equal(interp()[0].chave, CHAVE_BANCO)
 })
 
 await caso('chave cadastrada mas DESLIGADA não é usada (nasce desligada)', async () => {
   novo()
-  E.tabelas.ia_chaves = [{ id: 'k1', ativa: false, chave_cifrada: cifrar(CHAVE_BANCO) }]
+  E.tabelas.ia_chaves = [{ id: 'k1', provedor: 'openai', ativa: false, chave_cifrada: cifrar(CHAVE_BANCO) }]
   await msg('gastei 6 no pix')
   assert.equal(interp()[0].chave, CHAVE_AMBIENTE)
 })
 
 await caso('chave cifrada que não abre (segredo mudou, texto corrompido): usa a do ambiente, sem parar', async () => {
   novo()
-  E.tabelas.ia_chaves = [{ id: 'k1', ativa: true, chave_cifrada: 'v1:AAAA:BBBB:CCCC', atualizado_em: new Date().toISOString() }]
+  E.tabelas.ia_chaves = [{ id: 'k1', provedor: 'openai', ativa: true, chave_cifrada: 'v1:AAAA:BBBB:CCCC', atualizado_em: new Date().toISOString() }]
   const r = await msg('gastei 6 no pix')
   assert.match(r, /saiu R\$ 6,00/)
   assert.equal(interp()[0].chave, CHAVE_AMBIENTE)
@@ -170,7 +170,7 @@ await caso('chave cifrada que não abre (segredo mudou, texto corrompido): usa a
 
 await caso('chave cadastrada RECUSADA pela OpenAI (revogada): volta à chave do ambiente e a mensagem é atendida', async () => {
   novo()
-  E.tabelas.ia_chaves = [{ id: 'k1', ativa: true, chave_cifrada: cifrar(CHAVE_BANCO), atualizado_em: new Date().toISOString() }]
+  E.tabelas.ia_chaves = [{ id: 'k1', provedor: 'openai', ativa: true, chave_cifrada: cifrar(CHAVE_BANCO), atualizado_em: new Date().toISOString() }]
   ia.recusarChaves.add(CHAVE_BANCO)
   const r = await msg('gastei 6 no pix')
   assert.match(r, /saiu R\$ 6,00/)
@@ -329,8 +329,8 @@ await caso('cadastrar chave que funciona: guarda CIFRADA, DESLIGADA, com os 4 ú
 await caso('ativar chave: testa de novo, desliga a que estava ligada (só uma por vez) e passa a valer; desativar volta ao ambiente', async () => {
   novo()
   E.tabelas.ia_chaves = [
-    { id: '11111111-1111-1111-1111-111111111111', nome: 'Velha', ultimos4: 'aaaa', ativa: true, chave_cifrada: cifrar('sk-velha-chave-de-teste-1234567890') },
-    { id: '22222222-2222-2222-2222-222222222222', nome: 'Nova', ultimos4: 'bbbb', ativa: false, chave_cifrada: cifrar(CHAVE_BANCO) },
+    { id: '11111111-1111-1111-1111-111111111111', provedor: 'openai', nome: 'Velha', ultimos4: 'aaaa', ativa: true, chave_cifrada: cifrar('sk-velha-chave-de-teste-1234567890') },
+    { id: '22222222-2222-2222-2222-222222222222', provedor: 'openai', nome: 'Nova', ultimos4: 'bbbb', ativa: false, chave_cifrada: cifrar(CHAVE_BANCO) },
   ]
   const d = deps()
   await adm.definirChaveAtiva(d, ADMIN, { id: '22222222-2222-2222-2222-222222222222', ativa: true })
@@ -347,8 +347,8 @@ await caso('ativar chave: testa de novo, desliga a que estava ligada (só uma po
 await caso('ativar chave que não funciona mais: recusa e a que estava valendo continua', async () => {
   novo()
   E.tabelas.ia_chaves = [
-    { id: '11111111-1111-1111-1111-111111111111', nome: 'Velha', ultimos4: 'aaaa', ativa: true, chave_cifrada: cifrar('sk-velha-chave-de-teste-1234567890') },
-    { id: '22222222-2222-2222-2222-222222222222', nome: 'Nova', ultimos4: 'bbbb', ativa: false, chave_cifrada: cifrar(CHAVE_BANCO) },
+    { id: '11111111-1111-1111-1111-111111111111', provedor: 'openai', nome: 'Velha', ultimos4: 'aaaa', ativa: true, chave_cifrada: cifrar('sk-velha-chave-de-teste-1234567890') },
+    { id: '22222222-2222-2222-2222-222222222222', provedor: 'openai', nome: 'Nova', ultimos4: 'bbbb', ativa: false, chave_cifrada: cifrar(CHAVE_BANCO) },
   ]
   await assert.rejects(adm.definirChaveAtiva(deps(async () => ({ ok: false, detalhe: 'sem saldo' })), ADMIN, { id: '22222222-2222-2222-2222-222222222222', ativa: true }), (e: Error & { status?: number }) => e.status === 400 && /ontinua valendo/.test(e.message))
   assert.deepEqual(E.tabelas.ia_chaves.map((k) => [k.nome, k.ativa]), [['Velha', true], ['Nova', false]])
@@ -356,7 +356,7 @@ await caso('ativar chave que não funciona mais: recusa e a que estava valendo c
 
 await caso('remover chave: some e a auditoria diz se estava ativa; id inválido ou inexistente é recusado', async () => {
   novo()
-  E.tabelas.ia_chaves = [{ id: '11111111-1111-1111-1111-111111111111', nome: 'Velha', ultimos4: 'aaaa', ativa: true, chave_cifrada: cifrar(CHAVE_BANCO) }]
+  E.tabelas.ia_chaves = [{ id: '11111111-1111-1111-1111-111111111111', provedor: 'openai', nome: 'Velha', ultimos4: 'aaaa', ativa: true, chave_cifrada: cifrar(CHAVE_BANCO) }]
   await assert.rejects(adm.removerChave(deps(), ADMIN, { id: 'x' }), (e: Error & { status?: number }) => e.status === 400)
   await assert.rejects(adm.removerChave(deps(), ADMIN, { id: '99999999-9999-9999-9999-999999999999' }), (e: Error & { status?: number }) => e.status === 404)
   await adm.removerChave(deps(), ADMIN, { id: '11111111-1111-1111-1111-111111111111' })

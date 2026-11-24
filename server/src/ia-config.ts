@@ -6,6 +6,8 @@
  *   A Granninha nunca para por causa de configuração.
  *
  * Ordem do modelo: o do CLIENTE (se houver) > o de TODOS (se houver) > o de fábrica (OPENAI_MODELO, hoje gpt-5.4-mini).
+ * Provedor: sai do NOME do modelo. "claude-..." vai para a Anthropic, qualquer outro para a OpenAI. Áudio é sempre OpenAI (a Anthropic não transcreve).
+ * Se o caminho da Anthropic falhar por qualquer motivo (sem chave, chave ou modelo recusados, fora do ar), a conversa cai no modelo de fábrica da OpenAI.
  * A chave cadastrada pela tela fica CIFRADA no banco (AES-256-GCM, segredo em IA_SEGREDO no ambiente do servidor); sem o segredo, ou se não decifrar,
  * vale a chave do ambiente. Chave e texto cifrado nunca saem do servidor.
  */
@@ -25,6 +27,11 @@ export const TAREFAS_IDS = TAREFAS.map((t) => t.id)
 
 export const MODELO_FABRICA = process.env.OPENAI_MODELO ?? 'gpt-5.4-mini'
 export const MODELO_AUDIO_FABRICA = process.env.OPENAI_MODELO_AUDIO ?? 'gpt-4o-mini-transcribe'
+export type Provedor = 'openai' | 'anthropic'
+export const PROVEDORES: Provedor[] = ['openai', 'anthropic']
+export const provedorDoModelo = (modelo: string): Provedor => (/^claude/i.test(modelo) ? 'anthropic' : 'openai')
+/** Modelo barato da Anthropic usado só para TESTAR uma chave nova (a chamada mínima de teste). */
+export const MODELO_TESTE_ANTHROPIC = process.env.ANTHROPIC_MODELO_TESTE ?? 'claude-haiku-5-5'
 export const fabricaDe = (t: Tarefa) => (t === 'audio' ? MODELO_AUDIO_FABRICA : MODELO_FABRICA)
 
 /** Nome do esquema JSON pedido à IA → tarefa. Qualquer nome desconhecido é tratado como "entender a mensagem". */
@@ -71,9 +78,9 @@ export function decifrar(cifrado: string): string {
 interface Config {
   global: Partial<Record<Tarefa, string>>
   cliente: Map<string, Partial<Record<Tarefa, string>>>
-  chave: { id: string; cifrada: string } | null
+  chaves: Partial<Record<Provedor, { id: string; cifrada: string }>>
 }
-const VAZIA: Config = { global: {}, cliente: new Map(), chave: null }
+const VAZIA: Config = { global: {}, cliente: new Map(), chaves: {} }
 const TTL_MS = 60_000
 let cache: { ate: number; cfg: Config } | null = null
 let avisouEm = 0
@@ -96,9 +103,9 @@ async function ler(): Promise<Config> {
   const [g, c, k] = await Promise.all([
     sb.from('config_ia_modelo').select('tarefa,modelo'),
     sb.from('ia_modelo_cliente').select('user_id,tarefa,modelo'),
-    sb.from('ia_chaves').select('id,chave_cifrada').eq('ativa', true).order('atualizado_em', { ascending: false }).limit(1),
+    sb.from('ia_chaves').select('id,provedor,chave_cifrada').eq('ativa', true).order('atualizado_em', { ascending: false }).limit(8),
   ])
-  const cfg: Config = { global: {}, cliente: new Map(), chave: null }
+  const cfg: Config = { global: {}, cliente: new Map(), chaves: {} }
   if (g.error) avisar('config_ia_modelo', g.error)
   else for (const l of g.data ?? []) if (TAREFAS_IDS.includes(l.tarefa as Tarefa) && MODELO_VALIDO.test(l.modelo)) cfg.global[l.tarefa as Tarefa] = l.modelo
   if (c.error) avisar('ia_modelo_cliente', c.error)
@@ -110,7 +117,11 @@ async function ler(): Promise<Config> {
       cfg.cliente.set(l.user_id, m)
     }
   if (k.error) avisar('ia_chaves', k.error)
-  else if (k.data?.[0]) cfg.chave = { id: k.data[0].id, cifrada: k.data[0].chave_cifrada }
+  else
+    for (const l of k.data ?? []) {
+      const prov = (l.provedor ?? 'openai') as Provedor // linhas antigas (antes da coluna ser usada) são da OpenAI
+      if (PROVEDORES.includes(prov) && !cfg.chaves[prov]) cfg.chaves[prov] = { id: l.id, cifrada: l.chave_cifrada } // a mais recente de cada provedor
+    }
   return cfg
 }
 
@@ -130,18 +141,33 @@ export async function configuracao(): Promise<Config> {
 export async function modeloDe(tarefa: Tarefa): Promise<string> {
   const cfg = await configuracao()
   const uid = contextoIA.getStore()?.userId
-  return (uid && cfg.cliente.get(uid)?.[tarefa]) || cfg.global[tarefa] || fabricaDe(tarefa)
+  const m = (uid && cfg.cliente.get(uid)?.[tarefa]) || cfg.global[tarefa] || fabricaDe(tarefa)
+  // Áudio só existe na OpenAI: um modelo Claude gravado para áudio é ignorado (nunca chega a uma chamada que não pode funcionar).
+  return tarefa === 'audio' && provedorDoModelo(m) === 'anthropic' ? fabricaDe(tarefa) : m
 }
 
 /** A chave de API a usar: a cadastrada e ativa na tela (decifrada) ou, se não houver ou der qualquer problema, a do ambiente. */
 export async function chaveDaIA(): Promise<{ chave: string; origem: 'banco' | 'ambiente' }> {
   const cfg = await configuracao()
-  if (cfg.chave) {
+  if (cfg.chaves.openai) {
     try {
-      return { chave: decifrar(cfg.chave.cifrada), origem: 'banco' }
+      return { chave: decifrar(cfg.chaves.openai.cifrada), origem: 'banco' }
     } catch (e) {
       avisar('a chave cadastrada (uso a do ambiente)', e as Error)
     }
   }
   return { chave: env('OPENAI_API_KEY'), origem: 'ambiente' }
+}
+
+/** A chave da Anthropic: a cadastrada e ativa na tela (decifrada) ou ANTHROPIC_API_KEY do ambiente. Sem nenhuma das duas, null (o chamador cai na OpenAI). */
+export async function chaveDaAnthropic(): Promise<{ chave: string; origem: 'banco' | 'ambiente' } | null> {
+  const cfg = await configuracao()
+  if (cfg.chaves.anthropic) {
+    try {
+      return { chave: decifrar(cfg.chaves.anthropic.cifrada), origem: 'banco' }
+    } catch (e) {
+      avisar('a chave da Anthropic cadastrada (uso a do ambiente, se houver)', e as Error)
+    }
+  }
+  return process.env.ANTHROPIC_API_KEY ? { chave: process.env.ANTHROPIC_API_KEY, origem: 'ambiente' } : null
 }
