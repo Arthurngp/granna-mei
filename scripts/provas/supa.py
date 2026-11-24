@@ -1,4 +1,4 @@
-"""Acesso ao Supabase do Granna Mei. Chaves lidas do Coolify em memória, nunca impressas."""
+"""Acesso ao Supabase da Granninha. Chaves lidas do Coolify em memória, nunca impressas."""
 import json, os, sys, urllib.request, urllib.error
 sys.path.insert(0, os.path.dirname(__file__))
 from cool import call

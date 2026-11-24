@@ -68,13 +68,16 @@ export async function acessoDe(userId: string, hoje: string): Promise<{ acesso: 
 }
 
 export async function contextoDe(userId: string, hoje: string): Promise<Contexto> {
-  const [p, cats, carts, contas] = await Promise.all([
+  const [p, cats, carts, contas, fixas] = await Promise.all([
     sb.from('perfis').select('ramo').eq('id', userId).single(),
     sb.from('categorias').select('id,nome,tipo,pessoal').eq('user_id', userId),
     sb.from('carteiras').select('id,nome,tipo,padrao,fechamento,vencimento,conta_pagamento_id').eq('user_id', userId),
     sb.from('contas').select('id,descricao,valor,vencimento,tipo').eq('user_id', userId).eq('status', 'aberta').order('vencimento').limit(40),
+    sb.from('fixas').select('id,descricao,valor,dia').eq('user_id', userId).order('dia').limit(40),
   ])
   for (const [r, n] of [[p, 'perfil'], [cats, 'categorias'], [carts, 'carteiras'], [contas, 'contas']] as const) falhou(r.error, 'contexto ' + n)
+  // As contas fixas só servem para "a internet agora é 109": se a leitura falhar, registrar o resto da conversa não pode parar por isso.
+  if (fixas.error) console.error('[contexto] não consegui ler as contas fixas (o registro segue sem elas):', fixas.error.message)
   const categorias = (cats.data ?? []).map((c) => ({ ...c, pessoal: !!c.pessoal }))
   // Categoria obrigatória: sem nenhuma que sirva, o gasto vai para "Outros gastos". Se o cliente não tem, cria agora.
   if (categorias.length && !categorias.some((c) => c.id === 'outras-saidas')) {
@@ -116,6 +119,7 @@ export async function contextoDe(userId: string, hoje: string): Promise<Contexto
     categorias,
     carteiras,
     contasAbertas: (contas.data ?? []).map((c) => ({ ...c, valor: Number(c.valor) })),
+    fixas: fixas.error ? undefined : (fixas.data ?? []).map((f) => ({ id: f.id as string, descricao: f.descricao as string, valor: Number(f.valor), dia: Number(f.dia) })),
     faturasAbertas,
   }
 }

@@ -164,11 +164,11 @@ const db = createServer(async (req, res) => {
 interface AcaoFalsa {
   tipo_acao: string; movimento: 'entrada' | 'saida' | null; valor: number | null; descricao: string; categoria_id: string | null
   carteira_id: string | null; carteira_destino_id: string | null; meio: string | null; data: string | null; pessoal: boolean
-  vencimento: string | null; dia_do_mes: number | null; parcelas: number | null; conta_id: string | null; talvez_pessoal: boolean
+  vencimento: string | null; dia_do_mes: number | null; parcelas: number | null; conta_id: string | null; fixa_id: string | null; talvez_pessoal: boolean
 }
 export const acao = (x: Partial<AcaoFalsa>): AcaoFalsa => ({
   tipo_acao: 'lancamento', movimento: 'saida', valor: 6, descricao: 'Mercado', categoria_id: 'material', carteira_id: null, carteira_destino_id: null,
-  meio: 'pix', data: null, pessoal: false, vencimento: null, dia_do_mes: null, parcelas: null, conta_id: null, talvez_pessoal: false, ...x,
+  meio: 'pix', data: null, pessoal: false, vencimento: null, dia_do_mes: null, parcelas: null, conta_id: null, fixa_id: null, talvez_pessoal: false, ...x,
 })
 export const acoes = (...a: AcaoFalsa[]) => ({ intencao: 'acoes', acoes: a, pergunta: null, correcao: null, falta: null })
 export const SEM_ACAO = { intencao: 'outro', acoes: [], pergunta: null, correcao: null, falta: null }

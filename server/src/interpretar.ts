@@ -37,6 +37,8 @@ export interface Contexto {
   carteiras: CarteiraCtx[]
   /** Contas em aberto, para "paguei a luz" achar a conta certa */
   contasAbertas: { id: string; descricao: string; valor: number; vencimento: string; tipo: 'pagar' | 'receber' }[]
+  /** Contas fixas do cliente (todo mês), para "a internet agora é 109" achar a conta certa em vez de criar outra. */
+  fixas?: { id: string; descricao: string; valor: number; dia: number }[]
   /** Faturas de cartão com valor em aberto, da mais antiga para a mais nova */
   faturasAbertas?: FaturaAberta[]
   /**
@@ -55,7 +57,7 @@ export interface Contexto {
   historico?: { cliente: string; granninha: string }[]
 }
 
-export type TipoAcao = 'lancamento' | 'conta' | 'recorrente' | 'parcelado' | 'baixar_conta' | 'transferencia' | 'pagar_fatura' | 'criar_categoria'
+export type TipoAcao = 'lancamento' | 'conta' | 'recorrente' | 'parcelado' | 'baixar_conta' | 'transferencia' | 'pagar_fatura' | 'criar_categoria' | 'ajustar_fixa' | 'ajustar_conta' | 'encerrar_fixa'
 export type Intencao = 'acoes' | 'pergunta' | 'desfazer' | 'corrigir' | 'saudacao' | 'ajuda' | 'outro'
 export type Meio = 'pix' | 'dinheiro' | 'debito' | 'credito' | 'boleto' | 'transferencia' | 'maquininha'
 
@@ -76,6 +78,8 @@ export interface AcaoIA {
   dia_do_mes: number | null
   parcelas: number | null
   conta_id: string | null
+  /** Só em "ajustar_fixa": a conta fixa (da lista do cliente) que mudou de valor. */
+  fixa_id?: string | null
   /** O gasto pode ser tanto da casa quanto do negócio e a pessoa não disse qual (celular, internet, gasolina...). */
   talvez_pessoal: boolean
 }
@@ -157,23 +161,29 @@ function sistema(c: Contexto) {
   const contas = c.contasAbertas.length
     ? c.contasAbertas.slice(0, 40).map((x) => `- ${x.id}: ${x.tipo === 'pagar' ? 'a pagar' : 'a receber'} "${n(x.descricao)}" R$ ${x.valor.toFixed(2)} vence ${x.vencimento}`).join('\n')
     : '(nenhuma)'
+  const fixasTxt = c.fixas?.length
+    ? c.fixas.slice(0, 40).map((x) => `- ${x.id}: "${n(x.descricao)}" R$ ${x.valor.toFixed(2)} todo dia ${x.dia}`).join('\n')
+    : '(nenhuma)'
   return `Você lê mensagens que um microempreendedor (MEI) manda no WhatsApp para registrar o dinheiro do negócio.
 Hoje é ${DIAS[d.getDay()]}, ${c.hoje}.${c.ramo ? ` O negócio é do ramo: ${c.ramo}.` : ''} Responda só no formato pedido.
 
 INTENÇÃO
-- "acoes": a mensagem registra dinheiro (uma ou mais ações), ou pede para criar uma categoria.
+- "acoes": a mensagem registra dinheiro (uma ou mais ações), pede para criar uma categoria, ou MUDA algo que já está anotado: o valor ou o dia de uma conta fixa ("a internet agora é 109", "o aluguel agora vence dia 5"), o valor ou a data de uma conta em aberto ("a luz desse mês vence dia 28") ou encerra uma conta fixa ("cancelei a internet"). Frase que diz que o valor ou o dia de uma conta da lista MUDOU é sempre "acoes" (ajustar_fixa, ajustar_conta ou encerrar_fixa), nunca "ajuda" nem "outro".
 - "pergunta": quer saber algo dos próprios números ou do MEI dele ("quanto gastei", "o que vence", "quanto sobrou", "quanto falta pro limite do MEI", "quando vence o DAS", "quanto está a fatura"). Reescreva a pergunta clara em "pergunta".
 - "desfazer": quer anular o último registro ("desfazer", "apaga o último", "cancela isso", "errei, apaga").
 - "corrigir": quer mudar o último registro ("não foi 50, foi 60", "era dinheiro, não pix", "esse recebimento foi de prestação de serviço", "na verdade foi no Nubank", "era da casa, não do negócio", "muda a categoria para Material"). Descreva a correção em "correcao".
   Frase que fala de "esse", "essa", "isso", "o último" ou "o de agora" e só diz o que ele É (categoria, conta, meio, se é da casa) é "corrigir", NUNCA um registro novo: quem registra algo novo conta um fato novo ("recebi 290 do João").
 - "saudacao": só cumprimento ou agradecimento.
-- "ajuda": pede ajuda ou pergunta sobre a própria Granninha: o que ela faz, quem é, se é robô, como usar, se ela faz tal coisa ("como eu lanço uma conta?", "dá pra mandar áudio?", "você controla o cartão?"), ou diz que não entendeu como funciona. Pedido de ajuda para REGISTRAR algo COM valor ("me ajuda a lançar uma venda de 500", "anota pra mim 80 de luz") é "acoes", nunca "ajuda". Dúvida sobre a CONTA ou a assinatura da própria Granninha (preço, plano, cancelar, excluir a conta) também é "ajuda". Pergunta sobre os NÚMEROS do cliente ("quanto sobrou", "o que vence") é "pergunta", nunca "ajuda".
+- "ajuda": pede ajuda ou pergunta sobre a própria Granninha: o que ela faz, quem é, se é robô, como usar, se ela faz tal coisa ("como eu lanço uma conta?", "dá pra mandar áudio?", "você controla o cartão?"), ou diz que não entendeu como funciona. Pedido de ajuda para REGISTRAR algo COM valor ("me ajuda a lançar uma venda de 500", "anota pra mim 80 de luz") é "acoes", nunca "ajuda". Dúvida sobre a CONTA ou a assinatura da própria Granninha (preço, plano, cancelar, excluir a conta) também é "ajuda". Pergunta sobre os NÚMEROS do cliente ("quanto sobrou", "o que vence") é "pergunta", nunca "ajuda". Frase que AFIRMA um valor ou dia novo de uma conta da lista ("a internet agora é 109") não é pergunta sobre a Granninha: é "acoes".
 - "outro": nada a ver com dinheiro nem com a Granninha.
 
 TIPOS DE AÇÃO
 - "lancamento": dinheiro que JÁ entrou ou saiu, inclusive compra no cartão de crédito à vista. movimento entrada/saida.
 - "conta": dinheiro que VAI entrar ou sair numa data (boleto, fiado, "me deve", "vou receber", "vence dia"). movimento entrada = a receber, saida = a pagar. Preencha "vencimento".
-- "recorrente": conta que se repete todo mês ("aluguel 900 todo dia 10"). Preencha "dia_do_mes".
+- "recorrente": conta que se repete todo mês, a pagar ("aluguel 900 todo dia 10") ou a receber ("a Joana me paga 300 todo dia 5", movimento entrada). Preencha "dia_do_mes".
+- "ajustar_fixa": a pessoa muda o VALOR e/ou o DIA de vencimento de uma conta fixa que JÁ está na lista CONTAS FIXAS abaixo, daqui para a frente ("a internet agora é 109", "o aluguel subiu para 1000", "a luz passou a ser 150 todo mês", "a internet agora vence dia 25", "muda o aluguel para dia 5 e 1100"). Preencha "fixa_id" (o id da lista), "valor" (o valor NOVO, só se ela disse) e "dia_do_mes" (o dia NOVO, só se ela disse). NÃO é "recorrente" (conta fixa NOVA, que não está na lista) e NÃO é pagamento: se a pessoa PAGOU ("paguei 109 de internet", "a internet veio 109"), é baixa ou lançamento, nunca ajuste.
+- "ajustar_conta": a pessoa muda o valor ou a data de UMA conta em aberto da lista CONTAS EM ABERTO, só dessa vez ("a luz desse mês vence dia 28", "adia a conta do João para sexta", "a conta de luz veio 180 e não 150", "muda o vencimento da Santander para 30"). Preencha "conta_id" (da lista; se há várias do mesmo nome, a de vencimento mais próximo), "valor" (o valor NOVO, só se ela disse) e "vencimento" (a data NOVA em AAAA-MM-DD, só se ela disse). Se ela diz que passa a ser assim TODO MÊS, é "ajustar_fixa". Não é pagamento.
+- "encerrar_fixa": a pessoa não paga ou não recebe mais uma conta fixa da lista CONTAS FIXAS ("cancelei a internet", "não pago mais o aluguel da sala", "tira a internet das contas fixas"). Preencha "fixa_id". Só quando ela deixa claro que acabou; "paguei" nunca é encerrar.
 - "parcelado": compra ou venda em parcelas ("em 4x", "4 vezes de 300"). "valor" = TOTAL; "parcelas" = quantidade. Se foi no cartão, meio = "credito".
 - "baixar_conta": pagou ou recebeu uma conta que JÁ está na lista abaixo e que a pessoa NOMEOU ("paguei a água", "a Mariana pagou"). Preencha "conta_id"; "valor" só se a pessoa disse um valor. Se nenhuma conta da lista tem o nome do que a pessoa disse, NÃO é baixa: é lançamento (e se faltar o valor, pergunte). Se o valor dito é diferente do valor da conta, é lançamento novo, não baixa. Baixa de conta sem valor dito NÃO precisa perguntar o valor: usa o valor da conta.
 - "transferencia": dinheiro passando de uma carteira do próprio dono para outra ("depositei o dinheiro do caixa no banco", "a maquininha caiu no banco", "guardei 500 na XP"). Use carteira_id (origem) e carteira_destino_id.
@@ -210,6 +220,9 @@ ${carts}
 
 CONTAS EM ABERTO
 ${contas}
+
+CONTAS FIXAS
+${fixasTxt}
 ${conversaRecente(c.historico)}`
 }
 
@@ -227,7 +240,7 @@ function esquema(c: Contexto) {
     type: 'object',
     additionalProperties: false,
     properties: {
-      tipo_acao: { type: 'string', enum: ['lancamento', 'conta', 'recorrente', 'parcelado', 'baixar_conta', 'transferencia', 'pagar_fatura', 'criar_categoria'] },
+      tipo_acao: { type: 'string', enum: ['lancamento', 'conta', 'recorrente', 'parcelado', 'baixar_conta', 'transferencia', 'pagar_fatura', 'criar_categoria', 'ajustar_fixa', 'ajustar_conta', 'encerrar_fixa'] },
       movimento: enumNulo(['entrada', 'saida']),
       valor: nulo('number'),
       descricao: { type: 'string' },
@@ -241,9 +254,10 @@ function esquema(c: Contexto) {
       dia_do_mes: nulo('integer'),
       parcelas: nulo('integer'),
       conta_id: c.contasAbertas.length ? enumNulo(c.contasAbertas.map((x) => x.id)) : { type: 'null' },
+      fixa_id: c.fixas?.length ? enumNulo(c.fixas.slice(0, 40).map((x) => x.id)) : { type: 'null' },
       talvez_pessoal: { type: 'boolean' },
     },
-    required: ['tipo_acao', 'movimento', 'valor', 'descricao', 'categoria_id', 'carteira_id', 'carteira_destino_id', 'meio', 'data', 'pessoal', 'vencimento', 'dia_do_mes', 'parcelas', 'conta_id', 'talvez_pessoal'],
+    required: ['tipo_acao', 'movimento', 'valor', 'descricao', 'categoria_id', 'carteira_id', 'carteira_destino_id', 'meio', 'data', 'pessoal', 'vencimento', 'dia_do_mes', 'parcelas', 'conta_id', 'fixa_id', 'talvez_pessoal'],
   }
   return {
     type: 'object',
@@ -276,6 +290,9 @@ function nomeada(texto: string, descricao: string) {
   const t = tira(texto)
   return tira(descricao).split(/[^a-z0-9]+/).some((p) => p.length >= 3 && !VAZIAS.has(p) && t.includes(p))
 }
+
+/** Data que existe de verdade: 2026-02-31 não (o Date do JavaScript "rola" para março e a `dataValida` acima deixa passar). */
+const dataReal = (s: string | null) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(s + 'T12:00:00Z').toISOString().slice(0, 10) === s
 
 const dataValida = (s: string | null) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(new Date(s + 'T12:00:00').getTime())
 
@@ -325,7 +342,25 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
   if (op.documento) {
     // Comprovante: no máximo um lançamento, com o valor e a direção do documento. O resto é ignorado.
     const d = op.documento
-    const bate = r.acoes.filter((a) => a.tipo_acao !== 'criar_categoria' && a.tipo_acao !== 'transferencia' && a.tipo_acao !== 'pagar_fatura'
+    // Comprovante de pagamento de cartão: o valor é o do DOCUMENTO (nunca o da IA nem o da frase). Cartão cadastrado do cliente segue como pagamento de
+    // fatura. Cartão que ele não tem cadastrado (CEA, Riachuelo, cartão de loja, de terceiro) é uma saída comum: antes a ação era descartada e a
+    // pessoa recebia "Li R$ ... O que foi?" mesmo com a legenda dizendo o que era e de qual conta saiu.
+    const cartoesDoc = c.carteiras.filter((x) => x.tipo === 'cartao')
+    const falouFatura = /\bfatura\b/.test(tira(texto))
+    r = {
+      ...r,
+      acoes: r.acoes.map((a) => {
+        if (a.tipo_acao === 'pagar_fatura') {
+          const cadastrado = cartoesDoc.some((x) => x.id === a.carteira_destino_id) || (cartoesDoc.length === 1 && falouFatura)
+          if (cadastrado) return { ...a, valor: d.valor }
+          return { ...a, tipo_acao: 'lancamento' as const, movimento: d.movimento, valor: d.valor, carteira_destino_id: null, conta_id: null }
+        }
+        // Uma ação só e sem valor (a legenda não tinha número): o valor do documento completa.
+        if (r.acoes.length === 1 && a.valor === null && (a.tipo_acao === 'lancamento' || a.tipo_acao === 'conta')) return { ...a, valor: d.valor }
+        return a
+      }),
+    }
+    const bate = r.acoes.filter((a) => a.tipo_acao !== 'criar_categoria' && a.tipo_acao !== 'transferencia' && a.tipo_acao !== 'ajustar_fixa' && a.tipo_acao !== 'ajustar_conta' && a.tipo_acao !== 'encerrar_fixa'
       && (a.valor === null ? a.tipo_acao === 'baixar_conta' && c.contasAbertas.some((x) => x.id === a.conta_id && Math.abs(x.valor - d.valor) < 0.01) : Math.abs(a.valor - d.valor) < 0.01))
     if (!bate.length) return { acoes: [], perguntar: `Li R$ ${d.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} nesse comprovante. O que foi? Me conta em uma frase.` }
     r = { ...r, acoes: [{ ...bate[0], movimento: bate[0].tipo_acao === 'baixar_conta' ? bate[0].movimento : d.movimento }] }
@@ -348,6 +383,16 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
       }
     }
     r = { ...r, acoes: expandidas }
+  }
+  // "Internet 109 todo mês" quando a conta fixa "Internet" já existe (mesmo nome, e o mesmo dia se ele foi dito) é o valor novo da MESMA conta:
+  // criar outra deixaria duas fixas iguais e as contas do mês em dobro. Só nome igual; nome parecido ("Aluguel da loja" x "Aluguel da sala") nunca une.
+  r = {
+    ...r,
+    acoes: r.acoes.map((a) => {
+      if (a.tipo_acao !== 'recorrente' || !(a.valor !== null && a.valor > 0)) return a
+      const iguais = (c.fixas ?? []).filter((x) => tira(x.descricao).trim() === tira(a.descricao ?? '').trim())
+      return iguais.length === 1 && (!a.dia_do_mes || a.dia_do_mes === iguais[0].dia) ? { ...a, tipo_acao: 'ajustar_fixa' as const, fixa_id: iguais[0].id } : a
+    }),
   }
   const perguntarMeio = op.perguntarMeio !== false
   const padrao = c.carteiras.find((x) => x.padrao && x.tipo !== 'cartao' && x.tipo !== 'investimento')?.id ?? c.carteiras.find((x) => x.tipo !== 'cartao' && x.tipo !== 'investimento')?.id ?? c.carteiras[0]?.id ?? ''
@@ -381,6 +426,65 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
       const nome = limparTextoCliente(a.descricao.replace(/^categoria\s+/i, ''), 40)
       if (!nome) return { acoes: [], perguntar: 'Qual o nome da categoria?' }
       out.push({ ...a, descricao: nome, movimento: a.movimento ?? 'saida', valor: null, categoria_id: null, carteira_id: '', data: c.hoje, fatura: null, noCartao: false })
+      continue
+    }
+
+    if (a.tipo_acao === 'ajustar_fixa' || a.tipo_acao === 'encerrar_fixa') {
+      if (c.fixas === undefined) return { acoes: [], perguntar: 'Não consegui ver suas contas fixas agora. Me manda de novo daqui a pouco?' }
+      const fixas = c.fixas
+      const nomeDe = (x: { descricao: string }) => limparTextoCliente(x.descricao, 60)
+      const encerrar = a.tipo_acao === 'encerrar_fixa'
+      if (!fixas.length) return { acoes: [], perguntar: 'Você não tem conta fixa cadastrada. Para cadastrar, me diga: "aluguel de 1200 todo dia 5".' }
+      const fixa = fixas.find((x) => x.id === a.fixa_id)
+      if (!fixa) return { acoes: [], perguntar: `Qual conta fixa ${encerrar ? 'acabou' : 'mudou'}? Você tem: ${fixas.map(nomeDe).join(', ')}.` }
+      // A conta tem que estar na frase: "muda ela para 109" com a IA adivinhando qual seria mexer na conta errada.
+      if (!nomeada(texto, fixa.descricao)) return { acoes: [], perguntar: `Você quer ${encerrar ? 'encerrar' : 'mudar'} a conta fixa "${nomeDe(fixa)}"? Me diga o nome da conta${encerrar ? '' : ' e o que mudou'}.` }
+      // Duas contas fixas com a mesma palavra ("Aluguel da loja", "Aluguel da sala"): só segue se a frase traz o nome inteiro da escolhida.
+      const citadas = fixas.filter((x) => nomeada(texto, x.descricao))
+      if (citadas.length > 1 && !tira(texto).includes(tira(fixa.descricao).trim())) {
+        return { acoes: [], perguntar: `Qual delas: ${citadas.map((x) => `"${nomeDe(x)}"`).join(' ou ')}? Me diga o nome completo.` }
+      }
+      const base = { ...a, descricao: fixa.descricao, fixa_id: fixa.id, movimento: null, categoria_id: null, carteira_id: '', carteira_destino_id: null, data: c.hoje, fatura: null, noCartao: false }
+      if (encerrar) {
+        out.push({ ...base, valor: null, dia_do_mes: null })
+        continue
+      }
+      let valor = a.valor !== null && a.valor > 0 ? a.valor : null
+      const dia = a.dia_do_mes && Number.isInteger(a.dia_do_mes) && a.dia_do_mes >= 1 && a.dia_do_mes <= 31 ? a.dia_do_mes : null
+      if (valor === null && dia === null) return { acoes: [], perguntar: `O que mudou em "${nomeDe(fixa)}": o valor ou o dia do vencimento?` }
+      // O valor tem que estar na frase. Quando só o dia mudou ("agora vence dia 25") não há valor a conferir.
+      if (valor !== null && temNumeroDeValor(texto) && !valorConfere(texto, valor, null)) return { acoes: [], perguntar: `Só para conferir: o valor novo de "${nomeDe(fixa)}" é quanto?` }
+      // O dia também: o número tem que aparecer na frase, senão a IA pode ter chutado.
+      if (dia !== null && !new RegExp(`(^|[^0-9])${dia}([^0-9]|$)`).test(texto)) return { acoes: [], perguntar: `Em que dia do mês vence "${nomeDe(fixa)}"?` }
+      // O que já está assim não muda: se só sobra o que é igual, avisa em vez de dizer que mudou.
+      if (valor !== null && Math.abs(valor - fixa.valor) < 0.005) valor = null
+      const diaNovo = dia !== null && dia !== fixa.dia ? dia : null
+      if (valor === null && diaNovo === null) {
+        return { acoes: [], perguntar: `"${nomeDe(fixa)}" já está em ${brlSimples(fixa.valor)} todo dia ${fixa.dia}. Não mudei nada.` }
+      }
+      out.push({ ...base, valor, dia_do_mes: diaNovo })
+      continue
+    }
+
+    if (a.tipo_acao === 'ajustar_conta') {
+      const nomeDe = (x: { descricao: string }) => limparTextoCliente(x.descricao, 60)
+      const conta = c.contasAbertas.find((x) => x.id === a.conta_id)
+      if (!conta) return { acoes: [], perguntar: 'Não achei essa conta em aberto. Qual conta você quer mudar? Me diga o nome.' }
+      if (!nomeada(texto, conta.descricao)) return { acoes: [], perguntar: `Você quer mudar a conta "${nomeDe(conta)}"? Me diga o nome da conta e o que mudou.` }
+      const ddmm = (v: string) => v.split('-').reverse().slice(0, 2).join('/')
+      // Várias contas em aberto com o mesmo nome (uma por mês, de conta fixa): se a IA não pegou a mais próxima, a frase tem que citar a data dela.
+      const mesmas = c.contasAbertas.filter((x) => tira(x.descricao).trim() === tira(conta.descricao).trim() && x.tipo === conta.tipo)
+      if (mesmas.length > 1 && mesmas[0].id !== conta.id && !texto.includes(ddmm(conta.vencimento))) {
+        return { acoes: [], perguntar: `Você tem mais de uma conta "${nomeDe(conta)}" em aberto (vencem ${mesmas.slice(0, 4).map((x) => ddmm(x.vencimento)).join(', ')}). Qual delas? Me diga a data de vencimento atual.` }
+      }
+      let valor = a.valor !== null && a.valor > 0 ? a.valor : null
+      let venc = dataReal(a.vencimento) && a.vencimento! >= c.hoje.slice(0, 4) + '-01-01' && a.vencimento! <= `${Number(c.hoje.slice(0, 4)) + 3}-12-31` ? a.vencimento : null
+      if (valor === null && venc === null) return { acoes: [], perguntar: `O que mudou na conta "${nomeDe(conta)}": o valor ou a data de vencimento?` }
+      if (valor !== null && temNumeroDeValor(texto) && !valorConfere(texto, valor, null)) return { acoes: [], perguntar: `Só para conferir: o valor novo de "${nomeDe(conta)}" é quanto?` }
+      if (valor !== null && Math.abs(valor - conta.valor) < 0.005) valor = null
+      if (venc === conta.vencimento) venc = null
+      if (valor === null && venc === null) return { acoes: [], perguntar: `"${nomeDe(conta)}" já está em ${brlSimples(conta.valor)} e vence ${ddmm(conta.vencimento)}. Não mudei nada.` }
+      out.push({ ...a, descricao: conta.descricao, conta_id: conta.id, valor, vencimento: venc, movimento: conta.tipo === 'receber' ? 'entrada' : 'saida', categoria_id: null, carteira_id: '', carteira_destino_id: null, data: c.hoje, fatura: null, noCartao: false })
       continue
     }
 

@@ -219,6 +219,34 @@ caso('comprovante sem nenhum valor que bata vira pergunta, não lançamento', ()
   assert.equal(r.acoes.length, 0)
   assert.match(r.perguntar!, /150,00/)
 })
+// Caso de origem (23/11/2026): comprovante de "pagamento de cartão CEA / Riachuelo com meu Nubank". A IA devolveu pagar_fatura, o conferidor descartava
+// esse tipo no comprovante e a pessoa recebia "Li R$ 325,77 nesse comprovante. O que foi?" mesmo com a legenda explicando.
+const PAGOU = (x: Partial<AcaoIA>) => acao({ tipo_acao: 'pagar_fatura', movimento: null, valor: null, descricao: 'Cartão CEA', carteira_id: 'banco', ...x })
+caso('comprovante de pagamento de cartão que o cliente NÃO tem cadastrado vira saída do valor do documento, sem perguntar', () => {
+  const r = conferir('Pagamento de cartão CEA de Nathalli com meu Nubank', CTX, resp(PAGOU({})), { documento: { valor: 325.77, movimento: 'saida' } })
+  assert.equal(r.perguntar, null)
+  assert.equal(r.acoes.length, 1)
+  assert.equal(r.acoes[0].tipo_acao, 'lancamento')
+  assert.equal(r.acoes[0].movimento, 'saida')
+  assert.equal(r.acoes[0].valor, 325.77)
+  assert.equal(r.acoes[0].carteira_id, 'banco', 'sai da conta citada')
+})
+caso('comprovante de pagamento de cartão: o valor é o do documento, nunca o que a IA inventou', () => {
+  const r = conferir('Pagamento do meu cartão Riachuelo, paguei com meu Nubank', CTX, resp(PAGOU({ valor: 9500, descricao: 'Cartão Riachuelo' })), { documento: { valor: 192.05, movimento: 'saida' } })
+  assert.equal(r.acoes.length, 1)
+  assert.equal(r.acoes[0].valor, 192.05)
+})
+caso('comprovante de fatura de cartão CADASTRADO segue como pagamento de fatura, com o valor do documento', () => {
+  const r = conferir('paguei a fatura do Cartão Inter', VARIAS, resp(PAGOU({ carteira_destino_id: 'cinter', carteira_id: 'nubank', descricao: 'Fatura Inter' })), { documento: { valor: 410.3, movimento: 'saida' } })
+  assert.equal(r.acoes.length, 1)
+  assert.equal(r.acoes[0].tipo_acao, 'pagar_fatura')
+  assert.equal(r.acoes[0].valor, 410.3)
+  assert.equal(r.acoes[0].carteira_destino_id, 'cinter')
+})
+caso('comprovante com legenda sem valor: o valor do documento completa a única ação', () => {
+  const r = conferir('entrada de serviço no meu banco', CTX, resp(acao({ valor: null, movimento: 'entrada', descricao: 'Serviço' })), { documento: { valor: 100, movimento: 'entrada' } })
+  assert.equal(r.acoes[0].valor, 100)
+})
 caso('comprovante não deixa a IA trocar entrada por saída', () => {
   const r = conferir('150', CTX, resp(acao({ valor: 150, movimento: 'saida' })), { documento: { valor: 150, movimento: 'entrada' } })
   assert.equal(r.acoes[0].movimento, 'entrada')

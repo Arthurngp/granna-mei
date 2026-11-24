@@ -1,4 +1,4 @@
-"""Cria (ou confirma) a conta de admin do Arthur no Granna Mei. Senha aleatória só no arquivo 600.
+"""Cria (ou confirma) a conta de admin do Arthur na Granninha. Senha aleatória só no arquivo 600.
 A segunda etapa (autenticador) ele ativa no primeiro acesso ao /admin."""
 import os, sys, secrets
 sys.path.insert(0, os.path.dirname(__file__))

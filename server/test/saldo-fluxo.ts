@@ -132,7 +132,7 @@ await caso('a IA fora do ar não impede de consultar o saldo (é código, não I
 
 await caso('falha ao calcular o saldo depois de gravar NÃO desfaz nem esconde o lançamento', async () => {
   ia.regras = [[/gastei 6/, acoes(acao({ valor: 6 }))]]
-  E.falharTabela = 'fixas' // só a consulta de saldo lê fixas: o registro em si não depende disso
+  E.falharTabela = 'fixas' // a consulta de saldo lê fixas; o contexto também lê, mas tolera a falha: o registro em si não depende disso
   const r = await msg('gastei 6 no pix')
   assert.match(r, /saiu R\$ 6,00/)
   assert.ok(!/Saldo Nubank/.test(r), 'sem saldo inventado quando não deu para calcular')
