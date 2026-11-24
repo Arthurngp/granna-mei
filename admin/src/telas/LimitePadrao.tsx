@@ -70,7 +70,7 @@ export function LimitePadrao() {
       setPadrao(r.padrao)
       setValor(String(r.padrao))
       setMotivo('')
-      avisar(`Pronto. O padrão agora é ${n(r.padrao)} lançamentos por mês para quem não tem limite próprio. Vale em até 1 minuto.`)
+      avisar(`Pronto. O padrão agora é ${n(r.padrao)} mensagens atendidas por mês para quem não tem limite próprio. Vale em até 1 minuto.`)
     } catch (e) {
       setErro((e as Error).message.includes('motivo') ? 'Escreva o motivo (pelo menos 3 letras).' : (e as Error).message)
     } finally {
@@ -80,7 +80,7 @@ export function LimitePadrao() {
 
   return (
     <section className="cartao g6">
-      <div className="cartao-cab"><h2>Limite de lançamentos por mês</h2></div>
+      <div className="cartao-cab"><h2>Limite de mensagens atendidas por mês</h2></div>
       {indisponivel ? (
         <Falha texto={indisponivel} />
       ) : padrao === null ? (
@@ -95,13 +95,13 @@ export function LimitePadrao() {
             <div><span>Padrão hoje</span><span className="num">{n(padrao)} por mês</span></div>
           </div>
           <label className="campo">
-            <span>Novo padrão (lançamentos por mês)</span>
+            <span>Novo padrão (mensagens atendidas por mês)</span>
             <input
               className="entrada num"
               inputMode="numeric"
               value={valor}
               onChange={(e) => setValor(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              aria-label="Novo limite padrão de lançamentos por mês"
+              aria-label="Novo limite padrão de mensagens atendidas por mês"
             />
           </label>
           {mudou && previa !== null && (

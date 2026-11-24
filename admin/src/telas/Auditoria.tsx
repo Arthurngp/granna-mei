@@ -20,7 +20,14 @@ const ROTULO_ACAO: Record<string, string> = {
   recurso_cliente: 'recurso de plano superior (liberar ou retirar)',
 }
 /** Ações que não têm um cliente alvo: o nome do alvo no lugar do "(removido)" que a listagem devolve. */
-const ALVO_GERAL: Record<string, string> = { limite_global: 'todos os clientes', retencao_regra: 'lembretes automáticos' }
+const ALVO_GERAL: Record<string, string> = {
+  limite_global: 'todos os clientes',
+  retencao_regra: 'lembretes automáticos',
+  retencao_etapa: 'lembretes automáticos',
+  whatsapp_desconectar: 'o WhatsApp da Granninha',
+  alerta: 'alerta de queda',
+  excluir_conta_definitivo: 'conta excluída',
+}
 
 export function Auditoria() {
   const [l, setL] = useState<Linha[] | null>(null)
@@ -34,7 +41,7 @@ export function Auditoria() {
   const semana = l ? l.filter((a) => Date.now() - new Date(a.criado_em).getTime() < 7 * 86_400_000).length : 0
   const heads: HeadDef[] | undefined = l
     ? [
-        { rotulo: 'Ações registradas', valor: n(l.length), nota: 'tudo que um admin já fez' },
+        { rotulo: 'Ações registradas', valor: n(l.length) + (l.length >= 300 ? '+' : ''), nota: l.length >= 300 ? 'mostrando as 300 mais recentes' : 'tudo que um admin já fez' },
         { rotulo: 'Nos últimos 7 dias', valor: n(semana) },
         { rotulo: 'Última ação', valor: l[0] ? dataHora(l[0].criado_em) : '–', nota: l[0] ? `por ${l[0].admin}` : 'nenhuma ainda', texto: true },
       ]

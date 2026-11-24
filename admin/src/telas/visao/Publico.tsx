@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { RAMOS } from '../../../../src/lib/config'
 import { custoReais, reais, type Consumo } from '../../custo'
-import { Falha, NOME_SITUACAO, dataBR } from '../comum'
+import { Falha, NOME_SITUACAO } from '../comum'
 import { BarraH, Cartao, Pagina, type HeadDef } from './layout'
 import { Ausente, n, pct, useRpc } from './usar'
 
@@ -69,7 +69,7 @@ export function Publico() {
         { rotulo: 'Perfis completos', valor: n(cob?.completos ?? 0), nota: `de ${n(cob?.total ?? 0)} clientes (${pct(cob?.completos ?? 0, cob?.total ?? 0)})` },
         { rotulo: 'Ramo que mais usa', valor: mRamo ? nomeGrupo('ramo', mRamo.grupo) : '–', nota: mRamo ? `${pct(mRamo.ativos7, mRamo.pessoas)} usaram esta semana` : 'precisa de grupos com 3 pessoas', texto: true },
         { rotulo: 'Idade que mais usa', valor: mIdade ? mIdade.grupo : '–', nota: mIdade ? `${n(mIdade.ativos7)} de ${n(mIdade.pessoas)} usaram esta semana` : 'ainda sem idades suficientes', texto: true },
-        { rotulo: 'Cidade que mais cadastra', valor: cidades[0]?.grupo ?? '–', nota: cidades[0] ? `${n(cidades[0].pessoas)} de ${n(cob?.completos ?? 0)} perfis completos` : 'ainda sem cidades', texto: true },
+        { rotulo: 'Cidade que mais cadastra', valor: cidades[0]?.grupo ?? '–', nota: cidades[0] ? `${n(cidades[0].pessoas)} ${cidades[0].pessoas === 1 ? 'pessoa informou' : 'pessoas informaram'} essa cidade` : 'ainda sem cidades', texto: true },
       ]
     : undefined
 
@@ -86,7 +86,7 @@ export function Publico() {
         <Cartao g={12}>
           <div className="cobertura">
             <p>
-              <b>{n(cob.completos)} de {n(cob.total)}</b> clientes contaram idade, cidade e faturamento. O ramo vem de todos. Os gráficos de idade, cidade e faturamento contam só os perfis completos: com amostra pequena, serve para ter ideias, não para decidir.
+              <b>{n(cob.completos)} de {n(cob.total)}</b> clientes contaram idade, cidade e faturamento. O ramo vem de todos. Cada gráfico conta quem preencheu aquele campo, mesmo sem o perfil completo: com amostra pequena, serve para ter ideias, não para decidir.
             </p>
             <div className="cobertura-b">
               <div className="hb-t"><i style={{ width: `${cob.total ? (cob.completos / cob.total) * 100 : 0}%`, background: '#0e8250' }} /></div>
@@ -218,7 +218,7 @@ export function Publico() {
                   <span className={p.cidade ? '' : 'vz'}>{p.cidade ? `${p.cidade}${p.uf ? `, ${p.uf}` : ''}` : 'não informou'}</span>
                   <span className={p.faixa_idade ? '' : 'vz'}>{p.faixa_idade ?? 'não informou'}</span>
                   <span className={p.faturamento_faixa ? '' : 'vz'}>{p.faturamento_faixa ? (FAT_NOME[p.faturamento_faixa] ?? 'prefere não dizer') : 'não informou'}</span>
-                  <span>{dataBR(p.criado_em).slice(0, 5)}</span>
+                  <span>{new Date(p.criado_em).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' })}</span>
                   <span>{n(p.msgs7)} msg</span>
                 </div>
               </article>

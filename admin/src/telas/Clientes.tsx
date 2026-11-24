@@ -102,7 +102,7 @@ export function Clientes() {
         { rotulo: 'Clientes', valor: n(p.clientes), nota: `${n(p.novos_7d)} novos em 7 dias` },
         { rotulo: 'Em dia', valor: n(sit.ativa ?? 0), nota: `${n(sit.cortesia ?? 0)} em cortesia` },
         { rotulo: 'Em teste', valor: n(sit.trial ?? 0), nota: `${n(sit.teste_vencido ?? 0)} com teste vencido` },
-        { rotulo: 'Sem acesso', valor: n((sit.bloqueada ?? 0) + (sit.atrasada ?? 0) + (sit.teste_vencido ?? 0)), nota: 'bloqueadas, em atraso ou teste vencido', tom: (sit.bloqueada ?? 0) + (sit.atrasada ?? 0) > 0 ? 'ruim' : undefined },
+        { rotulo: 'Sem acesso', valor: n((sit.bloqueada ?? 0) + (sit.teste_vencido ?? 0)), nota: 'bloqueadas ou com o teste vencido (quem está em atraso ainda usa)', tom: (sit.bloqueada ?? 0) > 0 ? 'ruim' : undefined },
       ]
     : undefined
 
@@ -143,7 +143,7 @@ export function Clientes() {
                 </div>
                 <div className="cl-v">
                   <span className={`situacao s-${c.situacao}`}>{NOME_SITUACAO[c.situacao] ?? c.situacao}</span>
-                  <small>{c.mensagens_mes} msg no mês</small>
+                  <small>{c.mensagens_mes} atendidas no mês</small>
                 </div>
               </button>
             ))}
@@ -229,7 +229,7 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
     setOcupado(true)
     try {
       const r = await rpc<{ efetivo: number }>('admin_limite_definir', { p_user: c.id, p_valor: remover ? null : Number(valorLimite), p_motivo: motivo.trim() })
-      avisar(remover ? `Limite próprio removido. Agora vale o padrão: ${n(r.efetivo)} por mês.` : `Limite deste cliente: ${n(r.efetivo)} lançamentos por mês. Vale já na próxima mensagem dele.`)
+      avisar(remover ? `Limite próprio removido. Agora vale o padrão: ${n(r.efetivo)} por mês.` : `Limite deste cliente: ${n(r.efetivo)} mensagens atendidas por mês. Vale já na próxima mensagem dele.`)
       mudou()
       fechar()
     } catch (e) {
@@ -303,7 +303,7 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
           )}
           {limite && (
             <div>
-              <span>Limite do mês</span>
+              <span>Mensagens atendidas no mês</span>
               <span className="num">
                 {n(limite.uso_mes)} de {n(limite.efetivo)} <small className="suave">({limite.proprio !== null ? 'só dele' : 'padrão'})</small>
               </span>
@@ -374,7 +374,7 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
           </div>
         ) : acao === 'limite' && limite ? (
           <div className="item-ob ligado" style={CAIXA}>
-            <b>Limite de lançamentos por mês</b>
+            <b>Limite de mensagens atendidas por mês</b>
             <small className="suave">
               Só de {c.nome || c.email}. Hoje vale {n(limite.efetivo)} ({limite.proprio !== null ? 'definido só para ele' : 'o padrão de todos'}) e ele já usou {n(limite.uso_mes)} neste mês. O cliente não vê este número.
             </small>
@@ -385,7 +385,7 @@ function FichaCliente({ c, fechar, mudou }: { c: Cliente | null; fechar: () => v
                 inputMode="numeric"
                 value={valorLimite}
                 onChange={(e) => setValorLimite(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                aria-label="Novo limite de lançamentos por mês"
+                aria-label="Novo limite de mensagens atendidas por mês"
               />
             </label>
             {limiteBloqueiaAgora && (
