@@ -4,6 +4,7 @@
  * transforma áudio, foto ou PDF em texto → entende → grava → responde.
  */
 import { cruzarComprovante } from './cruzar.ts'
+import { contextoIA } from './ia-config.ts'
 import { temNumeroDeValor, valorConfere } from './numeros.ts'
 import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, silenciarLembretes, usoDoMes } from './banco.ts'
 import { ehAssuntoDaConta, ehPedidoDeAjuda, responderAjuda } from './ajuda.ts'
@@ -239,7 +240,8 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
           status = 'ignorada'
           resposta = `Esse número já está confirmado nesta conta, então não dá para usá-lo em outra ao mesmo tempo. Se quiser levá-lo para a conta nova, troque o número aqui em ${PAINEL()}/ajustes (ou peça a exclusão desta conta) e confirme lá.`
         } else {
-          const r = await conversar(cliente, hoje, tipo, d, msgId, telefone, consumo, opts.retomada === true)
+          // O contexto diz de qual cliente é cada chamada de IA: é assim que o modelo individual (aba Configurações) chega à chamada sem mexer em nenhuma assinatura.
+          const r = await contextoIA.run({ userId: cliente.id }, () => conversar(cliente, hoje, tipo, d, msgId, telefone, consumo, opts.retomada === true))
           ;({ status, resposta, efeitos, intencao } = r)
           textoFinal = r.texto
           tokens = r.tokens

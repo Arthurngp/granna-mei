@@ -2,6 +2,7 @@
  * Banco PostgREST falso e IA falsa em memória, para testar o processar() real sem rede nem custo.
  * Usado por test/saldo-fluxo.ts e test/correcao-fluxo.ts.
  */
+import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
@@ -13,6 +14,7 @@ const PKS: Record<string, string[]> = {
   mensagens: ['id'], conversas: ['telefone'], perfis: ['id'], assinaturas: ['user_id'],
   categorias: ['user_id', 'id'], carteiras: ['user_id', 'id'], lancamentos: ['user_id', 'id'], fixas: ['user_id', 'id'], contas: ['user_id', 'id'],
   avisos: ['chave'],
+  config_ia_modelo: ['tarefa'], ia_modelo_cliente: ['user_id', 'tarefa'], ia_chaves: ['id'],
 }
 export const E = {
   tabelas: {} as Record<string, Linha[]>,
@@ -132,6 +134,7 @@ const db = createServer(async (req, res) => {
     const ignora = prefer.includes('resolution=ignore-duplicates')
     const saida: Linha[] = []
     for (const n of novas) {
+      if (tabela === 'ia_chaves' && !n.id) n.id = randomUUID() // default gen_random_uuid() do banco
       const ja = E.tabelas[tabela].find((l) => chave(l, pk) === chave(n, pk))
       if (ja && mescla) Object.assign(ja, n), saida.push(ja)
       else if (ja && ignora) continue
@@ -144,7 +147,8 @@ const db = createServer(async (req, res) => {
         saida.push(linha)
       }
     }
-    return prefer.includes('return=representation') ? enviar(201, saida) : enviar(201, undefined)
+    // Como o PostgREST de verdade: pedido com .single() (Accept vnd.pgrst.object) recebe o OBJETO, não a lista.
+    return prefer.includes('return=representation') ? enviar(201, umSo ? saida[0] : saida) : enviar(201, undefined)
   }
   if (req.method === 'PATCH') {
     const alvo = filtra()
@@ -185,6 +189,11 @@ export const ia = {
   ultimoResumo: null as null | Record<string, any>,
   /** Prompt de sistema da última interpretação (para provar o que a IA recebeu). */
   ultimoSistema: '',
+  /** Cada chamada de IA recebida: esquema (ou 'minima'/'audio'), modelo pedido e chave usada. */
+  chamadasFeitas: [] as { nome: string; modelo: string; chave: string }[],
+  /** Modelos que a IA falsa recusa (404 como a OpenAI faz com nome inexistente) e chaves que ela recusa (401). */
+  recusarModelos: new Set<string>(),
+  recusarChaves: new Set<string>(),
   queda: false,
   /** Faz a IA falsa responder um erro HTTP específico (ex.: 429 insufficient_quota). */
   erro: null as { status: number; corpo: string } | null,
@@ -210,13 +219,35 @@ const iaServer = createServer(async (req, res) => {
     res.writeHead(500, { 'Content-Type': 'application/json' })
     return res.end(JSON.stringify({ error: 'IA fora do ar (provocado pelo teste)' }))
   }
+  const bearer = String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
+  if (ia.recusarChaves.has(bearer)) {
+    ia.chamadasFeitas.push({ nome: 'recusada', modelo: '', chave: bearer })
+    res.writeHead(401, { 'Content-Type': 'application/json' })
+    return res.end(JSON.stringify({ error: { message: 'Incorrect API key provided' } }))
+  }
   // Transcrição de áudio: multipart, não JSON.
   if ((req.url ?? '').includes('/audio/transcriptions')) {
+    const modeloAudio = /name="model"\r\n\r\n([^\r\n]+)/.exec(txt)?.[1] ?? ''
+    ia.chamadasFeitas.push({ nome: 'audio', modelo: modeloAudio, chave: bearer })
+    if (ia.recusarModelos.has(modeloAudio)) {
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify({ error: { message: `The model \`${modeloAudio}\` does not exist or you do not have access to it.` } }))
+    }
     ia.chamadas.transcricao++
     res.writeHead(200, { 'Content-Type': 'application/json' })
     return res.end(JSON.stringify({ text: ia.transcricao, usage: { type: 'duration', seconds: 3 } }))
   }
   const b = JSON.parse(txt)
+  ia.chamadasFeitas.push({ nome: b.response_format?.json_schema?.name ?? 'minima', modelo: String(b.model), chave: bearer })
+  if (ia.recusarModelos.has(String(b.model))) {
+    res.writeHead(404, { 'Content-Type': 'application/json' })
+    return res.end(JSON.stringify({ error: { message: `The model \`${b.model}\` does not exist or you do not have access to it.`, type: 'invalid_request_error', code: 'model_not_found' } }))
+  }
+  // Chamada mínima (sonda e teste de modelo ou de chave): sem esquema, responde "ok".
+  if (!b.response_format) {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    return res.end(JSON.stringify({ choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 7, completion_tokens: 3 } }))
+  }
   const nome = b.response_format.json_schema.name as string
   const usuario = String(b.messages[1].content)
   let saida: unknown
@@ -300,6 +331,9 @@ export function semear() {
   ia.ultimoSistemaPergunta = ''
   ia.ultimoResumo = null
   ia.ultimoSistema = ''
+  ia.chamadasFeitas = []
+  ia.recusarModelos = new Set()
+  ia.recusarChaves = new Set()
   ia.queda = false
   ia.erro = null
   ia.pedidos = 0

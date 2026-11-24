@@ -8,6 +8,7 @@ import { desvincularSessao, garantirSessao, qrDaSessao, statusSessao } from './g
 import { criarTroca, depsReais, tratarTroca } from './trocar-whatsapp.ts'
 import { ErroExclusao, excluirContaDefinitivo } from './excluir.ts'
 import { numeroDeAviso } from './alerta.ts'
+import { adicionarChave, definirChaveAtiva, depsReais as depsIA, ErroConfig, listar as listarIA, removerChave, salvarModelo, salvarModeloCliente } from './ia-config-admin.ts'
 
 // Os domínios valem sempre, além do que vier em ADMIN_ORIGENS: trocar o domínio não pode derrubar o admin.
 // O admin em granninha.com.br/admin chama esta API de outra origem; sem ela aqui o navegador bloqueia por CORS.
@@ -24,6 +25,11 @@ export const ORIGENS = [
       .filter(Boolean),
   ),
 ]
+
+// Configurações da IA (aba Configurações): a lógica e as regras estão em ia-config-admin.ts.
+const iaDeps = depsIA(sb, async (adminId, acao, detalhes, alvo) => {
+  falhou((await sb.from('admin_auditoria').insert({ admin_id: adminId, acao, alvo_user_id: alvo ?? null, detalhes })).error, 'auditar a configuração da IA')
+})
 
 // Troca do número do WhatsApp: confirmação em duas etapas exigida aqui no servidor (ver trocar-whatsapp.ts).
 const trocaWhats = criarTroca(
@@ -139,6 +145,32 @@ export async function rotaAdmin(req: IncomingMessage, res: ServerResponse, camin
     } catch (e) {
       if (e instanceof ErroExclusao) json(res, e.status, { erro: e.message })
       else json(res, 500, { erro: `Não foi possível excluir: ${(e as Error).message}` })
+    }
+    return true
+  }
+  if (req.method === 'GET' && caminho === '/admin/ia') {
+    try {
+      json(res, 200, await listarIA(iaDeps))
+    } catch (e) {
+      json(res, 500, { erro: `Não foi possível ler as configurações: ${(e as Error).message}` })
+    }
+    return true
+  }
+  if (req.method === 'POST' && caminho.startsWith('/admin/ia/')) {
+    try {
+      const b = JSON.parse((await corpo()) || '{}') as Record<string, unknown>
+      const r =
+        caminho === '/admin/ia/modelo' ? await salvarModelo(iaDeps, admin, b)
+        : caminho === '/admin/ia/cliente' ? await salvarModeloCliente(iaDeps, admin, b)
+        : caminho === '/admin/ia/chave' ? await adicionarChave(iaDeps, admin, b)
+        : caminho === '/admin/ia/chave/ativar' ? await definirChaveAtiva(iaDeps, admin, b)
+        : caminho === '/admin/ia/chave/remover' ? await removerChave(iaDeps, admin, b)
+        : null
+      if (r) json(res, 200, r)
+      else json(res, 404, { erro: 'rota desconhecida' })
+    } catch (e) {
+      if (e instanceof ErroConfig) json(res, e.status, { erro: e.message })
+      else json(res, 500, { erro: `Não foi possível salvar: ${(e as Error).message}` })
     }
     return true
   }

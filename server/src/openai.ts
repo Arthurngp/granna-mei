@@ -1,17 +1,20 @@
 import { env } from './env.ts'
+import { chaveDaIA, fabricaDe, MODELO_AUDIO_FABRICA, MODELO_FABRICA, modeloDe, tarefaDeEsquema } from './ia-config.ts'
 import { classificarFalhaIA, ErroIA, registrarFalhaIA, registrarOkIA, valeTentarDeNovoIA, type TipoFalhaIA } from './ia-estado.ts'
 
-export const MODELO = process.env.OPENAI_MODELO ?? 'gpt-5.4-mini'
-export const MODELO_AUDIO = process.env.OPENAI_MODELO_AUDIO ?? 'gpt-4o-mini-transcribe'
+/** Modelos de FÁBRICA (o que vale sem nada configurado na aba Configurações do admin). O modelo de cada mensagem é resolvido em ia-config.ts. */
+export const MODELO = MODELO_FABRICA
+export const MODELO_AUDIO = MODELO_AUDIO_FABRICA
 
 // OPENAI_BASE_URL existe para os testes apontarem para uma IA falsa local. Em produção fica sem definir.
 const BASE = process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
 
 async function pedir(caminho: string, init: RequestInit, tentativas = 3): Promise<Response> {
+  let cred = await chaveDaIA()
   for (let i = 0; ; i++) {
     let r: Response
     try {
-      r = await fetch(BASE + caminho, { ...init, headers: { Authorization: `Bearer ${env('OPENAI_API_KEY')}`, ...(init.headers ?? {}) }, signal: AbortSignal.timeout(25_000) })
+      r = await fetch(BASE + caminho, { ...init, headers: { Authorization: `Bearer ${cred.chave}`, ...(init.headers ?? {}) }, signal: AbortSignal.timeout(25_000) })
     } catch (e) {
       // Sem resposta a tempo ou queda de rede: tenta de novo.
       if (i + 1 < tentativas) {
@@ -27,6 +30,12 @@ async function pedir(caminho: string, init: RequestInit, tentativas = 3): Promis
     }
     const corpo = (await r.text()).slice(0, 300)
     const tipo = classificarFalhaIA(r.status, corpo)
+    // A chave cadastrada na aba Configurações foi recusada (revogada, sem saldo): a Granninha não para por isso. Volta à chave do ambiente e segue.
+    if ((tipo === 'sem_chave' || tipo === 'sem_cota') && cred.origem === 'banco') {
+      console.error(`[ia-config] a chave cadastrada na tela foi recusada (${tipo}); usei a do ambiente: ${corpo.slice(0, 120)}`)
+      cred = { chave: env('OPENAI_API_KEY'), origem: 'ambiente' }
+      continue
+    }
     // Insistir só quando insistir resolve. Cota esgotada e chave inválida não passam em 2 segundos:
     // repetir três vezes fazia a cliente esperar mais para receber exatamente o mesmo erro.
     if (i + 1 < tentativas && valeTentarDeNovoIA(tipo)) {
@@ -43,10 +52,10 @@ async function pedir(caminho: string, init: RequestInit, tentativas = 3): Promis
  * com confirmação) e não devolve uso para o custo por cliente. Uma mensagem curta e poucos tokens de saída; exige crédito de verdade, ao contrário
  * de listar modelos, que responderia mesmo com a cota zerada.
  */
-export async function chamadaMinimaIA(): Promise<{ ok: true; uso: Uso } | { ok: false; tipo: TipoFalhaIA; detalhe: string }> {
+export async function chamadaMinimaIA(modelo: string = MODELO, chaveInformada?: string): Promise<{ ok: true; uso: Uso } | { ok: false; tipo: TipoFalhaIA; detalhe: string }> {
   let chave: string
   try {
-    chave = env('OPENAI_API_KEY')
+    chave = chaveInformada ?? (await chaveDaIA()).chave
   } catch (e) {
     return { ok: false, tipo: 'sem_chave', detalhe: (e as Error).message }
   }
@@ -54,7 +63,7 @@ export async function chamadaMinimaIA(): Promise<{ ok: true; uso: Uso } | { ok: 
     const r = await fetch(BASE + '/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${chave}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODELO, reasoning_effort: 'low', max_completion_tokens: 32, messages: [{ role: 'user', content: 'ok' }] }),
+      body: JSON.stringify({ model: modelo, reasoning_effort: 'low', max_completion_tokens: 32, messages: [{ role: 'user', content: 'ok' }] }),
       signal: AbortSignal.timeout(20_000),
     })
     if (r.ok) {
@@ -80,34 +89,65 @@ export interface Uso {
   audioSeg?: number
 }
 
-/** Chamada com resposta em JSON validado por esquema. */
+/** O erro é a OpenAI recusando o MODELO (nome inexistente ou sem acesso), e não cota, chave ou instabilidade? */
+function recusouOModelo(e: unknown): boolean {
+  return e instanceof ErroIA && (e.status === 400 || e.status === 404) && /model/i.test(e.message)
+}
+
+/** Chamada com resposta em JSON validado por esquema. O modelo vem da configuração (cliente > todos > fábrica); se a OpenAI o recusar, repete com o de fábrica. */
 export async function jsonEstruturado<T>(sistema: string, usuario: string | { type: string; [k: string]: unknown }[], nome: string, esquema: object): Promise<{ dados: T; uso: Uso }> {
-  const r = await pedir('/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: MODELO,
-      reasoning_effort: 'low',
-      messages: [
-        { role: 'system', content: sistema },
-        { role: 'user', content: usuario },
-      ],
-      response_format: { type: 'json_schema', json_schema: { name: nome, strict: true, schema: esquema } },
-    }),
-  })
-  const j = (await r.json()) as { choices: { message: { content: string; refusal?: string } }[]; usage?: { prompt_tokens: number; completion_tokens: number } }
-  const msg = j.choices[0].message
-  if (msg.refusal) throw new Error('Recusa do modelo: ' + msg.refusal)
-  return { dados: JSON.parse(msg.content) as T, uso: { entrada: j.usage?.prompt_tokens ?? 0, saida: j.usage?.completion_tokens ?? 0 } }
+  const tarefa = tarefaDeEsquema(nome)
+  const escolhido = await modeloDe(tarefa)
+  const chamar = async (modelo: string) => {
+    const r = await pedir('/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelo,
+        reasoning_effort: 'low',
+        messages: [
+          { role: 'system', content: sistema },
+          { role: 'user', content: usuario },
+        ],
+        response_format: { type: 'json_schema', json_schema: { name: nome, strict: true, schema: esquema } },
+      }),
+    })
+    const j = (await r.json()) as { choices: { message: { content: string; refusal?: string } }[]; usage?: { prompt_tokens: number; completion_tokens: number } }
+    const msg = j.choices[0].message
+    if (msg.refusal) throw new Error('Recusa do modelo: ' + msg.refusal)
+    return { dados: JSON.parse(msg.content) as T, uso: { entrada: j.usage?.prompt_tokens ?? 0, saida: j.usage?.completion_tokens ?? 0 } }
+  }
+  try {
+    return await chamar(escolhido)
+  } catch (e) {
+    const fabrica = fabricaDe(tarefa)
+    if (escolhido !== fabrica && recusouOModelo(e)) {
+      console.error(`[ia-config] o modelo configurado "${escolhido}" foi recusado para ${tarefa}; usei o de fábrica "${fabrica}": ${(e as Error).message.slice(0, 160)}`)
+      return await chamar(fabrica)
+    }
+    throw e
+  }
 }
 
 /** Transcreve um áudio (ogg/opus do WhatsApp) e devolve o consumo, para o custo no admin. */
 export async function transcrever(audio: Buffer, mime = 'audio/ogg'): Promise<{ texto: string; uso: Uso }> {
-  const form = new FormData()
-  form.append('model', MODELO_AUDIO)
-  form.append('language', 'pt')
-  form.append('file', new Blob([new Uint8Array(audio)], { type: mime }), mime.includes('mpeg') ? 'audio.mp3' : 'audio.ogg')
-  const r = await pedir('/audio/transcriptions', { method: 'POST', body: form })
+  const escolhido = await modeloDe('audio')
+  const enviar = (modelo: string) => {
+    const form = new FormData()
+    form.append('model', modelo)
+    form.append('language', 'pt')
+    form.append('file', new Blob([new Uint8Array(audio)], { type: mime }), mime.includes('mpeg') ? 'audio.mp3' : 'audio.ogg')
+    return pedir('/audio/transcriptions', { method: 'POST', body: form })
+  }
+  let r: Response
+  try {
+    r = await enviar(escolhido)
+  } catch (e) {
+    if (escolhido !== MODELO_AUDIO_FABRICA && recusouOModelo(e)) {
+      console.error(`[ia-config] o modelo de áudio configurado "${escolhido}" foi recusado; usei o de fábrica "${MODELO_AUDIO_FABRICA}": ${(e as Error).message.slice(0, 160)}`)
+      r = await enviar(MODELO_AUDIO_FABRICA)
+    } else throw e
+  }
   const j = (await r.json()) as {
     text: string
     usage?: { type?: string; seconds?: number; input_tokens?: number; output_tokens?: number; input_token_details?: { audio_tokens?: number; text_tokens?: number } }

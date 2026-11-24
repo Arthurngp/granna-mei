@@ -80,6 +80,7 @@ MIGRATIONS = {
     "enviomanual": "20261123120000_envio_manual.sql",
     "custofoto": "20261123140000_custo_foto_documento.sql",
     "enviofrio": "20261123160000_envio_manual_contato_frio.sql",
+    "configia": "20261124140000_config_ia.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
@@ -223,6 +224,14 @@ CONFERE = {
     # Admin com "usou" de verdade: refaz admin_ativacao, admin_acoes, admin_retencao e admin_publico (só leitura) e cria 2 funções de apoio FECHADAS ao cliente.
     # Depende da `admindados` (rodar antes). ANTES e DEPOIS mostram o que muda: "mensagens_que_nao_sao_uso" são mensagens de cliente que hoje contam como uso
     # (SAIR, recusa por acesso ou limite, ruído, erro) e passam a não contar; "funcoes_de_apoio" vira 2; "cliente_executa_apoio" tem de ficar false.
+    # Só cria três tabelas novas (modelo para todos, modelo por cliente, chaves de API) e as fecha a cliente/anônimo. ANTES: "tabelas_existem" = 0; DEPOIS: 3,
+    # "acessiveis_a_cliente_ou_anonimo" tem de ser 0 (a chave guardada é segredo), "chaves_cadastradas" começa em 0.
+    "configia": """select
+        (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('config_ia_modelo','ia_modelo_cliente','ia_chaves')) as tabelas_existem,
+        (select count(*) from information_schema.role_table_grants g where g.table_schema='public' and g.table_name in ('config_ia_modelo','ia_modelo_cliente','ia_chaves')
+           and g.grantee in ('anon','authenticated','PUBLIC')) as acessiveis_a_cliente_ou_anonimo,
+        (select case when to_regclass('public.ia_chaves') is null then null
+              else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.ia_chaves', false, true, '')))[1]::text end) as chaves_cadastradas""",
     "adminuso": """select
         (select count(*) from public.mensagens m where m.user_id is not null and m.status not in ('ok','pergunta')) as mensagens_de_cliente_recusadas_ou_ruido,
         (select count(*) from public.mensagens m where m.user_id is not null and m.status = 'pergunta'

@@ -5,12 +5,13 @@ import { MOCK, sb, rpc } from './sb'
 import { Auditoria } from './telas/Auditoria'
 import { Avisos } from './telas/Avisos'
 import { Clientes } from './telas/Clientes'
+import { Configuracoes } from './telas/Configuracoes'
 import { Granninha } from './telas/Granninha'
 import { SlotCtx } from './telas/visao/layout'
 import { Visao } from './telas/Visao'
 
 type Etapa = 'carregando' | 'entrar' | 'sem-acesso' | 'ativar-2fa' | 'codigo-2fa' | 'dentro'
-type Aba = 'visao' | 'clientes' | 'granninha' | 'avisos' | 'auditoria'
+type Aba = 'visao' | 'clientes' | 'granninha' | 'avisos' | 'auditoria' | 'configuracoes'
 
 export default function App() {
   const [etapa, setEtapa] = useState<Etapa>('carregando')
@@ -75,6 +76,7 @@ export default function App() {
                 ['granninha', 'Granninha'],
                 ['avisos', 'Avisos'],
                 ['auditoria', 'Auditoria'],
+                ['configuracoes', 'Configurações'],
               ] as const
             ).map(([v, r]) => (
               <button key={v} type="button" aria-pressed={aba === v} onClick={() => setAba(v)}>
@@ -92,6 +94,7 @@ export default function App() {
         {aba === 'granninha' && <Granninha />}
         {aba === 'avisos' && <Avisos />}
         {aba === 'auditoria' && <Auditoria />}
+        {aba === 'configuracoes' && <Configuracoes />}
       </main>
       </SlotCtx.Provider>
     </div>
