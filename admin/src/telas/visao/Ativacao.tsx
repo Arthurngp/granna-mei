@@ -10,8 +10,6 @@ interface Coorte {
   cadastros: number
   confirmaram: number
   com_mensagem: number
-  /** Terminaram as boas-vindas (passo 7) e nunca usaram. Vem contado do banco; ausente se a migration admin_uso_real ainda não rodou. */
-  terminaram_sem_uso?: number
   passos: Record<string, number>
 }
 interface Ativ {
@@ -19,6 +17,8 @@ interface Ativ {
   passos: Record<string, number>
   confirmaram: number
   com_mensagem: number
+  /** Terminaram as boas-vindas (passo 7) e nunca usaram. Vem contado do banco; ausente se a migration admin_uso_real ainda não rodou. */
+  terminaram_sem_uso?: number
   mediana_horas_ate_primeira: number | null
   coortes: Coorte[]
 }
