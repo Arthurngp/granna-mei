@@ -30,16 +30,32 @@ function pontos(descConta: string, valorConta: number, descLanc: string, valorLa
   return mesmoNome + perto
 }
 
-/** Lançamentos que PODEM ser o pagamento desta conta, do mais provável para o menos (até 8). Nada que já pague outra conta. */
-export function candidatosParaConta(a: Estado, conta: Conta, hoje: string): Lancamento[] {
+/** Um lançamento oferecido para pagar uma conta. `ocupada`: a conta que ele já paga hoje (aparece marcado; escolher passa o pagamento para esta conta). */
+export interface Opcao {
+  l: Lancamento
+  ocupada?: Conta
+}
+
+/**
+ * Lançamentos que PODEM ser o pagamento desta conta, do mais provável para o menos.
+ * Sem busca: os últimos 60 dias em torno do vencimento, até 8. Com busca (nome ou valor): TODOS os lançamentos do tipo certo que combinam, até 30,
+ * sem limite de data (a pessoa sabe o que procura). Quem já paga outra conta NÃO some: vem marcado em `ocupada`, porque muitas vezes é o pagamento certo
+ * ligado à conta errada (caso do Arthur em 24/11: o pagamento de 109 estava ligado à conta de dezembro e a lista não o mostrava).
+ */
+export function candidatosParaConta(a: Estado, conta: Conta, hoje: string, busca = ''): Opcao[] {
   if (conta.status !== 'aberta') return []
-  const usados = new Set(a.contas.filter((c) => c.status === 'paga' && c.lancId).map((c) => c.lancId))
+  const q = semAcento(busca).trim()
+  const qNum = q.replace(',', '.')
   return a.lancamentos
-    .filter((l) => l.tipo === tipoDoLancamento(conta) && !usados.has(l.id) && dias(l.data, conta.vencimento) <= 60 && l.data <= hoje)
-    .map((l) => ({ l, p: pontos(conta.descricao, conta.valor, l.descricao, l.valor) }))
+    .filter((l) => {
+      if (l.tipo !== tipoDoLancamento(conta) || l.data > hoje) return false
+      if (!q) return dias(l.data, conta.vencimento) <= 60
+      return semAcento(l.descricao).includes(q) || l.valor.toFixed(2).includes(qNum) || l.valor.toFixed(2).replace('.', ',').includes(q)
+    })
+    .map((l) => ({ l, p: pontos(conta.descricao, conta.valor, l.descricao, l.valor), ocupada: contaDoLancamento(a, l.id) }))
     .sort((x, y) => y.p - x.p || dias(x.l.data, conta.vencimento) - dias(y.l.data, conta.vencimento))
-    .slice(0, 8)
-    .map((x) => x.l)
+    .slice(0, q ? 30 : 8)
+    .map((x) => ({ l: x.l, ocupada: x.ocupada }))
 }
 
 /** Contas em aberto que este lançamento PODE ter pago, da mais provável para a menos (até 8). */
@@ -76,4 +92,17 @@ export function soltar(a: Estado, contaId: string, apagarPagamento = false): Est
     contas: a.contas.map((x): Conta => (x.id === contaId ? { ...x, status: 'aberta', pagoEm: undefined, lancId: undefined } : x)),
     lancamentos: apagarPagamento && c.lancId ? a.lancamentos.filter((l) => l.id !== c.lancId) : a.lancamentos,
   }
+}
+
+/**
+ * Passa um pagamento de uma conta para outra: a conta que ele pagava volta a ficar em aberto (o lançamento FICA) e a nova fica paga com ele.
+ * Se o pagamento não estava ligado a nada, é o mesmo que `vincular`. Recusa (devolve o mesmo estado) o que não fecha, sem desligar nada pela metade.
+ */
+export function religar(a: Estado, contaId: string, lancId: string): Estado {
+  const c = a.contas.find((x) => x.id === contaId)
+  const l = a.lancamentos.find((x) => x.id === lancId)
+  if (!c || !l || c.status !== 'aberta' || l.tipo !== tipoDoLancamento(c)) return a
+  const antiga = contaDoLancamento(a, lancId)
+  if (!antiga) return vincular(a, contaId, lancId)
+  return vincular(soltar(a, antiga.id, false), contaId, lancId)
 }
