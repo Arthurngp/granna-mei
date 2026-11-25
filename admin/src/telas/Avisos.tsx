@@ -64,7 +64,7 @@ const REGRAS: Record<Regra, { titulo: string; desc: string; atraso: string; sumi
   nunca_mandou: {
     titulo: 'Nunca mandou nada',
     desc: 'Pessoas que confirmaram o WhatsApp, mas ainda não lançaram nada.',
-    atraso: 'Quantas horas depois de a pessoa entrar',
+    atraso: 'Quantas horas depois da última mensagem da pessoa',
   },
   parou_de_usar: {
     titulo: 'Parou de usar',
@@ -415,7 +415,7 @@ function EtapaForm({ r, e, outra, aoSalvar }: { r: RegraCfg; e: EtapaCfg; outra:
       </label>
       {(ativa ? travaDesligar : travaLigar) && <small className="suave">{ativa ? travaDesligar : travaLigar}</small>}
       <label className="campo">
-        <span>{r.regra === 'nunca_mandou' ? 'Quantas horas depois de a pessoa entrar' : 'Quantas horas depois da última vez que a pessoa usou'}{atrasoOk ? `: ${prazo(atrasoNum)}` : ''}</span>
+        <span>{r.regra === 'nunca_mandou' ? 'Quantas horas depois da última mensagem da pessoa' : 'Quantas horas depois da última vez que a pessoa usou'}{atrasoOk ? `: ${prazo(atrasoNum)}` : ''}</span>
         <input className="entrada num" inputMode="numeric" value={atraso} onChange={(x) => setAtraso(x.target.value.replace(/\D/g, '').slice(0, 3))} aria-label={`Horas de espera da ${e.etapa}ª mensagem de ${REGRAS[r.regra].titulo}`} />
       </label>
       {erroOrdem && <small style={{ color: 'var(--out, #b4232c)', fontWeight: 620 }}>{erroOrdem}</small>}
