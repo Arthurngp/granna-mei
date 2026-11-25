@@ -12,6 +12,10 @@
  *   saído): o admin vê "falhou" e decide.
  * - Antes de enviar, confere DE NOVO se a pessoa pode receber (pode ter respondido SAIR esperando na fila). Recusado vira "falhou" com o motivo.
  *   Contato frio (quem nunca escreveu para o número atual) só sai se o admin autorizou AQUELE pedido (contato_frio); o automático nunca o faz.
+ * - Número só DIGITADO no cadastro (a pessoa não confirmou o WhatsApp; pedido de 2026-11-24): só sai com autorização própria do admin naquele pedido
+ *   (nao_confirmado), que não se confunde com a do contato frio. Antes de enviar, o número é conferido NO WHATSAPP: se não existe, o pedido vira
+ *   "falhou" sem sair nada (mensagem para número inexistente é sinal de disparo em massa); se existe, sai para o endereço real que o WhatsApp devolve
+ *   (no Brasil ele muitas vezes não tem o nono dígito, e mandar para a variante errada não entrega). Não deu para conferir: em dúvida, não envia.
  * - A linha do SAIR é acrescentada aqui, sempre (montarTextoRetencao), e cada envio é gravado em `avisos` (tipo retencao_manual) para os
  *   lembretes automáticos enxergarem: contam na espera de 3 minutos e no intervalo de 48 horas por pessoa.
  */
@@ -30,6 +34,13 @@ export interface PedidoManual {
   texto: string
   /** O admin autorizou, de propósito, o envio para quem nunca escreveu para o número atual. A autorização vale só para este pedido. */
   contato_frio?: boolean
+  /** O admin autorizou, de propósito, o envio para um número só digitado no cadastro (WhatsApp não confirmado). Também vale só para este pedido. */
+  nao_confirmado?: boolean
+}
+/** O que o WhatsApp diz de um número: se existe e qual é o endereço real dele. */
+export interface NumeroNoWhats {
+  existe: boolean
+  jid: string | null
 }
 export interface AlvoManual {
   telefone: string | null
@@ -45,7 +56,9 @@ export interface DepsManual {
   /** O pedido mais antigo da fila, ou null. Lança se não conseguir ler (inclusive migration não aplicada). */
   proximo: () => Promise<PedidoManual | null>
   /** `forcar`: repete a autorização que o admin deu ao pedir (só libera o contato frio; SAIR, exclusão e o resto continuam recusando). */
-  apto: (userId: string, forcar: boolean) => Promise<AlvoManual>
+  apto: (userId: string, forcar: boolean, naoConfirmado?: boolean) => Promise<AlvoManual>
+  /** Confere o número no WhatsApp. Só é chamado para número digitado. Lança se não conseguir conferir. Ausente: número digitado nunca sai. */
+  conferirNumero?: (telefone: string) => Promise<NumeroNoWhats>
   gatewayConectado: () => Promise<boolean>
   /** O envio mais recente de QUALQUER tipo e quantos manuais já saíram desde `inicioDoDia`. */
   movimento: (inicioDoDia: string) => Promise<{ ultimoEnvioEm: string | null; manuaisHoje: number }>
@@ -111,22 +124,43 @@ export async function rodarEnvioManual(d: DepsManual, agora = new Date()): Promi
     if (agora.getTime() - Math.max(noBanco, estadoManual.ultimoEnvioMs) < ESPERA_MANUAL_MINUTOS * 60_000) return log
 
     // Confere DE NOVO se a pessoa pode receber: ela pode ter respondido SAIR enquanto esperava.
-    const alvo = await d.apto(pedido.user_id, !!pedido.contato_frio)
+    const alvo = await d.apto(pedido.user_id, !!pedido.contato_frio, !!pedido.nao_confirmado)
     if (alvo.recusa || !alvo.telefone) {
       const motivo = alvo.recusa ?? 'sem telefone para responder'
       await d.concluir(pedido, { ok: false, erro: `não enviado: ${motivo}` })
       log.push(`pedido recusado na hora de enviar (${motivo})`)
       return log
     }
+    // Número digitado: confere no WhatsApp antes de reservar. Sem conferência (ou conferência que falha), nada sai e o pedido espera o próximo minuto.
+    let destino = alvo.telefone
+    if (pedido.nao_confirmado) {
+      if (!d.conferirNumero) {
+        log.push('número digitado e sem como conferir no WhatsApp: nada enviado')
+        return log
+      }
+      let n: NumeroNoWhats
+      try {
+        n = await d.conferirNumero(alvo.telefone)
+      } catch (e) {
+        log.push(`não consegui conferir o número no WhatsApp, o pedido continua na fila: ${erroSeguro((e as Error).message)}`)
+        return log
+      }
+      if (!n.existe || !n.jid) {
+        await d.concluir(pedido, { ok: false, erro: 'não enviado: o número digitado no cadastro não tem WhatsApp' })
+        log.push('pedido recusado na hora de enviar (o número digitado não tem WhatsApp)')
+        return log
+      }
+      destino = n.jid
+    }
     if (!(await d.reservar(pedido, alvo.telefone))) return log
 
     try {
-      await d.enviar(alvo.telefone, montarTextoRetencao(pedido.texto, alvo.nome))
+      await d.enviar(destino, montarTextoRetencao(pedido.texto, alvo.nome))
       await d.concluir(pedido, { ok: true })
       estadoManual.enviados++
       estadoManual.falhasSeguidas = 0
       estadoManual.ultimoEnvioMs = agora.getTime()
-      log.push(`manual: enviado a ${mascarar(alvo.telefone)}${pedido.contato_frio ? ' (contato frio, autorizado pelo admin)' : ''}`)
+      log.push(`manual: enviado a ${mascarar(alvo.telefone)}${pedido.nao_confirmado ? ' (número digitado no cadastro, autorizado pelo admin)' : pedido.contato_frio ? ' (contato frio, autorizado pelo admin)' : ''}`)
     } catch (e) {
       const msg = erroSeguro((e as Error).message)
       await d.concluir(pedido, { ok: false, erro: msg }).catch((e2) => log.push(`não consegui registrar a falha: ${(e2 as Error).message}`))

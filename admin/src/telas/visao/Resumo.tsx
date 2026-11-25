@@ -22,12 +22,18 @@ interface Item {
   nome: string
   negocio: string
   whats: string
-  grupo: 'bloq' | 'sumiu' | 'nunca' | 'whats'
+  grupo: 'bloq' | 'sumiu' | 'nunca' | 'whats' | 'cadastro' | 'semfone'
   status: string | null
   passo: number
   criado_em: string
   ultima: string | null
   dias: number
+  /** Só vêm do banco com a migration contatoscadastro. Sem ela ficam ausentes e a tela se comporta como antes. */
+  verificado?: boolean
+  sair?: boolean
+  ramo?: string
+  ocupacao?: string
+  email?: string
 }
 interface Acoes {
   contagem: Partial<Record<Item['grupo'], number>>
@@ -76,8 +82,15 @@ type EstadoEnvio =
   | { tipo: 'enviado'; em: number | null }
   | { tipo: 'falhou'; erro: string }
 
-/** Só estes grupos têm envio pelo sistema: quem parou no passo do WhatsApp nunca escreveu para o número, e quem está sem acesso pede conversa de gente. */
+/** Estes grupos têm envio pelo sistema para o número CONFIRMADO. Quem está sem acesso pede conversa de gente. */
 const COM_ENVIO: Item['grupo'][] = ['nunca', 'sumiu']
+/**
+ * Quem só DIGITOU o número no cadastro e não confirmou (pedido do Arthur em 2026-11-24). Também tem envio pelo sistema, mas com aviso e autorização
+ * próprios a cada pedido: ninguém provou que o número é da pessoa. Só vale quando o banco diz `verificado: false` (migration contatoscadastro); sem
+ * esse campo a tela não oferece o envio, porque o banco antigo recusaria.
+ */
+const naoConfirmado = (i: Item) => (i.grupo === 'whats' || i.grupo === 'cadastro') && i.verificado === false
+const temEnvio = (i: Item) => !i.sair && (COM_ENVIO.includes(i.grupo) || naoConfirmado(i))
 /** A recusa do banco para quem só falou com o número ANTIGO (contato frio). Só esse caso tem "Enviar mesmo assim", decisão manual do admin: quem respondeu SAIR ou pediu exclusão não recebe nada, autorizado ou não. */
 const RECUSA_FRIA = /nunca escreveu para o número atual/i
 /** A mesma linha que o servidor acrescenta no fim de toda mensagem (RODAPE_SAIR em server/src/retencao.ts). */
@@ -93,10 +106,13 @@ const haQuanto = (ms: number) => {
 
 const GRUPOS: { id: Item['grupo']; nome: string }[] = [
   { id: 'nunca', nome: 'Nunca usaram' },
-  { id: 'whats', nome: 'Pararam no WhatsApp' },
+  { id: 'whats', nome: 'Não conectaram' },
+  { id: 'cadastro', nome: 'Pararam no cadastro' },
   { id: 'sumiu', nome: 'Sumiram' },
   { id: 'bloq', nome: 'Sem acesso' },
+  { id: 'semfone', nome: 'Sem telefone' },
 ]
+const haDias = (d: number) => (d <= 0 ? 'hoje' : d === 1 ? 'ontem' : `há ${d} dias`)
 
 function motivo(i: Item) {
   switch (i.grupo) {
@@ -106,8 +122,12 @@ function motivo(i: Item) {
       return { m: 'Usava e parou', q: `última mensagem há ${i.dias} dias` }
     case 'nunca':
       return { m: 'Confirmou o WhatsApp e nunca usou', q: `cadastro há ${i.dias} dias` }
+    case 'cadastro':
+      return { m: 'Parou no meio do cadastro', q: `começou ${haDias(i.dias)}` }
+    case 'semfone':
+      return { m: 'Criou a conta e não deixou telefone', q: `conta criada ${haDias(i.dias)}` }
     default:
-      return { m: 'Parou em Confirmar WhatsApp', q: `cadastro há ${i.dias} dias` }
+      return { m: i.passo >= 7 ? 'Terminou o cadastro e não conectou' : 'Parou em Confirmar WhatsApp', q: `cadastro ${haDias(i.dias)}` }
   }
 }
 
@@ -117,8 +137,12 @@ function sugestao(i: Item) {
   switch (i.grupo) {
     case 'nunca':
       return `${oi} Aqui é da Granninha. Vi que você já conectou seu WhatsApp, mas ainda não mandou o primeiro lançamento. Quer que eu te mostre como é rápido? Me manda, por exemplo: gastei 50 no mercado.`
+    // Os dois textos abaixo vão para quem ainda não confirmou o número. Pedem uma resposta: quando a pessoa responde, a Granninha manda sozinha o
+    // caminho para terminar (o texto do admin não pode ter link). Passam por retencao_texto_erro no banco.
     case 'whats':
-      return `${oi} Aqui é da Granninha. Vi que você começou o cadastro e parou na hora de confirmar o WhatsApp. Posso te ajudar a terminar? Leva um minuto.`
+      return `${oi} Aqui é da Granninha. Seu cadastro ficou pronto, falta só confirmar este número pra gente começar a conversar. Me responde por aqui que eu te mando o passo. Leva um minuto.`
+    case 'cadastro':
+      return `${oi} Aqui é da Granninha. Vi que você começou seu cadastro e parou no meio. Falta pouco pra eu começar a anotar o que entra e o que sai do seu negócio. Me responde por aqui que eu te mando o caminho pra terminar.`
     case 'sumiu':
       return `${oi} Faz uns dias que você não usa a Granninha. Aconteceu alguma coisa? Se algo atrapalhou, me conta que eu resolvo.`
     default:
@@ -141,7 +165,9 @@ function sugestaoFria(i: Item) {
 
 const porque: Record<Item['grupo'], (d: number) => string> = {
   nunca: (d) => `Confirmou o WhatsApp há ${d} dias e não mandou nada. Quanto mais cedo a primeira conversa, maior a chance de virar hábito.`,
-  whats: (d) => `Fez o cadastro há ${d} dias e travou na confirmação do número. Sem confirmar, a Granninha não responde.`,
+  whats: (d) => `Fez o cadastro ${haDias(d)} e não confirmou o número. Sem confirmar, a Granninha não anota nada para essa pessoa.`,
+  cadastro: (d) => `Começou o cadastro ${haDias(d)}, deixou o telefone e parou antes do fim. É quem está mais perto de virar cliente.`,
+  semfone: (d) => `Criou a conta ${haDias(d)} e saiu na primeira tela, sem deixar telefone. Só dá para falar com essa pessoa por e-mail.`,
   sumiu: (d) => `Usava a Granninha e está há ${d} dias sem mandar nada. É o sinal mais cedo de que a pessoa vai embora.`,
   bloq: () => 'A conta está sem acesso. Vale entender o motivo antes de qualquer contato.',
 }
@@ -181,7 +207,9 @@ function ConfirmarEnvio({ item, fila, desvio, jaFria, onFechar, onEnviado, onRec
   // Contato frio: a fila já diz quem é (campo frios), ou o banco recusou agora, ou já recusou antes nesta sessão. Muda o TEXTO (pede para salvar o número novo e
   // começar a lançar) e a confirmação passa a levar a autorização do admin.
   const [fria, setFria] = useState(jaFria || !!fila.frios?.includes(item.user_id))
-  const texto = fria ? sugestaoFria(item) : sugestao(item)
+  // Número só digitado no cadastro: o texto é o do próprio grupo e a confirmação SEMPRE leva a autorização do admin (sem ela o banco recusa).
+  const digitado = naoConfirmado(item)
+  const texto = digitado ? sugestao(item) : fria ? sugestaoFria(item) : sugestao(item)
   const recente = fila.ultimo_envio_em ? Date.now() + desvio - Date.parse(fila.ultimo_envio_em) < fila.espera_min * 60_000 : false
   const espera = fila.itens.length > 0 || recente
   async function enviar(forcar: boolean) {
@@ -218,7 +246,12 @@ function ConfirmarEnvio({ item, fila, desvio, jaFria, onFechar, onEnviado, onRec
       </p>
       {!fila.whatsapp_ok && <div className="por">O WhatsApp da Granninha está desconectado agora. O pedido fica na fila e sai quando reconectar.</div>}
       {erro && <div className="por" role="alert">{erro}</div>}
-      {fria && (
+      {digitado && (
+        <div className="por" role="alert">
+          Vai para <b>{item.whats}</b>, o número que a pessoa digitou no cadastro. Ninguém confirmou que é dela: se foi digitado errado, a mensagem cai em outra pessoa. Antes de enviar, o sistema confere se o número existe no WhatsApp e, se não existir, nada sai. Chamar quem nunca falou com a Granninha tem risco de bloqueio do número e conta no limite de 10 por dia. A decisão é sua.
+        </div>
+      )}
+      {fria && !digitado && (
         <div className="por" role="alert">
           Esta pessoa só falou com o número antigo da Granninha, então a mensagem pede para salvar o número novo e começar a lançar. Mandar do número novo para quem nunca falou com ele tem risco de bloqueio. A decisão é sua.
         </div>
@@ -227,11 +260,11 @@ function ConfirmarEnvio({ item, fila, desvio, jaFria, onFechar, onEnviado, onRec
         <button type="button" onClick={onFechar}>
           Cancelar
         </button>
-        <button type="button" className="p" onClick={() => void enviar(fria)} disabled={enviando}>
-          {enviando ? 'Enviando…' : 'Enviar mensagem'}
+        <button type="button" className="p" onClick={() => void enviar(fria || digitado)} disabled={enviando}>
+          {enviando ? 'Enviando…' : digitado ? 'Enviar mesmo assim' : 'Enviar mensagem'}
         </button>
       </div>
-      {fria && (
+      {(fria || digitado) && (
         <p className="texto-ajuda">
           Ou prefira o seu WhatsApp pessoal:{' '}
           <a href={waLink(item.whats, texto)} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', fontWeight: 700 }}>
@@ -274,12 +307,12 @@ export function Resumo() {
   const recebidoEm = useMemo(() => Date.now(), [fila.dados])
   const desvio = fila.dados ? Date.parse(fila.dados.agora) - recebidoEm : 0
   const podeEnviar = !!fila.dados
-  const comEnvioPara = (i: Item) => podeEnviar && COM_ENVIO.includes(i.grupo)
+  const comEnvioPara = (i: Item) => podeEnviar && temEnvio(i)
   /** O texto certo para esta conta: o do contato frio se ela nunca escreveu para o número atual, o de sempre nos outros casos. */
   const textoDe = (i: Item) => (COM_ENVIO.includes(i.grupo) && (soAntigo[i.user_id] || fila.dados?.frios?.includes(i.user_id)) ? sugestaoFria(i) : sugestao(i))
   const envioDe = (i: Item): EstadoEnvio | null => {
     const f = fila.dados
-    if (!f || !COM_ENVIO.includes(i.grupo)) return null
+    if (!f || !temEnvio(i)) return null
     const ativo = f.itens.find((x) => x.user_id === i.user_id)
     if (ativo) return { tipo: ativo.status, id: ativo.id, previsto: Date.parse(ativo.previsto_em), posicao: ativo.posicao }
     const rec = f.recentes.find((x) => x.user_id === i.user_id)
@@ -340,7 +373,9 @@ export function Resumo() {
   ) : undefined
 
   const todos = acoes.dados?.itens ?? []
-  const lista = (filtro === 'todos' ? todos : todos.filter((i) => i.grupo === filtro)).slice(0, 6)
+  // Em "Todos" a tela mostra só o mais urgente; ao abrir um grupo, mostra o grupo inteiro (até 30), para dar para chamar um por um.
+  const LIMITE_LISTA = filtro === 'todos' ? 6 : 30
+  const lista = (filtro === 'todos' ? todos : todos.filter((i) => i.grupo === filtro)).slice(0, LIMITE_LISTA)
   const total = acoes.dados ? Object.values(acoes.dados.contagem).reduce((a, b) => a + (b ?? 0), 0) : 0
 
   const perda = ativ.dados ? maiorPerda(ativ.dados.passos) : null
@@ -415,7 +450,7 @@ export function Resumo() {
                           </button>
                         )}
                       </div>
-                    ) : (
+                    ) : i.grupo === 'semfone' || i.sair ? null : (
                       <a className="ac-wa" href={waLink(i.whats, sugestao(i))} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} aria-label={`Chamar ${i.nome} no WhatsApp`}>
                         <IconeWa />
                       </a>
@@ -424,7 +459,13 @@ export function Resumo() {
                 )
               })}
             </div>
-            <p className="rodape-cartao">{(filtro === 'todos' ? todos.length : todos.filter((i) => i.grupo === filtro).length) > 6 ? 'Mostrando as 6 primeiras. Os grupos mais urgentes vêm antes.' : 'Toque numa conta para ver a ficha e a mensagem sugerida.'}</p>
+            <p className="rodape-cartao">
+              {(filtro === 'todos' ? todos.length : todos.filter((i) => i.grupo === filtro).length) > LIMITE_LISTA
+                ? filtro === 'todos'
+                  ? 'Mostrando as 6 primeiras. Os grupos mais urgentes vêm antes: toque num grupo acima para ver todos dele.'
+                  : `Mostrando as ${LIMITE_LISTA} primeiras deste grupo.`
+                : 'Toque numa conta para ver a ficha e a mensagem sugerida.'}
+            </p>
           </>
         )}
       </Cartao>
@@ -555,13 +596,24 @@ export function Resumo() {
             {envioDe(sel)?.tipo === 'falhou' && <div className="por">O último envio pelo sistema não saiu: {(envioDe(sel) as { erro: string }).erro}</div>}
             {envioDe(sel)?.tipo === 'enviado' && <div className="por ok">Já mandamos uma mensagem pelo sistema nas últimas 24 horas.</div>}
             {(envioDe(sel)?.tipo === 'fila' || envioDe(sel)?.tipo === 'enviando') && <div className="por ok">Mensagem na fila do sistema. Ela sai sozinha, e dá para cancelar na lista.</div>}
-            <div className="fato"><span>WhatsApp</span><b>{sel.whats || 'sem número'}</b></div>
+            {sel.sair && <div className="por">Esta pessoa respondeu SAIR: não recebe mais mensagem pelo sistema.</div>}
+            <div className="fato">
+              <span>{sel.verificado === false ? 'WhatsApp digitado no cadastro' : sel.verificado ? 'WhatsApp confirmado' : 'WhatsApp'}</span>
+              <b>{sel.grupo === 'semfone' ? 'não deixou' : sel.whats ? `${sel.whats}${sel.verificado === false ? ' (não confirmado)' : ''}` : 'sem número'}</b>
+            </div>
+            {sel.email && <div className="fato"><span>E-mail</span><b>{sel.email}</b></div>}
+            {(sel.ocupacao || sel.ramo) && <div className="fato"><span>Ocupação</span><b>{sel.ocupacao || sel.ramo}</b></div>}
             <div className="fato"><span>Cadastro</span><b>{dataHora(sel.criado_em)}</b></div>
             <div className="fato"><span>Passo das boas-vindas</span><b>{NOME_PASSO[Math.min(7, sel.passo)] ?? sel.passo}</b></div>
             <div className="fato"><span>Última mensagem</span><b>{dataHora(sel.ultima)}</b></div>
-            <h4>Mensagem sugerida</h4>
-            <div className="msg">{textoDe(sel)}</div>
-            {(() => {
+            {sel.grupo !== 'semfone' && !sel.sair && (
+              <>
+                <h4>Mensagem sugerida</h4>
+                <div className="msg">{textoDe(sel)}</div>
+              </>
+            )}
+            {sel.grupo === 'semfone' && <p className="texto-ajuda">Sem telefone não há para onde enviar pelo sistema. O contato desta pessoa é o e-mail acima.</p>}
+            {sel.grupo !== 'semfone' && !sel.sair && (() => {
               const env = envioDe(sel)
               const podeSistema = comEnvioPara(sel) && (!env || env.tipo === 'falhou')
               return (
@@ -577,7 +629,9 @@ export function Resumo() {
                     </a>
                   </div>
                   <p className="texto-ajuda">
-                    {podeSistema
+                    {podeSistema && naoConfirmado(sel)
+                      ? 'Enviar pelo sistema usa o número da Granninha, com fila de 5 minutos entre mensagens, e pede a sua confirmação porque o número não foi confirmado. O link abre a sua conversa pessoal: você revisa e envia.'
+                      : podeSistema
                       ? 'Enviar pelo sistema usa o número da Granninha, com fila de 5 minutos entre mensagens. O link abre a sua conversa pessoal: você revisa e envia.'
                       : 'O texto abre pronto na conversa; você revisa e envia.'}
                   </p>

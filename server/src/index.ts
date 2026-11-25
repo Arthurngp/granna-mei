@@ -10,7 +10,7 @@ import './env.ts'
 import { sb } from './banco.ts'
 import { rotaAdmin } from './admin.ts'
 import { bloquearAtrasadas, rotaCobranca } from './cobranca.ts'
-import { assinaturaValida, enviarTexto, statusSessao } from './gateway.ts'
+import { assinaturaValida, conferirNumero, enviarTexto, statusSessao } from './gateway.ts'
 import { excluirVencidas, soltarNumerosDeExcluidas } from './excluir.ts'
 import { hojeSP, marcarColunaEventoFaltando, processar, registrarChegada, semColunaEvento, type EventoGateway } from './granninha.ts'
 import { clientePorNumero } from './banco.ts'
@@ -248,7 +248,7 @@ export function iniciar(porta = PORTA) {
   // Lembretes de retenção (quem nunca mandou nada e quem parou de usar). Desligados até o Arthur ligar no admin; ver retencao.ts.
   const depsRetencao = depsRetencaoDoBanco(sb, enviarTexto, async () => (await statusSessao()).estado === 'CONNECTED', () => lerConfigAvisos().piloto)
   // Envio manual pedido pelo admin (botão "enviar" na visão geral): só sai o que o Arthur aprovou, um a cada 5 minutos; ver envio-manual.ts.
-  const depsManual = depsEnvioManualDoBanco(sb, enviarTexto, async () => (await statusSessao()).estado === 'CONNECTED')
+  const depsManual = depsEnvioManualDoBanco(sb, enviarTexto, async () => (await statusSessao()).estado === 'CONNECTED', conferirNumero)
   const avisar = async () => {
     try {
       for (const linha of await rodarAvisos(depsAvisos, lerConfigAvisos())) console.log('[avisos]', linha)

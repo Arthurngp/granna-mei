@@ -155,12 +155,17 @@ function acoes() {
     mk('nunca', 'Marina Costa', 'Studio Marina', 3, 7, 'trial', '(81) 98811-2010'),
     mk('nunca', 'Paulo Reis', 'PR Pintura', 5, 7, 'trial', '(81) 98811-2011'),
     mk('nunca', 'Diego Matos', 'DM Elétrica', 9, 7, 'trial', '(81) 98811-2012'),
-    mk('whats', 'Eduardo Pires', 'EP Reformas', 2, 6, 'trial', '(81) 98811-2013'),
-    mk('whats', 'Márcio Dias', 'MD Ar Condicionado', 3, 6, 'trial', '(81) 98811-2014'),
-    mk('whats', 'Tiago Bento', 'TB Fretes', 4, 6, 'trial', '(81) 98811-2015'),
-    mk('whats', 'Vera Alves', 'Vera Costuras', 5, 6, 'trial', '(81) 98811-2016'),
-    mk('whats', 'Camila Rocha', 'Studio Camila', 6, 6, 'trial', '(81) 98811-2017'),
-    mk('whats', 'Joana Lins', 'Joana Bolos', 8, 6, 'trial', '(81) 98811-2018'),
+    // Quem só digitou o número no cadastro (migration contatoscadastro): o banco manda verificado:false, e-mail, ramo e ocupação.
+    ...[
+      mk('whats', 'Eduardo Pires', 'EP Reformas', 0, 7, 'trial', '(81) 98811-2013'),
+      mk('whats', 'Márcio Dias', 'MD Ar Condicionado', 1, 6, 'trial', '(81) 98811-2014'),
+      mk('whats', 'Tiago Bento', 'TB Fretes', 4, 6, 'trial', '(81) 98811-2015'),
+      mk('cadastro', 'Vera Alves', 'Vera Costuras', 0, 2, 'trial', '(81) 98811-2016'),
+      mk('cadastro', 'Camila Rocha', 'Studio Camila', 0, 1, 'trial', '(81) 98811-2017'),
+      mk('cadastro', 'Joana Lins', 'Joana Bolos', 2, 3, 'trial', '(81) 98811-2018'),
+      mk('cadastro', 'Nilo Prado', '', 1, 1, 'trial', '(81) 98811-2019'),
+    ].map((i, k) => ({ ...i, verificado: false, sair: i.nome === 'Nilo Prado', ramo: k % 2 ? 'outro' : 'beleza', ocupacao: k % 2 ? 'tatuador' : '', email: `${i.nome.split(' ')[0].toLowerCase()}@exemplo.com` })),
+    ...[mk('semfone', 'Rita Moura', '', 0, 0, 'trial', ''), mk('semfone', 'Fábio Teles', '', 1, 0, 'trial', '')].map((i) => ({ ...i, verificado: false, sair: false, ramo: '', ocupacao: '', email: `${i.nome.split(' ')[0].toLowerCase()}@exemplo.com` })),
   ]
   const contagem: Record<string, number> = {}
   for (const i of itens) contagem[i.grupo] = (contagem[i.grupo] ?? 0) + 1
@@ -350,7 +355,8 @@ export async function mockRpc(nome: string, args: Record<string, unknown>): Prom
     }
     case 'admin_envio_pedir': {
       const u = String(args.p_user)
-      if (!['nunca', 'sumiu'].includes(String(args.p_grupo))) throw new Error('este grupo não tem envio pelo sistema: use o link do WhatsApp')
+      if (!['nunca', 'sumiu', 'whats', 'cadastro'].includes(String(args.p_grupo))) throw new Error('este grupo não tem envio pelo sistema: use o link do WhatsApp')
+      if (['whats', 'cadastro'].includes(String(args.p_grupo)) && !args.p_forcar) throw new Error('o WhatsApp desta pessoa não está confirmado: o número foi só digitado no cadastro')
       ;(window as unknown as { __pedido?: unknown }).__pedido = args // só para o teste de tela conferir o que foi enviado
       if ((u.includes('Larissa Gomes') || u.includes('Sônia Vaz')) && !args.p_forcar) throw new Error('esta pessoa nunca escreveu para o número atual: chamar primeiro pode bloquear o número')
       if (u.includes('Diego Matos')) throw new Error('esta pessoa respondeu SAIR e não quer receber mensagem')

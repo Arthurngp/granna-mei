@@ -156,6 +156,18 @@ export function paraMov(l: { id: string; tipo: string; valor: number | string; d
 }
 
 /** SAIR: a pessoa não quer mais lembretes de uso. Só a Granninha grava (o cliente não tem permissão nessa coluna). */
+/**
+ * Cadastros que DIGITARAM este número e ainda não confirmaram (pode haver mais de um: a pessoa criou duas contas). Não é cliente reconhecido: serve
+ * só para honrar o SAIR de quem recebeu uma mensagem nossa e para mostrar como terminar o cadastro a quem escreveu.
+ */
+export async function cadastrosPendentesDoNumero(jid: string): Promise<{ id: string; nome: string; avisos_off: boolean }[]> {
+  const chave = chaveDoNumero(jid)
+  if (!chave) return []
+  const { data, error } = await sb.from('perfis').select('id,nome,avisos_off').eq('whats_chave', chave).eq('whats_verificado', false).eq('papel', 'cliente').is('exclusao_em', null).limit(5)
+  falhou(error, 'cadastrosPendentesDoNumero')
+  return ((data ?? []) as { id: string; nome: string | null; avisos_off: boolean | null }[]).map((l) => ({ id: l.id, nome: l.nome ?? '', avisos_off: !!l.avisos_off }))
+}
+
 export async function silenciarLembretes(userId: string) {
   const { error } = await sb.from('perfis').update({ avisos_off: true }).eq('id', userId)
   falhou(error, 'silenciar lembretes')
