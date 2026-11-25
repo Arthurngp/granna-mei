@@ -611,7 +611,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
       const perguntaExtrato = `Achei ${leitura.transacoes.length} lançamentos nesse extrato${doBanco ? ` do ${doBanco.nome}` : ''}: ${brl(ent)} de entradas e ${brl(sai)} de saídas.\n\n` + (opcoes
           ? `Quer que eu importe? Responda com o número da conta deste extrato, ou NÃO:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`
           : doBanco ? `Quer que eu importe no ${doBanco.nome}? Responda SIM ou NÃO.` : 'Quer que eu importe? Responda SIM ou NÃO.')
-      await guardar({ tipo: 'importar', transacoes: leitura.transacoes, anexo, opcoes, carteira: doBanco?.id, pergunta: perguntaExtrato })
+      await guardar({ tipo: 'importar', transacoes: leitura.transacoes, anexo, opcoes, carteira: doBanco?.id, pergunta: perguntaExtrato, saldoExtrato: leitura.saldo ?? null, bancoExtrato: leitura.banco ?? null })
       return { status: 'pergunta', resposta: perguntaExtrato, efeitos: {}, intencao: 'extrato', texto: leitura.resumo, tokens }
     }
     // Comprovante: cruza o banco de origem e o de destino com as contas do cliente. Entre duas contas dele é transferência (não é entrada nem saída);
@@ -811,12 +811,12 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
     if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei nada.', efeitos: {}, intencao: 'extrato', texto, tokens }
     if (pend.opcoes?.length) {
       const esc = opcaoEscolhida(texto, pend.opcoes)
-      if (esc) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens, esc.id, saida.config)
+      if (esc) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens, esc.id, saida.config, extratoDe(pend))
       if (/^\s*(sim|s|pode|importa|ok|isso|manda|\d+)\b/i.test(texto)) {
         await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
         return { status: 'pergunta', resposta: `De qual conta é esse extrato? Responda com o número:\n${pend.opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, efeitos: {}, intencao: 'extrato', texto, tokens }
       }
-    } else if (/^\s*(sim|s|pode|importa|ok|isso|manda)\b/i.test(texto)) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens, (pend as { carteira?: string }).carteira, saida.config)
+    } else if (/^\s*(sim|s|pode|importa|ok|isso|manda)\b/i.test(texto)) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens, (pend as { carteira?: string }).carteira, saida.config, extratoDe(pend))
   }
   // Resposta a uma pergunta com opções: o número (ou o nome) decide no código, sem depender da IA.
   // As respostas se acumulam (ex.: "do negócio" e depois "Nubank") até o lançamento fechar.
@@ -1047,7 +1047,13 @@ async function importarFatura(userId: string, ctx: Contexto, ts: Transacao[], ca
 }
 
 /** Importa as transações de um extrato depois do SIM. Pula as que já existem (mesmo dia, valor e direção). */
-async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Origem, anexo: string | null, tokens: Uso, carteira?: string, config?: EstadoConfig | null): Promise<Conversa> {
+/** O saldo final e o banco do extrato guardados na pergunta "quer que eu importe?" (para a configuração acertar o saldo pelo extrato). */
+const extratoDe = (p: unknown) => {
+  const x = (p ?? {}) as { saldoExtrato?: unknown; bancoExtrato?: unknown }
+  return { saldo: typeof x.saldoExtrato === 'number' ? x.saldoExtrato : null, banco: typeof x.bancoExtrato === 'string' ? x.bancoExtrato : null }
+}
+
+async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Origem, anexo: string | null, tokens: Uso, carteira?: string, config?: EstadoConfig | null, extrato: { saldo: number | null; banco: string | null } = { saldo: null, banco: null }): Promise<Conversa> {
   const { data: ja, error } = await sb.from('lancamentos').select('data,valor,tipo').eq('user_id', userId).gte('data', ts.map((t) => t.data ?? ctx.hoje).sort()[0])
   falhou(error, 'extrato: duplicados')
   const existe = new Set((ja ?? []).map((l) => `${l.data}|${Number(l.valor).toFixed(2)}|${l.tipo}`))
@@ -1069,7 +1075,7 @@ async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Or
   if (!acoes.length) return { status: 'ok', resposta: `Todos os ${ts.length} lançamentos desse extrato já estavam anotados.`, efeitos: {}, intencao: 'extrato', texto: 'importar extrato', tokens }
   const r = await executar(userId, ctx, acoes, tipo, anexo)
   // Na configuração, o saldo posto pelo print ou pelo valor dito já contém o que o extrato trouxe: corrige para não somar em dobro.
-  if (config) await corrigirSaldoImportado(userId, config, r.efeitos.lancamentos ?? [])
+  if (config) await corrigirSaldoImportado(userId, config, r.efeitos.lancamentos ?? [], extrato)
   return {
     status: 'ok',
     resposta: `Importei ${acoes.length} lançamentos${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Confira as categorias no painel.${await saldoDepois(userId, acoes)}\n\n${ERROU}`,

@@ -9,10 +9,11 @@
 import { randomUUID } from 'node:crypto'
 import { falhou, sb } from './banco.ts'
 import {
-  abandonou, boasVindas, categoriasPadrao, DAS, ehEspecie, ehNao, ehPronto, ehPular, ehSim, fechamentoDe, lerBanco, lerCartao, lerOcupacao, lerRamo, lerValor,
+  abandonou, bancoConhecido, boasVindas, categoriasPadrao, DAS, ehEspecie, ehNao, ehPronto, ehPular, ehSim, fechamentoDe, lerBanco, lerCartao, lerOcupacao, lerRamo, lerValor,
   MATERIAL_POR_RAMO, MAX_BANCOS, MAX_CARTOES, MAX_VOLTAS, MAIS_FIXA, pergunta, RAMOS, TEXTO_FIM, type Etapa, type EstadoConfig,
 } from './config-whats.ts'
 import { somaMeses, vencimentoNoMes } from './datas.ts'
+import { despedidaDe } from './despedida.ts'
 
 export const ligado = () => (process.env.ONBOARDING_WHATS ?? 'off').trim().toLowerCase() === 'on'
 
@@ -184,12 +185,25 @@ export async function responder(userId: string, e: EstadoConfig, texto: string):
         if (e.etapa === 'banco') return { tratou: true, resposta: juntar('Tudo bem, deixei como "Conta do banco". Dá pra mudar o nome no painel.', await irPara(userId, e, 'saldo', { carteira: undefined }, 'Conta do banco')) }
         return { tratou: true, resposta: await irPara(userId, e, 'cartao') }
       }
+      // "ok", "certo", "valeu", "kkk": não é resposta, é reação. Vai para o fluxo normal (que fica em silêncio) e a pergunta volta depois.
+      if (despedidaDe(t)) return NAO_TRATOU
       const especie = ehEspecie(t)
       const nome = especie ? 'Dinheiro' : lerBanco(t)
       if (!nome) return NAO_TRATOU
-      const c = await porBanco(userId, nome, especie ? 'dinheiro' : 'banco')
-      const bancos = (e.bancos ?? 0) + 1
-      return { tratou: true, resposta: await irPara(userId, e, 'saldo', { carteira: c.id, bancos }, c.nome) }
+      // Nome que não é de banco conhecido: confirma antes de virar conta.
+      if (!especie && !bancoConhecido(t)) return { tratou: true, resposta: await irPara(userId, e, 'banco_confirma', { bancoNome: nome, voltaPara: e.etapa }) }
+      return { tratou: true, resposta: await criarBancoEPedirSaldo(userId, e, nome, especie ? 'dinheiro' : 'banco') }
+    }
+    case 'banco_confirma': {
+      const volta = e.voltaPara ?? 'banco'
+      if (pulou) return { tratou: true, resposta: await irPara(userId, e, volta, { bancoNome: undefined, voltaPara: undefined }) }
+      if (ehSim(t) && e.bancoNome) return { tratou: true, resposta: await criarBancoEPedirSaldo(userId, { ...e, etapa: volta, bancoNome: undefined, voltaPara: undefined }, e.bancoNome, 'banco') }
+      if (despedidaDe(t) || ehNao(t)) return { tratou: true, resposta: await irPara(userId, e, volta, { bancoNome: undefined, voltaPara: undefined }) }
+      const outro = lerBanco(t)
+      if (!outro) return NAO_TRATOU
+      // Disse o nome certo: banco conhecido entra direto; outro nome desconhecido, confirma de novo.
+      if (bancoConhecido(t)) return { tratou: true, resposta: await criarBancoEPedirSaldo(userId, { ...e, etapa: volta, bancoNome: undefined, voltaPara: undefined }, outro, 'banco') }
+      return { tratou: true, resposta: await irPara(userId, e, 'banco_confirma', { bancoNome: outro, voltaPara: volta }) }
     }
     case 'saldo': {
       const cs = await bancosDe(userId)
@@ -198,6 +212,12 @@ export async function responder(userId: string, e: EstadoConfig, texto: string):
       if (pulou) return { tratou: true, resposta: await irPara(userId, e, seguinte) }
       const v = lerValor(t)
       if (v === null || !conta) return NAO_TRATOU
+      // O saldo já foi posto pelo extrato (saldo final dele): não muda, e diz qual ficou.
+      const jaFixado = e.saldoFixado?.[conta.id]
+      if (typeof jaFixado === 'number') {
+        const nota = Math.abs(jaFixado - v) < 0.01 ? `Bateu com o extrato: ${real(v)} no ${conta.nome}.` : `Pelo extrato, o ${conta.nome} ficou com ${real(jaFixado)} de saldo, então mantive esse. Se não for isso, dá pra ajustar no painel.`
+        return { tratou: true, resposta: juntar(nota, await irPara(userId, e, seguinte, { carteira: undefined })) }
+      }
       const pos = await porSaldo(userId, conta.id, v)
       const fixado = pos ? { ...(e.saldoFixado ?? {}), [conta.id]: v } : e.saldoFixado
       const nota = pos ? `Anotado: ${real(v)} no ${conta.nome}.` : `O ${conta.nome} já tem lançamento, então não mexi no saldo. Dá pra ajustar no painel, em Ajustes.`
@@ -206,6 +226,7 @@ export async function responder(userId: string, e: EstadoConfig, texto: string):
     case 'cartao':
     case 'cartao_dia': {
       if (pulou || (e.etapa === 'cartao' && ehNao(t))) return { tratou: true, resposta: await irPara(userId, e, 'das', { cartao: undefined }) }
+      if (despedidaDe(t)) return NAO_TRATOU
       let banco: string | null = null
       let dia: number | null = null
       if (e.etapa === 'cartao_dia') {
@@ -246,6 +267,12 @@ export async function responder(userId: string, e: EstadoConfig, texto: string):
     default:
       return NAO_TRATOU
   }
+}
+
+/** Cria (ou renomeia a genérica) a conta do banco dito e pergunta o saldo dela. */
+async function criarBancoEPedirSaldo(userId: string, e: EstadoConfig, nome: string, tipo: 'banco' | 'dinheiro'): Promise<string> {
+  const c = await porBanco(userId, nome, tipo)
+  return irPara(userId, e, 'saldo', { carteira: c.id, bancos: (e.bancos ?? 0) + 1, bancoNome: undefined, voltaPara: undefined }, c.nome)
 }
 
 /** O DAS como conta fixa, com as contas dos próximos vencimentos (como o cadastro do site fazia). Não duplica. */
@@ -296,7 +323,11 @@ export async function responderPrintSaldo(userId: string, e: EstadoConfig, banco
  * - Fora isso, a pergunta da etapa volta no fim, no máximo 2 vezes; depois a etapa é pulada.
  * - Se a mensagem deixou pergunta própria em aberto, ou a fila de perguntas falou, a configuração espera a vez.
  */
-export async function depoisDaMensagem(userId: string, e: EstadoConfig, criouFixa: boolean): Promise<string> {
+export async function depoisDaMensagem(userId: string, lido: EstadoConfig, criouFixa: boolean): Promise<string> {
+  // Relê: a mensagem pode ter mudado o estado no meio (extrato importado na configuração põe o saldo e avança a etapa).
+  const e = (await configAtiva(userId)) ?? null
+  if (!e) return ''
+  void lido
   if (e.etapa === 'fixas' && criouFixa) {
     await gravar(userId, { ...e, em: agoraIso(), voltas: 0 })
     return MAIS_FIXA
@@ -304,7 +335,7 @@ export async function depoisDaMensagem(userId: string, e: EstadoConfig, criouFix
   const voltas = (e.voltas ?? 0) + 1
   if (voltas > MAX_VOLTAS) {
     const ordem: Etapa[] = ['ramo', 'banco', 'saldo', 'mais_banco', 'cartao', 'das', 'fixas', 'fim']
-    const atual = e.etapa === 'ocupacao' ? 'ramo' : e.etapa === 'cartao_dia' ? 'cartao' : e.etapa
+    const atual = e.etapa === 'ocupacao' ? 'ramo' : e.etapa === 'cartao_dia' ? 'cartao' : e.etapa === 'banco_confirma' ? (e.voltaPara ?? 'banco') : e.etapa
     const prox = ordem[Math.min(ordem.indexOf(atual) + 1, ordem.length - 1)]
     return irPara(userId, e, prox, { carteira: undefined, cartao: undefined })
   }
@@ -314,12 +345,52 @@ export async function depoisDaMensagem(userId: string, e: EstadoConfig, criouFix
 }
 
 /**
+ * O saldo de hoje vindo do extrato: só para conta cujo saldo ainda não foi posto e que não tinha lançamento antes deste extrato. Se a conta é a
+ * genérica ("Conta do banco") e o extrato diz o banco, ela ganha o nome dele, e a configuração avança da etapa do banco para "mais algum banco?".
+ */
+async function saldoPeloExtrato(userId: string, e: EstadoConfig, lancamentos: string[], saldoFinal: number, banco: string | null): Promise<string | null> {
+  const r = await sb.from('lancamentos').select('id,tipo,valor,carteira_id').eq('user_id', userId).in('id', lancamentos)
+  falhou(r.error, 'config: lançamentos do extrato')
+  const linhas = (r.data ?? []) as { id: string; tipo: string; valor: number; carteira_id: string }[]
+  const carteira = linhas[0]?.carteira_id
+  if (!carteira || linhas.some((l) => l.carteira_id !== carteira) || typeof e.saldoFixado?.[carteira] === 'number') return null
+  const outros = await sb.from('lancamentos').select('id').eq('user_id', userId).eq('carteira_id', carteira).not('id', 'in', `(${lancamentos.map((x) => `"${x}"`).join(',')})`).limit(1)
+  falhou(outros.error, 'config: lançamentos anteriores')
+  if (outros.data?.length) return null
+  const liquido = linhas.reduce((s, l) => s + Number(l.valor) * (l.tipo === 'entrada' ? 1 : l.tipo === 'saida' ? -1 : 0), 0)
+  const inicial = Math.round((saldoFinal - liquido) * 100) / 100
+  falhou((await sb.from('carteiras').update({ saldo_inicial: inicial }).eq('user_id', userId).eq('id', carteira)).error, 'config: saldo pelo extrato')
+  const saldoFixado = { ...(e.saldoFixado ?? {}), [carteira]: saldoFinal }
+  let extra: Partial<EstadoConfig> = { saldoFixado }
+  const nome = banco ? lerBanco(banco) : null
+  if (nome && bancoConhecido(banco!)) {
+    const cs = await bancosDe(userId)
+    const c = cs.find((x) => x.id === carteira)
+    if (c && c.nome === 'Conta do banco') falhou((await sb.from('carteiras').update({ nome }).eq('user_id', userId).eq('id', carteira)).error, 'config: nome pelo extrato')
+  }
+  // Estava esperando o banco ou o saldo desta conta: os dois vieram do extrato, então a configuração segue para "mais algum banco?".
+  if (e.etapa === 'banco' || (e.etapa === 'saldo' && (!e.carteira || e.carteira === carteira))) {
+    extra = { ...extra, etapa: (e.bancos ?? 0) + 1 >= MAX_BANCOS ? 'cartao' : 'mais_banco', bancos: (e.bancos ?? 0) + (e.etapa === 'banco' ? 1 : 0), carteira: undefined, voltas: 0 }
+  }
+  await gravar(userId, { ...e, ...extra, em: new Date().toISOString() })
+  return carteira
+}
+
+/**
  * Extrato importado DURANTE a configuração numa conta cujo saldo foi posto aqui: o saldo já contém o que o extrato trouxe. Sem isto, o histórico
  * somaria em dobro (saldo de hoje + o que entrou e saiu até hoje). O saldo inicial é corrigido pelo líquido importado, e o saldo de hoje fica o lido.
  */
-export async function corrigirSaldoImportado(userId: string, e: EstadoConfig | null, lancamentos: string[]): Promise<void> {
-  const fixado = e?.saldoFixado ?? {}
-  if (!lancamentos.length || !Object.keys(fixado).length) return
+export async function corrigirSaldoImportado(userId: string, e: EstadoConfig | null, lancamentos: string[], extrato: { saldo?: number | null; banco?: string | null } = {}): Promise<void> {
+  if (!e || !lancamentos.length) return
+  // Extrato ANTES do saldo (a pessoa manda o extrato na etapa do banco): o saldo final do extrato é o saldo de hoje. Sem isto a conta ficava só com
+  // o líquido do extrato (muitas vezes negativo), e o saldo dito depois era recusado porque a conta "já tem lançamento".
+  const acertada = typeof extrato.saldo === 'number' ? await saldoPeloExtrato(userId, e, lancamentos, extrato.saldo, extrato.banco ?? null) : null
+  const atual = (await configAtiva(userId)) ?? e
+  const fixado = { ...(atual.saldoFixado ?? {}) }
+  for (const k of Object.keys(e.saldoFixado ?? {})) if (!(k in fixado)) fixado[k] = e.saldoFixado![k]
+  // A conta cujo saldo acabou de ser posto pelo próprio extrato já está certa: não corrige de novo.
+  if (acertada) delete fixado[acertada]
+  if (!Object.keys(fixado).length) return
   const r = await sb.from('lancamentos').select('id,tipo,valor,carteira_id').eq('user_id', userId).in('id', lancamentos)
   falhou(r.error, 'config: lançamentos importados')
   const liquido = new Map<string, number>()
