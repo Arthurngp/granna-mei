@@ -8,6 +8,9 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  nuncalancou 20261125010000_retencao_nunca_lancou.sql   lembrete "Nunca mandou nada" passa a valer para quem NUNCA LANÇOU (antes exigia no máximo 1 mensagem,
+          e quem conversou sem lançar ficava fora das duas regras). O prazo conta da última atividade. Só troca retencao_elegiveis, mesma assinatura. Com a regra
+          ligada em Todos, quem entrar no grupo novo recebe a 1ª mensagem no próximo ciclo (9h às 19h). Depende de retencaosequencia.
   contatoscadastro 20261124160000_contatos_cadastro.sql   quem DIGITOU o WhatsApp no cadastro e não confirmou aparece na lista do admin (parou no cadastro, terminou sem conectar, não deixou
           telefone) e pode ser chamado pelo sistema, à mão, um por vez, com autorização própria por pedido. Troca envio_manual_apto (terceiro parâmetro, padrão falso), admin_envio_pedir
           e admin_acoes; a fila aceita 2 grupos novos e ganha a coluna nao_confirmado. NÃO envia nada sozinha. Compatível com o servidor e o admin atuais. Depende de enviofrio e adminuso.
@@ -84,6 +87,7 @@ MIGRATIONS = {
     "custofoto": "20261123140000_custo_foto_documento.sql",
     "enviofrio": "20261123160000_envio_manual_contato_frio.sql",
     "contatoscadastro": "20261124160000_contatos_cadastro.sql",
+    "nuncalancou": "20261125010000_retencao_nunca_lancou.sql",
     "configia": "20261124140000_config_ia.sql",
     "iaanthropic": "20261124150000_ia_chaves_anthropic.sql",
 }
@@ -135,6 +139,16 @@ CONFERE = {
     # TROCAM de assinatura. O que importa conferir: cada uma existe UMA vez só (duas versões deixariam o PostgREST em dúvida e, como em
     # dúvida o servidor não envia, os lembretes parariam sem erro), o service_role executa a de elegíveis (4 argumentos) e o cliente não,
     # as etapas nascem desligadas, a tabela é fechada ao cliente e as 5 funções do admin existem, fechadas ao anon.
+    # Quem a regra "nunca mandou" pega hoje (etapa 1, 24 h) e se a função já é a nova. Só leitura.
+    "nuncalancou": """select
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis') as elegiveis_definicoes,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis'
+           and pg_get_functiondef(p.oid) like '%v.qtd <= 1 and v.lancs = 0%') as ainda_exige_uma_mensagem,
+        (select case when count(*) = 0 then null else bool_or(has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('anon', p.oid, 'execute')) end
+           from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis') as cliente_executa_elegiveis,
+        (select count(*) from public.retencao_elegiveis('nunca_mandou', 24, false, 1)) as nunca_mandou_hoje,
+        (select string_agg(split_part(coalesce(e.nome, ''), ' ', 1) || ' (' || e.qtd || ' msg)', ', ') from public.retencao_elegiveis('nunca_mandou', 24, false, 1) e) as quem,
+        (select modo from public.config_retencao where regra = 'nunca_mandou') as modo_da_regra""",
     "retencaosequencia": """select
         (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis') as elegiveis_definicoes,
         (select max(p.pronargs) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis') as elegiveis_argumentos,
