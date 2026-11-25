@@ -23,9 +23,10 @@ import { transcrever, type Uso } from './openai.ts'
 import { responderPergunta } from './perguntas.ts'
 import { carregarBase } from './base.ts'
 import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, pareceReenvio, perguntaDuplicata, perguntaReenvio, respostaDuplicata, respostaSimNao, type LancAntigo } from './duplicata.ts'
-import { brl as brlComSinal, contasQueFicaramNegativas, ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta } from './consultas.ts'
+import { brl as brlComSinal, contasQueFicaramNegativas, ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta, saldosDaBase } from './consultas.ts'
 import { foraDoDisponivel } from './cartao.ts'
 import { confirma, ERROU, MSG } from './voz.ts'
+import { carteiraDoBanco, textoSaldoLido } from './print-banco.ts'
 import { comNova, depois as depoisDaFila, valorSoltoDuvidoso, type ItemFila } from './fila.ts'
 import { baixaPronta, escolherGancho, fraseDeBaixa, janelaDoGancho, pendenteValido, respostaGancho, TEXTO_JA_BAIXADA, textoConfirmacao, textoNaoPagou, VALE_MS, type ContaGancho, type PendenteBaixa } from './gancho.ts'
 
@@ -536,6 +537,13 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
     falhou(upl.error, 'guardar comprovante')
     const { leitura, uso } = await lerDocumento(m.buffer, tipo === 'pdf' ? 'application/pdf' : m.mime, d.caption ?? '')
     soma(uso)
+    // Print da tela de saldo do banco: nunca vira lançamento. Compara com o que está anotado e, se não bate, sugere o extrato (print-banco.ts).
+    if (leitura.tipo === 'saldo') {
+      const cx = await contextoDe(cliente.id, hoje)
+      const cart = carteiraDoBanco(leitura.banco, cx.carteiras)
+      const anotado = cart ? (saldosDaBase(await carregarBase(cliente.id))[cart.id] ?? null) : null
+      return { status: 'ok', resposta: textoSaldoLido(leitura.banco, leitura.saldo, cart, anotado), efeitos: {}, intencao: 'saldo', texto: leitura.resumo, tokens }
+    }
     if (!leitura.transacoes.length) {
       return { status: 'pergunta', resposta: MSG.semValorNoArquivo(tipo === 'pdf' ? 'pdf' : 'foto', leitura.tipo === 'outro'), efeitos: {}, intencao: 'documento', texto: leitura.resumo, tokens }
     }
@@ -556,11 +564,13 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
       const ent = leitura.transacoes.filter((t) => t.movimento === 'entrada').reduce((a, t) => a + t.valor, 0)
       const sai = leitura.transacoes.filter((t) => t.movimento === 'saida').reduce((a, t) => a + t.valor, 0)
       const bancos = (await contextoDe(cliente.id, hoje)).carteiras.filter((c) => c.tipo === 'banco')
-      const opcoes = bancos.length > 1 ? bancos.map((c) => ({ id: c.id, nome: c.nome })) : undefined
-      const perguntaExtrato = `Achei ${leitura.transacoes.length} lançamentos nesse extrato: ${brl(ent)} de entradas e ${brl(sai)} de saídas.\n\n` + (opcoes
+      // O extrato diz de que banco é e ele bate com UMA conta da pessoa: é dessa, sem perguntar qual.
+      const doBanco = carteiraDoBanco(leitura.banco, bancos)
+      const opcoes = !doBanco && bancos.length > 1 ? bancos.map((c) => ({ id: c.id, nome: c.nome })) : undefined
+      const perguntaExtrato = `Achei ${leitura.transacoes.length} lançamentos nesse extrato${doBanco ? ` do ${doBanco.nome}` : ''}: ${brl(ent)} de entradas e ${brl(sai)} de saídas.\n\n` + (opcoes
           ? `Quer que eu importe? Responda com o número da conta deste extrato, ou NÃO:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`
-          : 'Quer que eu importe? Responda SIM ou NÃO.')
-      await guardar({ tipo: 'importar', transacoes: leitura.transacoes, anexo, opcoes, pergunta: perguntaExtrato })
+          : doBanco ? `Quer que eu importe no ${doBanco.nome}? Responda SIM ou NÃO.` : 'Quer que eu importe? Responda SIM ou NÃO.')
+      await guardar({ tipo: 'importar', transacoes: leitura.transacoes, anexo, opcoes, carteira: doBanco?.id, pergunta: perguntaExtrato })
       return { status: 'pergunta', resposta: perguntaExtrato, efeitos: {}, intencao: 'extrato', texto: leitura.resumo, tokens }
     }
     // Comprovante: cruza o banco de origem e o de destino com as contas do cliente. Entre duas contas dele é transferência (não é entrada nem saída);
@@ -759,7 +769,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
         await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
         return { status: 'pergunta', resposta: `De qual conta é esse extrato? Responda com o número:\n${pend.opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, efeitos: {}, intencao: 'extrato', texto, tokens }
       }
-    } else if (/^\s*(sim|s|pode|importa|ok|isso|manda)\b/i.test(texto)) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens)
+    } else if (/^\s*(sim|s|pode|importa|ok|isso|manda)\b/i.test(texto)) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens, (pend as { carteira?: string }).carteira)
   }
   // Resposta a uma pergunta com opções: o número (ou o nome) decide no código, sem depender da IA.
   // As respostas se acumulam (ex.: "do negócio" e depois "Nubank") até o lançamento fechar.

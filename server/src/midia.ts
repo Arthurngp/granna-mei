@@ -14,7 +14,11 @@ export interface Transacao {
 export interface Leitura {
   /** Como foi pago, quando o documento mostra (Pix, débito, crédito...). */
   meio?: 'pix' | 'transferencia' | 'debito' | 'credito' | 'boleto' | 'dinheiro' | null
-  tipo: 'comprovante' | 'extrato' | 'boleto' | 'nota' | 'fatura_cartao' | 'outro'
+  tipo: 'comprovante' | 'extrato' | 'boleto' | 'nota' | 'fatura_cartao' | 'saldo' | 'outro'
+  /** Em extrato e em print de saldo: o banco da conta mostrada (ex.: "Nubank"). null quando não aparece. */
+  banco?: string | null
+  /** Em print de saldo: o saldo disponível da conta. Em extrato: o saldo final, se aparecer. NUNCA é transação. */
+  saldo?: number | null
   /** Instituição e titular de quem PAGOU ou enviou (a conta de onde saiu), como aparecem no documento. null quando não aparecem. */
   banco_origem?: string | null
   titular_origem?: string | null
@@ -30,9 +34,10 @@ const SISTEMA = `Você lê imagens e PDFs que um microempreendedor manda para re
 Diga o tipo do documento e liste as transações que estão nele, com valor exatamente como aparece.
 - comprovante (Pix, transferência, pagamento, recibo de venda): uma transação.
 - boleto ou conta ainda não paga: tipo "boleto", uma transação de saída, e "vencimento" (AAAA-MM-DD).
-- extrato: todas as transações que aparecem, cada uma com data (AAAA-MM-DD) quando houver.
+- extrato (inclusive print da tela de extrato do aplicativo): todas as transações que aparecem, cada uma com data (AAAA-MM-DD) quando houver; "banco" = o banco do extrato; "saldo" = o saldo final mostrado no extrato, ou null se não aparecer.
 - nota fiscal ou cupom: o total como uma transação.
 - fatura de cartão de crédito: tipo "fatura_cartao", cada COMPRA como transação de saída com data (AAAA-MM-DD) e descrição; compra parcelada leva a parcela na descrição (ex.: "Loja X 2/4") e o valor da parcela. Não inclua pagamento da fatura anterior, estorno, crédito, juros de atraso nem o total. "vencimento" = data de vencimento da fatura.
+- tela do aplicativo do banco mostrando o SALDO da conta (ex.: "Saldo disponível R$ 1.234,56"), sem ser extrato nem comprovante: tipo "saldo", NENHUMA transação, "saldo" = o saldo da conta corrente mostrado e "banco" = o banco. Saldo não é dinheiro que entrou nem que saiu: nunca vire transação. Fatura do cartão, limite e investimento que aparecem na mesma tela não são o saldo.
 - se não for documento de dinheiro: tipo "outro" e nenhuma transação.
 - se PARECE documento de dinheiro (comprovante, extrato, boleto, fatura) mas está borrado, cortado ou ilegível: use o tipo do documento (ex.: "comprovante") com nenhuma transação. Nunca "outro": "outro" é só para o que não tem nada a ver com dinheiro.
 Direção: "entrada" quando o dinheiro chegou para o dono (Pix recebido, venda), "saida" quando ele pagou.
@@ -50,7 +55,7 @@ const ESQUEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    tipo: { type: 'string', enum: ['comprovante', 'extrato', 'boleto', 'nota', 'fatura_cartao', 'outro'] },
+    tipo: { type: 'string', enum: ['comprovante', 'extrato', 'boleto', 'nota', 'fatura_cartao', 'saldo', 'outro'] },
     transacoes: {
       type: 'array',
       items: {
@@ -72,8 +77,10 @@ const ESQUEMA = {
     banco_destino: { type: ['string', 'null'] },
     titular_destino: { type: ['string', 'null'] },
     meio: { type: ['string', 'null'], enum: ['pix', 'transferencia', 'debito', 'credito', 'boleto', 'dinheiro', null] },
+    banco: { type: ['string', 'null'] },
+    saldo: { type: ['number', 'null'] },
   },
-  required: ['tipo', 'transacoes', 'vencimento', 'resumo', 'meio', 'banco_origem', 'titular_origem', 'banco_destino', 'titular_destino'],
+  required: ['tipo', 'transacoes', 'vencimento', 'resumo', 'meio', 'banco_origem', 'titular_origem', 'banco_destino', 'titular_destino', 'banco', 'saldo'],
 }
 
 const MINUSCULAS = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'em'])
@@ -104,7 +111,11 @@ export async function lerDocumento(buffer: Buffer, mime: string, legenda: string
   dados.transacoes = dados.transacoes.filter((t) => t.valor > 0).map((t) => ({ ...t, descricao: limparNomeDeDocumento(limparTextoCliente(t.descricao, 60)) }))
   dados.resumo = limparTextoCliente(dados.resumo, 200)
   // Banco e titular também voltam para o banco de dados e para a comparação: entram limpos e curtos (nome de banco não leva ordem).
-  for (const k of ['banco_origem', 'titular_origem', 'banco_destino', 'titular_destino'] as const) dados[k] = dados[k] ? limparTextoCliente(dados[k]!, 80) || null : null
+  for (const k of ['banco_origem', 'titular_origem', 'banco_destino', 'titular_destino', 'banco'] as const) dados[k] = dados[k] ? limparTextoCliente(dados[k]!, 80) || null : null
+  // Print de saldo NUNCA vira transação, diga a IA o que disser: o saldo é o que tem na conta, não dinheiro que entrou ou saiu.
+  if (dados.tipo === 'saldo') dados.transacoes = []
+  // Saldo só existe em print de saldo e em extrato; número absurdo ou negativo não é saldo confiável.
+  dados.saldo = (dados.tipo === 'saldo' || dados.tipo === 'extrato') && typeof dados.saldo === 'number' && Number.isFinite(dados.saldo) && dados.saldo >= -1_000_000 && dados.saldo <= 100_000_000 ? Math.round(dados.saldo * 100) / 100 : null
   // Comprovante, boleto ou nota comprova uma operação só: ordem escondida não vira várias.
   if (dados.tipo !== 'extrato' && dados.tipo !== 'fatura_cartao') dados.transacoes = dados.transacoes.slice(0, 1)
   // Fatura de cartão só tem compras (saída). Pagamento, estorno e crédito ficam de fora.
