@@ -384,11 +384,19 @@ await caso('mesmo valor da conta, outro nome ou o "boleto" do meio de pagamento:
   assert.match(await msg('paguei 200 do fornecedor no boleto'), /saiu R\$ 200,00/, 'a conta "Boleto velho" não conta só porque a frase diz boleto')
 })
 
-await caso('outra coisa no lugar de 1 ou 2: a pergunta fica de lado e nada é gravado', async () => {
+await caso('outra coisa no lugar de 1 ou 2: responde a outra coisa, nada é gravado às cegas, e a pergunta volta UMA vez', async () => {
   ia.regras = ENERGIA_140
   await msg('paguei 140 de energia no pix')
   const r = await msg('quanto sobrou esse mês?')
-  assert.doesNotMatch(r, /Dar baixa/)
+  // A resposta à outra pergunta vem primeiro; a pergunta da conta volta separada, no fim (antes ela sumia e o pagamento de 140 se perdia).
+  assert.match(r, /^Este mês/)
+  assert.match(r, /E ficou esse aqui esperando:\nA conta de Energia está em R\$ 150,00/)
+  assert.equal(lancsU1().length, 0)
+  assert.equal(contaDe('c1')?.status, 'aberta')
+  // Ignorada de novo: sai, dizendo o que ficou sem anotar. Nada é gravado.
+  const r2 = await msg('quanto sobrou esse mês?')
+  assert.doesNotMatch(r2, /Dar baixa/)
+  assert.match(r2, /Ficou sem anotar, porque a pergunta ficou sem resposta: "paguei 140 de energia no pix"/)
   assert.equal(lancsU1().length, 0)
   assert.equal(contaDe('c1')?.status, 'aberta')
 })
