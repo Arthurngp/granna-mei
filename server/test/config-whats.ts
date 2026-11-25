@@ -248,6 +248,86 @@ await caso('cartão sem o dia: pergunta o dia antes de gravar', async () => {
   assert.equal(carteira('Cartão Inter')?.vencimento, 15)
 })
 
+await caso('reação ("certo", "show", "kkkk") nas etapas de banco e cartão não vira nome de conta', async () => {
+  semearNova()
+  await confirmar()
+  await fala('4')
+  for (const t of ['certo', 'show', 'kkkk', 'blz', 'massa', 'top', 'entendi']) {
+    await fala(t)
+    assert.equal(carteiras().find((c) => c.id === 'banco')?.nome, 'Conta do banco', t)
+    assert.ok(!estado()?.bancoNome, `"${t}" foi pedido como nome de banco`)
+  }
+  for (const t of ['show', 'certo', 'top']) assert.equal(C.lerCartao(t), null, t)
+  assert.deepEqual(C.lerCartao('Riachuelo dia 10'), { banco: 'Riachuelo', dia: 10 }, 'cartão de loja com o dia vale')
+  assert.deepEqual(C.lerCartao('cartão Riachuelo'), { banco: 'Riachuelo', dia: null }, 'com a palavra cartão também')
+})
+
+await caso('banco que não é conhecido: confirma antes de virar conta; SIM cria, outro nome confirma de novo, banco conhecido entra direto', async () => {
+  semearNova()
+  await confirmar()
+  await fala('4')
+  assert.match(await fala('Cooperativa Rural'), /^Seu banco se chama Cooperativa Rural\? Responde SIM, ou me diz o nome certo\./)
+  assert.equal(carteiras().find((c) => c.id === 'banco')?.nome, 'Conta do banco', 'virou conta antes de confirmar')
+  assert.match(await fala('Coop Sertão'), /^Seu banco se chama Coop Sertão\?/)
+  assert.match(await fala('sim'), /^E quanto tem no Coop Sertão hoje\?/)
+  assert.equal(carteiras().find((c) => c.id === 'banco')?.nome, 'Coop Sertão')
+  // Outra conta: banco conhecido dito na confirmação entra direto.
+  await fala('100')
+  assert.match(await fala('Cooperativa do Vale'), /^Seu banco se chama Cooperativa do Vale\?/)
+  assert.match(await fala('é o nubank'), /^E quanto tem no Nubank hoje\?/)
+  assert.ok(carteira('Nubank'))
+})
+
+await caso('extrato ANTES do saldo (na etapa do banco): o saldo de hoje vem do extrato, a conta ganha o nome do banco e a configuração segue', async () => {
+  semearNova()
+  await confirmar()
+  await fala('4')
+  ia.documento = {
+    tipo: 'extrato', meio: null, vencimento: null, resumo: 'Extrato', banco: 'Banco Inter', saldo: 842.3,
+    transacoes: [{ descricao: 'Cliente Ana', valor: 180, movimento: 'entrada', data: HOJE }, { descricao: 'Atacadão', valor: 96.4, movimento: 'saida', data: HOJE }],
+  }
+  const e = await foto('extrato.jpg')
+  assert.match(e, /Achei 2 lançamentos nesse extrato/)
+  const s = await fala('sim')
+  assert.match(s, /Importei 2 lançamentos/)
+  assert.equal(saldoDe('banco'), 842.3, 'o saldo de hoje não é o do extrato')
+  assert.equal(carteiras().find((c) => c.id === 'banco')?.nome, 'Inter')
+  assert.equal(estado()?.etapa, 'mais_banco')
+  assert.match(s, /Usa mais algum banco/, 'a configuração não seguiu para a etapa certa: ' + s)
+})
+
+await caso('extrato numa conta que já tinha lançamento antes: o saldo dela não é trocado pelo do extrato', async () => {
+  semearNova()
+  await confirmar()
+  await fala('4')
+  E.tabelas.lancamentos.push({ user_id: NOVA, id: 'l-antes', tipo: 'saida', valor: 10, carteira_id: 'banco', data: HOJE, descricao: 'Pão', pessoal: false })
+  ia.documento = {
+    tipo: 'extrato', meio: null, vencimento: null, resumo: 'Extrato', banco: 'Banco Inter', saldo: 842.3,
+    transacoes: [{ descricao: 'Cliente Ana', valor: 180, movimento: 'entrada', data: HOJE }, { descricao: 'Atacadão', valor: 96.4, movimento: 'saida', data: HOJE }],
+  }
+  await foto('extrato.jpg')
+  await fala('sim')
+  assert.equal(Number(carteiras().find((c) => c.id === 'banco')!.saldo_inicial), 0, 'trocou o saldo de uma conta que já tinha história')
+  assert.equal(saldoDe('banco'), 73.6)
+})
+
+await caso('extrato na etapa do saldo e depois o valor dito: vale o do extrato, e a Granninha diz qual ficou', async () => {
+  semearNova()
+  await confirmar()
+  await fala('4')
+  await fala('nubank')
+  ia.documento = {
+    tipo: 'extrato', meio: null, vencimento: null, resumo: 'Extrato', banco: 'Nubank', saldo: 500,
+    transacoes: [{ descricao: 'Mercado', valor: 50, movimento: 'saida', data: HOJE }, { descricao: 'Cliente Rui', valor: 120, movimento: 'entrada', data: HOJE }],
+  }
+  const fx = await foto('extrato.jpg')
+  assert.match(fx, /Achei 2 lançamentos nesse extrato do Nubank/)
+  await fala('sim')
+  assert.equal(saldoDe('banco'), 500)
+  // Já foi para "mais algum banco?"; se mesmo assim disser um valor, nada muda (é resposta de outra coisa) e o saldo segue o do extrato.
+  assert.equal(estado()?.etapa, 'mais_banco')
+})
+
 /* ===================== quem fica de fora ===================== */
 
 await caso('conta do cadastro antigo (sem a marca) confirma como sempre, sem configuração', async () => {

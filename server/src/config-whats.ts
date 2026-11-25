@@ -17,7 +17,7 @@
  */
 import { chaveBanco } from './cruzar.ts'
 
-export type Etapa = 'ramo' | 'ocupacao' | 'banco' | 'saldo' | 'mais_banco' | 'cartao' | 'cartao_dia' | 'das' | 'fixas' | 'fim'
+export type Etapa = 'ramo' | 'ocupacao' | 'banco' | 'banco_confirma' | 'saldo' | 'mais_banco' | 'cartao' | 'cartao_dia' | 'das' | 'fixas' | 'fim'
 
 export interface EstadoConfig {
   etapa: Etapa
@@ -29,6 +29,9 @@ export interface EstadoConfig {
   carteira?: string
   /** Etapa cartao_dia: o nome do cartão que falta o dia. */
   cartao?: string
+  /** Etapa banco_confirma: o nome de banco que não é conhecido, esperando a confirmação, e de qual etapa ele veio. */
+  bancoNome?: string
+  voltaPara?: 'banco' | 'mais_banco'
   /** Contas cujo saldo foi posto aqui (id → valor): extrato importado depois não soma em dobro. */
   saldoFixado?: Record<string, number>
   /** Quantos bancos e cartões já foram cadastrados aqui (teto contra laço). */
@@ -98,6 +101,7 @@ export function pergunta(e: EstadoConfig, nomeConta?: string): string {
     case 'mais_banco': return 'Usa mais algum banco, ou guarda dinheiro em espécie? Me diz qual, ou NÃO.'
     case 'cartao': return 'Usa cartão de crédito? Me diz de qual banco e o dia que a fatura vence, tipo: Nubank dia 10. Se não usa, responde NÃO.'
     case 'cartao_dia': return `Que dia vence a fatura do ${e.cartao ?? 'cartão'}? Me manda só o número do dia, tipo 10.`
+    case 'banco_confirma': return `Seu banco se chama ${e.bancoNome ?? 'assim'}? Responde SIM, ou me diz o nome certo.`
     case 'das': return `Quer que eu já guarde o DAS do MEI, de ${real(DAS.valor)}, todo dia ${DAS.dia}? Responde SIM ou NÃO.`
     case 'fixas': return 'Última: quais contas chegam todo mês? Me manda uma de cada vez, tipo: aluguel 900 dia 10. Quando acabar, responde PRONTO.'
     case 'fim': return ''
@@ -133,6 +137,9 @@ export function lerOcupacao(texto: string): string | null {
   return t
 }
 
+/** O nome dito é de um banco conhecido (Nubank, Itaú...)? Nome desconhecido pede confirmação antes de virar conta: "certo" e "show" não são banco. */
+export const bancoConhecido = (texto: string) => !!chaveBanco(texto)
+
 /** Nome de exibição de cada banco conhecido (chave de cruzar.ts). */
 const NOME_BANCO: Record<string, string> = {
   nubank: 'Nubank', bradesco: 'Bradesco', itau: 'Itaú', inter: 'Inter', santander: 'Santander', caixa: 'Caixa', bb: 'Banco do Brasil', c6: 'C6 Bank',
@@ -155,7 +162,8 @@ export function lerBanco(texto: string): string | null {
   // Nome que não é de banco conhecido só vale se parece nome: curto, sem número, e sem palavra de quem está contando um gasto ou perguntando algo
   // ("paguei a luz", "quanto tenho?" não podem virar uma conta chamada assim).
   if (t.length < 2 || t.length > 30 || /\d|https?:|www\.|[?!]/i.test(t) || t.split(' ').length > 3 || NAO_E_BANCO.test(norm(t))) return null
-  return t.replace(/(^|\s)\p{L}/gu, (c) => c.toUpperCase())
+  // Inicial maiúscula em cada palavra, menos nas pequenas do meio ("Cooperativa do Vale", não "Do Vale").
+  return t.split(' ').map((w, i) => (i > 0 && /^(de|do|da|dos|das|e)$/i.test(w) ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1))).join(' ')
 }
 const NAO_E_BANCO = /\b(paguei|pago|pagar|paga|recebi|receber|recebe|comprei|compra|gastei|gasto|vendi|venda|saldo|quanto|quanta|como|qual|quais|onde|quando|porque|ajuda|oi|ola|opa|bom|boa|obrigad\w*|valeu|reais|real|pix|luz|agua|aluguel|internet|conta|contas|fatura|sim|nao|pular|pronto|ok|beleza|tchau|cartao|credito|debito)\b/
 
@@ -184,6 +192,8 @@ export function lerCartao(texto: string): { banco: string | null; dia: number | 
     .trim()
   const banco = resto ? lerBanco(resto) : null
   if (!banco) return null
+  // Emissor que não é banco conhecido (Riachuelo, C&A) só vale com o dia ou com a palavra cartão: "show" e "certo" não são cartão.
+  if (!chaveBanco(resto) && dia === null && !/cart[aã]o/i.test(t)) return null
   return { banco, dia }
 }
 
