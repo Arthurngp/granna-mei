@@ -9,6 +9,22 @@ export const PRECO_ANUAL = 299.9
 /** Servidor da Granninha (cobrança). No build vem de VITE_GRANNINHA_API; sem ela usa o endereço de produção. */
 export const API_GRANNINHA = ((import.meta.env.VITE_GRANNINHA_API as string | undefined) || 'https://api-grannamei.amplasoft.me').replace(/\/+$/, '')
 
+/**
+ * Cadastro novo (decisão do Arthur em 24/11): o site pede só o WhatsApp, e o resto da configuração acontece na conversa com a Granninha.
+ * Liga para todos com VITE_ONBOARDING_WHATS=on no build; para o piloto, abrir o cadastro com ?onboarding=whats liga só neste navegador (e
+ * ?onboarding=site desliga de novo). O servidor só conduz a conversa com ONBOARDING_WHATS=on no app granninha e a migration configwhats aplicada.
+ */
+export function fluxoWhats(): boolean {
+  if ((import.meta.env.VITE_ONBOARDING_WHATS as string | undefined) === 'on') return true
+  try {
+    const q = new URLSearchParams(window.location.search).get('onboarding')
+    if (q === 'whats' || q === 'site') window.localStorage.setItem('granninha:onboarding', q)
+    return window.localStorage.getItem('granninha:onboarding') === 'whats'
+  } catch {
+    return false
+  }
+}
+
 /** Número do WhatsApp da Granninha, definido no build (VITE_WHATS_GRANNINHA). Sem ele, usa um número provisório. */
 export const WHATS_GRANNINHA = (import.meta.env.VITE_WHATS_GRANNINHA as string | undefined) || '5581900000000'
 export const linkWhats = (texto = 'Oi, Granninha!') => `https://wa.me/${WHATS_GRANNINHA}?text=${encodeURIComponent(texto)}`

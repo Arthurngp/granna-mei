@@ -3,9 +3,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Conversa } from '../components/Conversa'
 import { IconeCarteira } from '../components/Shell'
 import { CampoDinheiro, Chave, Mascote, Seg, type Pose } from '../components/ui'
-import { FAIXAS_FATURAMENTO, FAIXAS_RENDA, linkWhats, OCUPACAO_MIN, RAMOS, UFS } from '../lib/config'
+import { FAIXAS_FATURAMENTO, FAIXAS_RENDA, fluxoWhats, linkWhats, OCUPACAO_MIN, RAMOS, UFS } from '../lib/config'
 import { evento } from '../lib/eventos'
-import { salvarPerfilPublico, type PerfilPublico } from '../lib/remoto'
+import { salvarOnboardingVia, salvarPerfilPublico, type PerfilPublico } from '../lib/remoto'
 import { documentoValido, hoje, mascaraCnpj, mascaraFone, mesAtual, primeiroNome, somaMeses, vencimentoNoMes } from '../lib/format'
 import { categoriasPadrao } from '../lib/seed'
 import { novoId, useApp } from '../lib/store'
@@ -78,6 +78,12 @@ export default function Onboarding() {
   // Quem já terminou os dados e está esperando a Granninha confirmar o número volta direto para esse
   // passo se recarregar a página. Antes caía no passo 1 e tinha de preencher os 6 passos de novo.
   const [passo, setPassoLocal] = useState(s.sessao.passo >= 6 ? 6 : 0)
+  /**
+   * Cadastro novo: só o WhatsApp aqui, o resto pela conversa (config.ts, fluxoWhats). Só para quem começa do zero: quem já está no meio do
+   * cadastro antigo termina nele. No passo de confirmar, o ramo separa os dois: o cadastro antigo sempre grava o ramo, o novo nunca (é perguntado na
+   * conversa). Sem isso, quem preencheu as 7 telas e só falta confirmar seria marcado como cadastro novo, e a conversa perguntaria tudo de novo.
+   */
+  const [novo] = useState(() => fluxoWhats() && (s.sessao.passo === 0 || (s.sessao.passo >= 6 && !s.usuario.ramo)))
 
   // Pré-preenchidos com o que já foi salvo: voltar do último passo não pode apagar o que ele escreveu.
   const [negocio, setNegocio] = useState(s.usuario.negocio)
@@ -288,8 +294,31 @@ export default function Onboarding() {
     }
   }, [passo, confirmado, checarConfirmado])
 
+  /**
+   * Cadastro novo, ao sair da tela do WhatsApp: grava o número e o mínimo para a conta funcionar (uma conta de banco principal, as categorias e os
+   * lembretes de sempre) e vai direto para confirmar no WhatsApp. Ramo, bancos, cartão e contas de todo mês vêm na conversa.
+   */
+  const salvarMinimo = () => {
+    mut((a) => ({
+      ...a,
+      sessao: { ...a.sessao, passo: 6 },
+      usuario: { ...a.usuario, whats: fone },
+      categorias: categoriasPadrao(a.usuario.ramo || 'outro'),
+      carteiras: a.carteiras.length ? a.carteiras : [{ id: 'banco', nome: 'Conta do banco', tipo: 'banco', saldoInicial: 0, padrao: true }],
+      prefs: { ...a.prefs, resumoDia, resumoHora, lembreteHora: '09:00', antecedencia: 1 },
+    }))
+    if (!s.sessao.demo) void salvarOnboardingVia('whats')
+  }
+  // Quem recarrega no passo de confirmar pelo cadastro novo: a marca vai de novo (é idempotente e pode ter falhado da primeira vez).
+  useEffect(() => {
+    if (novo && passo === 6 && !s.sessao.demo) void salvarOnboardingVia('whats')
+  }, [novo, passo, s.sessao.demo])
+
   const g = GUIA[passo]
   const nome = primeiroNome(s.usuario.nome)
+  // Cadastro novo tem 2 telas: o WhatsApp e a confirmação.
+  const totalPassos = novo ? 2 : PASSOS
+  const passoVisivel = novo ? (passo >= 6 ? 1 : 0) : passo
   const mudaCarteira = (i: number, p: Partial<CarteiraOb>) => {
     setCarteiras((cs) => {
       const novo = cs.map((c, k) => (k === i ? { ...c, ...p } : c))
@@ -309,15 +338,15 @@ export default function Onboarding() {
       {confirmado && <Confete />}
       <div className="ob-topo">
         <div className="faixa-topo">
-          <button type="button" className="icone-btn" aria-label={passo === 0 && parte === 0 ? 'Sair' : 'Voltar'} onClick={() => (passo === 0 && parte === 1 ? setParte(0) : passo === 0 ? sair() : setPasso(passo - 1))}>
+          <button type="button" className="icone-btn" aria-label={passo === 0 && parte === 0 ? 'Sair' : 'Voltar'} onClick={() => (novo && passo === 6 ? setPassoLocal(0) : passo === 0 && parte === 1 ? setParte(0) : passo === 0 ? sair() : setPasso(passo - 1))}>
             <ArrowLeft size={22} />
           </button>
-          <div className="ob-passos" role="progressbar" aria-valuemin={1} aria-valuemax={PASSOS} aria-valuenow={Math.min(passo + 1, PASSOS)} aria-label="Progresso do cadastro">
-            {GUIA.slice(0, PASSOS).map((_, i) => (
-              <i key={i} className={i < passo ? 'feito' : i === passo ? 'atual' : ''} />
+          <div className="ob-passos" role="progressbar" aria-valuemin={1} aria-valuemax={totalPassos} aria-valuenow={Math.min(passoVisivel + 1, totalPassos)} aria-label="Progresso do cadastro">
+            {Array.from({ length: totalPassos }, (_, i) => (
+              <i key={i} className={i < passoVisivel ? 'feito' : i === passoVisivel ? 'atual' : ''} />
             ))}
           </div>
-          <span className="ob-cont num">{passo < PASSOS ? `${passo + 1} de ${PASSOS}` : 'Opcional'}</span>
+          <span className="ob-cont num">{passo < PASSOS ? `${passoVisivel + 1} de ${totalPassos}` : 'Opcional'}</span>
         </div>
       </div>
 
@@ -325,8 +354,8 @@ export default function Onboarding() {
         <div className="ob-guia">
           <Mascote pose={passo === 6 && confirmado ? 'festa' : g.pose} tam={104} anim={confirmado ? 'pula' : 'flutua'} />
           <div className="balao">
-            <h1>{passo === 6 && confirmado ? `Tudo pronto${nome ? `, ${nome}` : ''}!` : passo === 0 && parte === 1 ? 'Agora me conta do seu negócio' : passo === 0 && nome ? `Prazer, ${nome}! Eu sou a Granninha.` : g.titulo}</h1>
-            <p>{passo === 6 && confirmado ? 'Seu número está confirmado e eu já te respondi no WhatsApp. Agora é só me mandar o que entrou ou saiu.' : passo === 0 && parte === 0 ? 'Vou cuidar do dinheiro do seu negócio com você. Pra começar, me passa o seu WhatsApp.' : passo === 0 ? 'É só o nome. O CNPJ ou CPF é opcional, você pode pôr depois.' : g.texto}</p>
+            <h1>{novo && passo === 6 && confirmado ? `Número confirmado${nome ? `, ${nome}` : ''}!` : passo === 6 && confirmado ? `Tudo pronto${nome ? `, ${nome}` : ''}!` : passo === 0 && parte === 1 ? 'Agora me conta do seu negócio' : passo === 0 && nome ? `Prazer, ${nome}! Eu sou a Granninha.` : g.titulo}</h1>
+            <p>{novo && passo === 6 && confirmado ? 'Agora a gente continua no WhatsApp: te mandei umas perguntas rápidas por lá pra deixar tudo do seu jeito. Pode responder quando quiser.' : novo && passo === 6 ? 'Toque no botão verde, envie a mensagem e pronto. O resto a gente configura conversando por lá, em poucas perguntas.' : passo === 6 && confirmado ? 'Seu número está confirmado e eu já te respondi no WhatsApp. Agora é só me mandar o que entrou ou saiu.' : passo === 0 && parte === 0 ? 'Vou cuidar do dinheiro do seu negócio com você. Pra começar, me passa o seu WhatsApp.' : passo === 0 ? 'É só o nome. O CNPJ ou CPF é opcional, você pode pôr depois.' : g.texto}</p>
           </div>
         </div>
 
@@ -343,7 +372,7 @@ export default function Onboarding() {
                 onChange={(e) => setFone(mascaraFone(e.target.value))}
                 placeholder="(81) 90000-0000"
               />
-              <small>É por este número que você vai conversar comigo. Eu confirmo com você por lá.</small>
+              <small>{novo ? 'É por este número que você vai conversar comigo. O resto a gente configura por lá, em poucas perguntas.' : 'É por este número que você vai conversar comigo. Eu confirmo com você por lá.'}</small>
             </label>
           </div>
         )}
@@ -704,7 +733,8 @@ export default function Onboarding() {
             </button>
           </div>
         )}
-        {passo === 6 && confirmado && <Conversa />}
+        {/* A demonstração da conversa ("recebi 150") contradiz o cadastro novo, em que a Granninha já mandou as perguntas de configuração. */}
+        {passo === 6 && confirmado && !novo && <Conversa />}
       </div>
 
       <div className="ob-pe">
@@ -722,6 +752,12 @@ export default function Onboarding() {
                   // Sai do passo 1: o contato já fica gravado (quem abandonar depois deixa nome e número, ainda não confirmado).
                   // Primeira tela (só o WhatsApp): grava o número na hora e mostra os dados do negócio, sem mudar de passo.
                   if (passo === 0 && parte === 0) {
+                    // Cadastro novo: daqui já vai confirmar no WhatsApp (sem negócio, CPF/CNPJ nem as telas de configuração).
+                    if (novo) {
+                      salvarMinimo()
+                      setPasso(6)
+                      return
+                    }
                     if (!s.sessao.demo && !s.usuario.verificado) mut((a) => ({ ...a, usuario: { ...a.usuario, whats: fone } }))
                     setParte(1)
                     return
@@ -780,8 +816,8 @@ export default function Onboarding() {
                   </button>
                 </>
               ) : (
-                <button type="button" className="btn btn-pri btn-bloco" onClick={abrirPerfil}>
-                  Continuar
+                <button type="button" className="btn btn-pri btn-bloco" onClick={novo ? concluir : abrirPerfil}>
+                  {novo ? 'Ver meu painel' : 'Continuar'}
                   <ArrowRight size={18} />
                 </button>
               )}

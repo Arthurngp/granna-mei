@@ -225,6 +225,27 @@ export async function salvarPerfilPublico(dados: PerfilPublico): Promise<boolean
   }
 }
 
+/**
+ * Marca por onde a conta entrou ('whats' = cadastro novo, com a configuração pela conversa). Gravação à parte, como salvarPerfilPublico: sem a
+ * migration configwhats a coluna não existe, a gravação falha sozinha e o cadastro segue (o servidor então confirma o número do jeito de sempre).
+ */
+export async function salvarOnboardingVia(via: 'whats' | 'site'): Promise<boolean> {
+  if (!supabase) return false
+  try {
+    const { data, error: e1 } = await supabase.auth.getUser()
+    if (e1 || !data.user) return false
+    const { error: e2 } = await supabase.from('perfis').update({ onboarding_via: via }).eq('id', data.user.id)
+    if (e2) {
+      console.warn('[cadastro] não gravei por onde a conta entrou:', e2.message)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.warn('[cadastro] não gravei por onde a conta entrou:', (e as Error).message)
+    return false
+  }
+}
+
 /** Endereço temporário (1 hora) para mostrar a foto de perfil, que fica em pasta privada. */
 export async function linkFoto(path: string): Promise<string | null> {
   const { data, error } = await supabase!.storage.from('avatares').createSignedUrl(path, 3600)
