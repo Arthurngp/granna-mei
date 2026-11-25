@@ -8,6 +8,9 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  configwhats 20261125020000_config_whats.sql   configuração da conta pela conversa do WhatsApp (cadastro só com o WhatsApp): duas colunas novas em perfis,
+          onboarding_via (o cliente marca 'whats' ou 'site') e config_whats (estado da conversa, só o servidor grava). Nenhuma linha muda. Nada roda sem
+          a chave ONBOARDING_WHATS=on no app granninha. Compatível com o servidor, o painel e o admin atuais.
   nuncalancou 20261125010000_retencao_nunca_lancou.sql   lembrete "Nunca mandou nada" passa a valer para quem NUNCA LANÇOU (antes exigia no máximo 1 mensagem,
           e quem conversou sem lançar ficava fora das duas regras). O prazo conta da última atividade. Só troca retencao_elegiveis, mesma assinatura. Com a regra
           ligada em Todos, quem entrar no grupo novo recebe a 1ª mensagem no próximo ciclo (9h às 19h). Depende de retencaosequencia.
@@ -88,6 +91,7 @@ MIGRATIONS = {
     "enviofrio": "20261123160000_envio_manual_contato_frio.sql",
     "contatoscadastro": "20261124160000_contatos_cadastro.sql",
     "nuncalancou": "20261125010000_retencao_nunca_lancou.sql",
+    "configwhats": "20261125020000_config_whats.sql",
     "configia": "20261124140000_config_ia.sql",
     "iaanthropic": "20261124150000_ia_chaves_anthropic.sql",
 }
@@ -139,6 +143,16 @@ CONFERE = {
     # TROCAM de assinatura. O que importa conferir: cada uma existe UMA vez só (duas versões deixariam o PostgREST em dúvida e, como em
     # dúvida o servidor não envia, os lembretes parariam sem erro), o service_role executa a de elegíveis (4 argumentos) e o cliente não,
     # as etapas nascem desligadas, a tabela é fechada ao cliente e as 5 funções do admin existem, fechadas ao anon.
+    # As duas colunas, quem pode gravar cada uma e quantas contas já usam o cadastro novo. Só leitura.
+    "configwhats": """select
+        (select count(*) from information_schema.columns where table_schema='public' and table_name='perfis' and column_name in ('onboarding_via','config_whats')) as colunas_de_2,
+        (select count(*) from pg_constraint where conname='perfis_onboarding_via_valido') as regra_dos_valores,
+        (case when exists (select 1 from information_schema.columns where table_schema='public' and table_name='perfis' and column_name='onboarding_via')
+              then has_column_privilege('authenticated', 'public.perfis', 'onboarding_via', 'update') end) as cliente_marca_a_origem,
+        (case when exists (select 1 from information_schema.columns where table_schema='public' and table_name='perfis' and column_name='config_whats')
+              then has_column_privilege('authenticated', 'public.perfis', 'config_whats', 'update') end) as cliente_grava_o_estado,
+        (case when exists (select 1 from information_schema.columns where table_schema='public' and table_name='perfis' and column_name='onboarding_via')
+              then (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.perfis where onboarding_via = ''whats''', false, true, '')))[1]::text end) as contas_pelo_whats""",
     # Quem a regra "nunca mandou" pega hoje (etapa 1, 24 h) e se a função já é a nova. Só leitura.
     "nuncalancou": """select
         (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='retencao_elegiveis') as elegiveis_definicoes,
