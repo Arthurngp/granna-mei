@@ -3,6 +3,12 @@
 /** Limite de faturamento anual do MEI. */
 export const LIMITE_MEI = 81000
 
+/**
+ * Painel fechado para manutenção (pedido do Arthur em 25/11, enquanto o chip do WhatsApp aquece). Com true, toda rota do painel
+ * (entrar, criar conta e o painel logado) mostra a tela de manutenção; o site continua no ar. Para reabrir: false e merge na main.
+ */
+export const MANUTENCAO = true
+
 export const PRECO_MENSAL = 29.9
 export const PRECO_ANUAL = 299.9
 

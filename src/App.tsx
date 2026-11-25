@@ -10,6 +10,8 @@ import Bloqueado from './pages/Bloqueado'
 import Contas from './pages/Contas'
 import Inicio from './pages/Inicio'
 import Lancamentos from './pages/Lancamentos'
+import Manutencao from './pages/Manutencao'
+import { MANUTENCAO } from './lib/config'
 import MeuMei from './pages/MeuMei'
 import Onboarding from './pages/Onboarding'
 import Relatorios from './pages/Relatorios'
@@ -23,6 +25,8 @@ function SobeAoTrocar() {
 export default function App() {
   const { s, carregando } = useApp()
   const { logado, onboarding } = s.sessao
+
+  if (MANUTENCAO) return <Manutencao />
 
   if (carregando) {
     return (
