@@ -118,14 +118,25 @@ export default function Onboarding() {
   const [antecedencia, setAntecedencia] = useState('1')
 
   const foneOk = fone.replace(/\D/g, '').length >= 10
+  /**
+   * O passo 1 tem duas telas (pedido do Arthur em 2026-11-24): primeiro SÓ o WhatsApp, depois os dados do negócio. Com anúncio rodando, 5 de 8
+   * pessoas saíam da primeira tela, que pedia nome do negócio, documento e WhatsApp de uma vez, e não deixavam contato nenhum. O número do passo
+   * NÃO muda (as duas telas são o passo 0): o admin mede o cadastro por `onboarding_passo`, e mexer nessa numeração embaralharia a medição.
+   * Quem volta com o telefone já gravado cai direto na segunda tela.
+   */
+  const [parte, setParte] = useState<0 | 1>(s.usuario.whats.replace(/\D/g, '').length >= 10 ? 1 : 0)
   const cnpjOk = documentoValido(cnpj)
 
   /** O que ainda falta no passo atual. Vazio = pode avançar. */
   const falta = useMemo(() => {
-    if (passo === 0) {
+    if (passo === 0 && parte === 0) {
+      if (!foneOk) return 'Digite seu WhatsApp com DDD.'
+    }
+    if (passo === 0 && parte === 1) {
       if (negocio.trim().length < 2) return 'Diga o nome do seu negócio.'
       if (!cnpjOk) return 'Esse CNPJ ou CPF não confere. Revise os números ou deixe em branco.'
-      if (!foneOk) return 'Digite seu WhatsApp com DDD.'
+      // O telefone é da primeira tela: se ficou inválido (voltou e apagou), o aviso manda para lá em vez de travar aqui sem explicação.
+      if (!foneOk) return 'Volte e digite seu WhatsApp com DDD.'
     }
     if (passo === 1 && !ramo) return 'Escolha o ramo mais parecido com o seu.'
     if (passo === 1 && ramo === 'outro' && ocupacao.trim().length < OCUPACAO_MIN) return 'Me conta qual é a sua ocupação.'
@@ -151,7 +162,7 @@ export default function Onboarding() {
       if (semValor) return `Falta o valor de ${semValor.nome}.`
     }
     return ''
-  }, [passo, negocio, cnpjOk, foneOk, ramo, ocupacao, nasc, carteiras, padrao, fixas, usaCartao, cartoes])
+  }, [passo, parte, negocio, cnpjOk, foneOk, ramo, ocupacao, nasc, carteiras, padrao, fixas, usaCartao, cartoes])
 
   /**
    * Grava o contato assim que a pessoa sai do passo 1. Antes só gravava no fim do passo 6 (`salvarDados`), então quem abandonava
@@ -298,7 +309,7 @@ export default function Onboarding() {
       {confirmado && <Confete />}
       <div className="ob-topo">
         <div className="faixa-topo">
-          <button type="button" className="icone-btn" aria-label={passo === 0 ? 'Sair' : 'Voltar'} onClick={() => (passo === 0 ? sair() : setPasso(passo - 1))}>
+          <button type="button" className="icone-btn" aria-label={passo === 0 && parte === 0 ? 'Sair' : 'Voltar'} onClick={() => (passo === 0 && parte === 1 ? setParte(0) : passo === 0 ? sair() : setPasso(passo - 1))}>
             <ArrowLeft size={22} />
           </button>
           <div className="ob-passos" role="progressbar" aria-valuemin={1} aria-valuemax={PASSOS} aria-valuenow={Math.min(passo + 1, PASSOS)} aria-label="Progresso do cadastro">
@@ -310,25 +321,17 @@ export default function Onboarding() {
         </div>
       </div>
 
-      <div className="ob-corpo" key={passo}>
+      <div className="ob-corpo" key={`${passo}-${passo === 0 ? parte : 0}`}>
         <div className="ob-guia">
           <Mascote pose={passo === 6 && confirmado ? 'festa' : g.pose} tam={104} anim={confirmado ? 'pula' : 'flutua'} />
           <div className="balao">
-            <h1>{passo === 6 && confirmado ? `Tudo pronto${nome ? `, ${nome}` : ''}!` : passo === 0 && nome ? `Prazer, ${nome}! Eu sou a Granninha.` : g.titulo}</h1>
-            <p>{passo === 6 && confirmado ? 'Seu número está confirmado e eu já te respondi no WhatsApp. Agora é só me mandar o que entrou ou saiu.' : g.texto}</p>
+            <h1>{passo === 6 && confirmado ? `Tudo pronto${nome ? `, ${nome}` : ''}!` : passo === 0 && parte === 1 ? 'Agora me conta do seu negócio' : passo === 0 && nome ? `Prazer, ${nome}! Eu sou a Granninha.` : g.titulo}</h1>
+            <p>{passo === 6 && confirmado ? 'Seu número está confirmado e eu já te respondi no WhatsApp. Agora é só me mandar o que entrou ou saiu.' : passo === 0 && parte === 0 ? 'Vou cuidar do dinheiro do seu negócio com você. Pra começar, me passa o seu WhatsApp.' : passo === 0 ? 'É só o nome. O CNPJ ou CPF é opcional, você pode pôr depois.' : g.texto}</p>
           </div>
         </div>
 
-        {passo === 0 && (
+        {passo === 0 && parte === 0 && (
           <div className="pilha">
-            <label className="campo">
-              <span>Nome do seu negócio</span>
-              <input className="entrada" value={negocio} onChange={(e) => setNegocio(e.target.value)} placeholder="Ex.: Studio Camila" autoComplete="organization" />
-            </label>
-            <label className="campo">
-              <span>CNPJ ou CPF (opcional)</span>
-              <input className="entrada num" inputMode="numeric" value={cnpj} onChange={(e) => setCnpj(mascaraCnpj(e.target.value))} placeholder="CNPJ do MEI ou seu CPF" />
-            </label>
             <label className="campo">
               <span>Seu WhatsApp</span>
               <input
@@ -341,6 +344,19 @@ export default function Onboarding() {
                 placeholder="(81) 90000-0000"
               />
               <small>É por este número que você vai conversar comigo. Eu confirmo com você por lá.</small>
+            </label>
+          </div>
+        )}
+
+        {passo === 0 && parte === 1 && (
+          <div className="pilha">
+            <label className="campo">
+              <span>Nome do seu negócio</span>
+              <input className="entrada" value={negocio} onChange={(e) => setNegocio(e.target.value)} placeholder="Ex.: Studio Camila" autoComplete="organization" />
+            </label>
+            <label className="campo">
+              <span>CNPJ ou CPF (opcional)</span>
+              <input className="entrada num" inputMode="numeric" value={cnpj} onChange={(e) => setCnpj(mascaraCnpj(e.target.value))} placeholder="CNPJ do MEI ou seu CPF" />
             </label>
           </div>
         )}
@@ -704,6 +720,12 @@ export default function Onboarding() {
                 disabled={!!falta}
                 onClick={() => {
                   // Sai do passo 1: o contato já fica gravado (quem abandonar depois deixa nome e número, ainda não confirmado).
+                  // Primeira tela (só o WhatsApp): grava o número na hora e mostra os dados do negócio, sem mudar de passo.
+                  if (passo === 0 && parte === 0) {
+                    if (!s.sessao.demo && !s.usuario.verificado) mut((a) => ({ ...a, usuario: { ...a.usuario, whats: fone } }))
+                    setParte(1)
+                    return
+                  }
                   if (passo === 0) salvarContato()
                   if (passo === 1) salvarOcupacao()
                   // Ao concluir o último passo de dados, grava tudo antes de mandar a pessoa ao WhatsApp.
