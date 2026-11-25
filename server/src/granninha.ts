@@ -27,6 +27,8 @@ import { brl as brlComSinal, contasQueFicaramNegativas, ehPerguntaClara, linhasD
 import { foraDoDisponivel } from './cartao.ts'
 import { confirma, ERROU, MSG } from './voz.ts'
 import { carteiraDoBanco, textoSaldoLido } from './print-banco.ts'
+import { configAtiva, corrigirSaldoImportado, depoisDaMensagem, iniciar as iniciarConfig, responder as responderConfig, responderPrintSaldo, veioPeloWhats } from './config-whats-fluxo.ts'
+import type { EstadoConfig } from './config-whats.ts'
 import { comNova, depois as depoisDaFila, valorSoltoDuvidoso, type ItemFila } from './fila.ts'
 import { baixaPronta, escolherGancho, fraseDeBaixa, janelaDoGancho, pendenteValido, respostaGancho, TEXTO_JA_BAIXADA, textoConfirmacao, textoNaoPagou, VALE_MS, type ContaGancho, type PendenteBaixa } from './gancho.ts'
 
@@ -197,7 +199,7 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
   let textoFinal = d.content ?? ''
   let erro: string | null = null
   /** Preenchido pelo conversar() com o `atualizado_em` da pergunta em aberto que ele leu. */
-  const consumo: { pendenteLida?: string | null; consumiu?: boolean } = {}
+  const consumo: { pendenteLida?: string | null; consumiu?: boolean; config?: EstadoConfig | null } = {}
 
   // Modo teste: com WA_SOMENTE_NUMEROS preenchido, só esses números conversam. O resto é ignorado em
   // silêncio (sem resposta, sem IA), mas a linha sai de "recebida" para a varredura não voltar nela.
@@ -243,6 +245,12 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
           status = 'ignorada'
           resposta = `Esse número já está confirmado nesta conta, então não dá para usá-lo em outra ao mesmo tempo. Se quiser levá-lo para a conta nova, troque o número aqui em ${PAINEL()}/ajustes (ou peça a exclusão desta conta) e confirme lá.`
         } else {
+          // Configuração pela conversa em andamento (config-whats.ts): falhar ao ler nunca impede de atender a mensagem.
+          try {
+            consumo.config = await configAtiva(cliente.id)
+          } catch (e) {
+            console.error('[config] não li a configuração:', (e as Error).message.slice(0, 200))
+          }
           // O contexto diz de qual cliente é cada chamada de IA: é assim que o modelo individual (aba Configurações) chega à chamada sem mexer em nenhuma assinatura.
           const r = await contextoIA.run({ userId: cliente.id }, () => conversar(cliente, hoje, tipo, d, msgId, telefone, consumo, opts.retomada === true))
           ;({ status, resposta, efeitos, intencao } = r)
@@ -281,6 +289,7 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
   // Pedir ajuda no meio da pergunta não consome a pergunta: ela segue em aberto para a resposta que vem depois.
   // Fila de perguntas (fila.ts): se esta mensagem respondeu a pergunta, a próxima guardada volta junto da resposta; se ignorou, a pergunta volta
   // uma vez; o que passou do prazo sai, avisando o que ficou sem anotar. Mensagem sem resposta (silêncio) só limpa, como antes.
+  let filaFalou = false
   if (consumo.pendenteLida && status !== 'erro' && intencao !== 'ajuda') {
     let novo: unknown = null
     let extra = ''
@@ -296,7 +305,21 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
     const lim = await sb.from('conversas').update({ pendente: novo, atualizado_em: new Date().toISOString() }).eq('telefone', telefone).eq('atualizado_em', consumo.pendenteLida).select('telefone')
     if (lim.error) console.error('[granninha] limpar pergunta em aberto', lim.error.message)
     // Só diz que ficou algo esperando se a fila foi mesmo gravada (ninguém escreveu por cima no meio).
-    else if (extra && lim.data?.length) resposta = `${resposta}\n\n${extra}`
+    else if (extra && lim.data?.length) {
+      resposta = `${resposta}\n\n${extra}`
+      filaFalou = true
+    }
+  }
+
+  // Configuração pela conversa: a mensagem não era resposta dela (era um gasto, uma pergunta). Atendida a mensagem, a pergunta da configuração
+  // volta no fim, a não ser que a mensagem tenha deixado pergunta própria ou que a fila de perguntas tenha falado: uma pergunta por vez.
+  if (consumo.config && userId && intencao !== 'config' && status === 'ok' && resposta && !filaFalou) {
+    try {
+      const mais = await depoisDaMensagem(userId, consumo.config, (efeitos.fixas?.length ?? 0) > 0)
+      if (mais) resposta = `${resposta}\n\n${mais}`
+    } catch (e) {
+      console.error('[config] não consegui seguir a configuração:', (e as Error).message.slice(0, 200))
+    }
   }
 
   const up = await sb.from('mensagens').update({
@@ -407,7 +430,7 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
       const nome = (up.data?.nome ?? '').split(' ')[0]
       return {
         status: 'ok',
-        resposta: await confirmacaoComGancho(telefone, v.user_id as string, nome, !!(up.data as { ocultar?: boolean } | null)?.ocultar),
+        resposta: await boasVindasDoNumero(telefone, v.user_id as string, nome, !!(up.data as { ocultar?: boolean } | null)?.ocultar),
         userId: v.user_id,
       }
     }
@@ -456,6 +479,19 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
  * a confirmação do número já aconteceu e nunca depende disto. E a pergunta só sai se ficou gravada: perguntar sem poder ouvir a resposta
  * seria pior que não perguntar.
  */
+/**
+ * A resposta ao código que confirma o número. Quem veio pelo cadastro novo (só o WhatsApp no site) começa a configuração pela conversa; o resto
+ * recebe a confirmação com o gancho da conta. Se a configuração falhar ao começar, cai na confirmação de sempre: o número já está confirmado.
+ */
+async function boasVindasDoNumero(telefone: string, userId: string, nome: string, ocultar: boolean): Promise<string> {
+  try {
+    if (await veioPeloWhats(userId)) return await iniciarConfig(userId, nome)
+  } catch (e) {
+    console.error('[config] não comecei a configuração:', (e as Error).message.slice(0, 200))
+  }
+  return confirmacaoComGancho(telefone, userId, nome, ocultar)
+}
+
 async function confirmacaoComGancho(telefone: string, userId: string, nome: string, ocultar: boolean): Promise<string> {
   try {
     const hoje = hojeSP()
@@ -486,7 +522,7 @@ interface Conversa {
   tokens: Uso
 }
 
-async function conversar(cliente: { id: string; nome: string; negocio?: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string, saida: { pendenteLida?: string | null; consumiu?: boolean } = {}, retomada = false): Promise<Conversa> {
+async function conversar(cliente: { id: string; nome: string; negocio?: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string, saida: { pendenteLida?: string | null; consumiu?: boolean; config?: EstadoConfig | null } = {}, retomada = false): Promise<Conversa> {
   const tokens: Uso = { entrada: 0, saida: 0, audio: 0 }
   const soma = (u: Uso) => {
     tokens.entrada += u.entrada
@@ -539,6 +575,11 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
     soma(uso)
     // Print da tela de saldo do banco: nunca vira lançamento. Compara com o que está anotado e, se não bate, sugere o extrato (print-banco.ts).
     if (leitura.tipo === 'saldo') {
+      // Na configuração (etapas de banco e saldo), o print põe o banco e o saldo de uma vez.
+      if (saida.config) {
+        const rp = await responderPrintSaldo(cliente.id, saida.config, leitura.banco, leitura.saldo)
+        if (rp) return { status: 'ok', resposta: rp.resposta, efeitos: {}, intencao: 'config', texto: leitura.resumo, tokens }
+      }
       const cx = await contextoDe(cliente.id, hoje)
       const cart = carteiraDoBanco(leitura.banco, cx.carteiras)
       const anotado = cart ? (saldosDaBase(await carregarBase(cliente.id))[cart.id] ?? null) : null
@@ -629,6 +670,12 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
       if (rg === 'nao') return { status: 'ok', resposta: textoNaoPagou(pg.conta), efeitos: {}, intencao: 'gancho', texto, tokens }
       if (rg === 'sim') baixaDoGancho = pg
     }
+  }
+
+  // Resposta à pergunta da configuração pela conversa (config-whats.ts). Só quando não há pergunta própria em aberto: ela vem primeiro.
+  if (saida.config && !documento && !anexo && !(pend?.tipo && fresco) && !baixaDoGancho) {
+    const rc = await responderConfig(cliente.id, saida.config, texto)
+    if (rc.tratou) return { status: 'ok', resposta: rc.resposta, efeitos: {}, intencao: 'config', texto, tokens }
   }
 
   // Despedida, agradecimento e "ok" ("tá bom, volto mais tarde"): não é cumprimento nem pedido. Responde curto ou fica em
@@ -764,12 +811,12 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
     if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei nada.', efeitos: {}, intencao: 'extrato', texto, tokens }
     if (pend.opcoes?.length) {
       const esc = opcaoEscolhida(texto, pend.opcoes)
-      if (esc) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens, esc.id)
+      if (esc) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens, esc.id, saida.config)
       if (/^\s*(sim|s|pode|importa|ok|isso|manda|\d+)\b/i.test(texto)) {
         await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
         return { status: 'pergunta', resposta: `De qual conta é esse extrato? Responda com o número:\n${pend.opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, efeitos: {}, intencao: 'extrato', texto, tokens }
       }
-    } else if (/^\s*(sim|s|pode|importa|ok|isso|manda)\b/i.test(texto)) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens, (pend as { carteira?: string }).carteira)
+    } else if (/^\s*(sim|s|pode|importa|ok|isso|manda)\b/i.test(texto)) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens, (pend as { carteira?: string }).carteira, saida.config)
   }
   // Resposta a uma pergunta com opções: o número (ou o nome) decide no código, sem depender da IA.
   // As respostas se acumulam (ex.: "do negócio" e depois "Nubank") até o lançamento fechar.
@@ -1000,7 +1047,7 @@ async function importarFatura(userId: string, ctx: Contexto, ts: Transacao[], ca
 }
 
 /** Importa as transações de um extrato depois do SIM. Pula as que já existem (mesmo dia, valor e direção). */
-async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Origem, anexo: string | null, tokens: Uso, carteira?: string): Promise<Conversa> {
+async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Origem, anexo: string | null, tokens: Uso, carteira?: string, config?: EstadoConfig | null): Promise<Conversa> {
   const { data: ja, error } = await sb.from('lancamentos').select('data,valor,tipo').eq('user_id', userId).gte('data', ts.map((t) => t.data ?? ctx.hoje).sort()[0])
   falhou(error, 'extrato: duplicados')
   const existe = new Set((ja ?? []).map((l) => `${l.data}|${Number(l.valor).toFixed(2)}|${l.tipo}`))
@@ -1021,6 +1068,8 @@ async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Or
   }
   if (!acoes.length) return { status: 'ok', resposta: `Todos os ${ts.length} lançamentos desse extrato já estavam anotados.`, efeitos: {}, intencao: 'extrato', texto: 'importar extrato', tokens }
   const r = await executar(userId, ctx, acoes, tipo, anexo)
+  // Na configuração, o saldo posto pelo print ou pelo valor dito já contém o que o extrato trouxe: corrige para não somar em dobro.
+  if (config) await corrigirSaldoImportado(userId, config, r.efeitos.lancamentos ?? [])
   return {
     status: 'ok',
     resposta: `Importei ${acoes.length} lançamentos${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Confira as categorias no painel.${await saldoDepois(userId, acoes)}\n\n${ERROU}`,
