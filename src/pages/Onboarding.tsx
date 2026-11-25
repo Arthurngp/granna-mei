@@ -159,6 +159,27 @@ export default function Onboarding() {
    */
   const salvarContato = () => mut((a) => ({ ...a, usuario: { ...a.usuario, negocio: negocio.trim(), cnpj, whats: fone } }))
 
+  /**
+   * Grava o contato SEM esperar o "Continuar" (pedido do Arthur em 2026-11-24). Com anúncio rodando, a maioria de quem criava a conta saía na primeira
+   * tela, e o que já tinha sido digitado se perdia: no admin sobrava só nome e e-mail, sem telefone para chamar a pessoa de volta.
+   * Assim que o WhatsApp tem DDD e número, espera a pessoa parar de digitar e grava o que já é válido: o telefone, o nome do negócio (se já tem) e o
+   * documento (só se confere). O número continua NÃO confirmado. Não roda no modo demonstração nem para quem já confirmou (trocar o número de quem já
+   * confirmou derruba a confirmação, e isso só pode acontecer com um toque da pessoa, nunca enquanto ela digita).
+   */
+  const foneGravado = s.usuario.whats
+  const negocioGravado = s.usuario.negocio
+  const jaConfirmou = s.usuario.verificado
+  const demo = s.sessao.demo
+  useEffect(() => {
+    if (passo !== 0 || demo || jaConfirmou || !foneOk) return
+    const neg = negocio.trim().length >= 2 ? negocio.trim() : negocioGravado
+    if (fone === foneGravado && neg === negocioGravado) return
+    const t = window.setTimeout(() => {
+      mut((a) => ({ ...a, usuario: { ...a.usuario, whats: fone, negocio: neg, ...(cnpjOk && cnpj ? { cnpj } : {}) } }))
+    }, 900)
+    return () => window.clearTimeout(t)
+  }, [passo, demo, jaConfirmou, foneOk, fone, negocio, cnpj, cnpjOk, foneGravado, negocioGravado, mut])
+
   /** Ocupação de quem é de "Outro ramo". Gravação à parte: se falhar, o cadastro segue (ver salvarPerfilPublico). */
   const salvarOcupacao = () => {
     if (s.sessao.demo) return
@@ -711,19 +732,27 @@ export default function Onboarding() {
             <>
               {!confirmado ? (
                 <>
-                  <a
-                    className="btn btn-wa btn-bloco"
-                    href={linkWhats(codigo ? `Meu código Granninha: ${codigo}` : 'Oi, Granninha!')}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => {
-                      // Na demonstração não há Granninha de verdade: confirma sozinho depois de um instante.
-                      if (s.sessao.demo) setTimeout(() => setConfirmado(true), 2500)
-                    }}
-                  >
-                    <MessageCircle size={19} />
-                    Abrir o WhatsApp e enviar o código
-                  </a>
+                  {codigo ? (
+                    <a
+                      className="btn btn-wa btn-bloco"
+                      href={linkWhats(`Meu código Granninha: ${codigo}`)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => {
+                        // Na demonstração não há Granninha de verdade: confirma sozinho depois de um instante.
+                        if (s.sessao.demo) setTimeout(() => setConfirmado(true), 2500)
+                      }}
+                    >
+                      <MessageCircle size={19} />
+                      Abrir o WhatsApp e enviar o código
+                    </a>
+                  ) : (
+                    // Sem o código ainda, o botão não abre o WhatsApp: a mensagem sairia sem código e a Granninha não reconhece quem não confirmou.
+                    <button type="button" className="btn btn-wa btn-bloco" disabled>
+                      <LoaderCircle size={19} className="gira" />
+                      Preparando seu código…
+                    </button>
+                  )}
                   <button type="button" className="btn btn-txt" onClick={concluir}>
                     Confirmar depois
                   </button>
