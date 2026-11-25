@@ -22,12 +22,13 @@ export function depsAvisosDoBanco(sb: SupabaseClient, enviar: (telefone: string,
     async perfis(hhmm) {
       const { data, error } = await sb
         .from('perfis')
-        .select('id, nome, whats, whats_chave, lembrete_hora, antecedencia, ocultar, exclusao_em')
+        .select('id, nome, whats, whats_chave, lembrete_hora, antecedencia, ocultar, exclusao_em, avisos_off')
         .eq('whats_verificado', true)
         .is('exclusao_em', null)
         .lte('lembrete_hora', hhmm)
       falha('perfis', error)
-      const base = (data ?? []) as Omit<PerfilAviso, 'assinatura'>[]
+      // Quem respondeu SAIR não recebe NENHUM aviso automático, este incluído.
+      const base = ((data ?? []) as (Omit<PerfilAviso, 'assinatura'> & { avisos_off?: boolean | null })[]).filter((p) => !p.avisos_off).map(({ avisos_off: _s, ...p }) => p)
       const assinaturas = new Map<string, { status: string; trial_fim: string | null }>()
       for (let i = 0; i < base.length; i += LOTE) {
         const ids = base.slice(i, i + LOTE).map((p) => p.id)
@@ -56,21 +57,24 @@ export function depsAvisosDoBanco(sb: SupabaseClient, enviar: (telefone: string,
 
     async telefoneDe(p) {
       // O número em que a pessoa realmente escreveu: é o que o WhatsApp aceita (às vezes sem o nono dígito).
+      // E só se ela escreveu para o número ATUAL da Granninha (desde `numero_desde`): mensagem automática para quem nunca falou com este chip
+      // é contato frio, e número não oficial que inicia conversa é banido (decisão do Arthur em 21/11, a mesma regra dos lembretes de retenção).
+      // Sem o marco não dá para saber quem já falou com este número: ninguém recebe. Sem conversa, também não: nada de cair no número cadastrado.
+      const s = await sb.from('granninha_saude').select('numero_desde').eq('id', 1).maybeSingle()
+      falha('marco do número', s.error)
+      const marco = (s.data as { numero_desde: string | null } | null)?.numero_desde
+      if (!marco) return null
       const { data, error } = await sb
         .from('mensagens')
         .select('telefone')
         .eq('user_id', p.id)
         .in('status', ['ok', 'pergunta'])
+        .gte('criado_em', marco)
         .order('criado_em', { ascending: false })
         .limit(1)
       falha('telefone', error)
       const t = String((data as { telefone: string }[] | null)?.[0]?.telefone ?? '').replace(/\D/g, '')
-      if (t.length >= 10) return t
-      // Ainda não conversou: usa o número cadastrado e verificado.
-      const d = (p.whats ?? '').replace(/\D/g, '')
-      if (d.length === 10 || d.length === 11) return '55' + d
-      if (d.length >= 12 && d.startsWith('55')) return d
-      return null
+      return t.length >= 10 ? t : null
     },
 
     async jaAvisadas(userId, chaves) {
@@ -135,9 +139,10 @@ export function depsAvisosDoBanco(sb: SupabaseClient, enviar: (telefone: string,
       const out: PerfilAviso[] = []
       for (let i = 0; i < linhas.length; i += LOTE) {
         const lote = linhas.slice(i, i + LOTE)
-        const r = await sb.from('perfis').select('id, nome, whats, whats_chave, exclusao_em').in('id', lote.map((l) => l.user_id)).eq('whats_verificado', true).is('exclusao_em', null)
+        const r = await sb.from('perfis').select('id, nome, whats, whats_chave, exclusao_em, avisos_off').in('id', lote.map((l) => l.user_id)).eq('whats_verificado', true).is('exclusao_em', null)
         falha('perfis em teste', r.error)
-        for (const p of (r.data ?? []) as { id: string; nome: string; whats: string; whats_chave: string | null; exclusao_em: string | null }[]) {
+        for (const { avisos_off: sair, ...p } of (r.data ?? []) as { id: string; nome: string; whats: string; whats_chave: string | null; exclusao_em: string | null; avisos_off?: boolean | null }[]) {
+          if (sair) continue // respondeu SAIR
           const l = lote.find((x) => x.user_id === p.id)!
           // lembrete_hora, antecedencia e ocultar não entram no aviso de fim de teste.
           out.push({ ...p, lembrete_hora: '09:00', antecedencia: 1, ocultar: false, assinatura: { status: l.status, trial_fim: l.trial_fim } })

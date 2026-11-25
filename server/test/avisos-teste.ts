@@ -187,7 +187,7 @@ await caso('sem número para avisar: registra no log e não reserva', async () =
   const log = await A.rodarAvisosTeste(f.deps, CFG(), em('10:00', HOJE))
   assert.equal(f.enviados.length, 0)
   assert.equal(f.ledger.size, 0)
-  assert.ok(log.some((l) => /sem número/.test(l)))
+  assert.ok(log.some((l) => /não escreveu para o número atual/.test(l)))
 })
 
 await caso('ritmo: envios espaçados e teto por ciclo (número não oficial que dispara demais é banido)', async () => {
