@@ -26,6 +26,7 @@ import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, pareceRe
 import { brl as brlComSinal, contasQueFicaramNegativas, ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta } from './consultas.ts'
 import { foraDoDisponivel } from './cartao.ts'
 import { confirma, ERROU, MSG } from './voz.ts'
+import { comNova, depois as depoisDaFila, valorSoltoDuvidoso, type ItemFila } from './fila.ts'
 import { baixaPronta, escolherGancho, fraseDeBaixa, janelaDoGancho, pendenteValido, respostaGancho, TEXTO_JA_BAIXADA, textoConfirmacao, textoNaoPagou, VALE_MS, type ContaGancho, type PendenteBaixa } from './gancho.ts'
 
 const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.com.br/painel').replace(/\/+$/, '')
@@ -195,7 +196,7 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
   let textoFinal = d.content ?? ''
   let erro: string | null = null
   /** Preenchido pelo conversar() com o `atualizado_em` da pergunta em aberto que ele leu. */
-  const consumo: { pendenteLida?: string | null } = {}
+  const consumo: { pendenteLida?: string | null; consumiu?: boolean } = {}
 
   // Modo teste: com WA_SOMENTE_NUMEROS preenchido, só esses números conversam. O resto é ignorado em
   // silêncio (sem resposta, sem IA), mas a linha sai de "recebida" para a varredura não voltar nela.
@@ -277,9 +278,24 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
   // ela continua lá para a resposta seguinte fazer sentido. O filtro por `atualizado_em` é o que
   // impede de apagar uma pergunta NOVA que o próprio processamento acabou de gravar.
   // Pedir ajuda no meio da pergunta não consome a pergunta: ela segue em aberto para a resposta que vem depois.
+  // Fila de perguntas (fila.ts): se esta mensagem respondeu a pergunta, a próxima guardada volta junto da resposta; se ignorou, a pergunta volta
+  // uma vez; o que passou do prazo sai, avisando o que ficou sem anotar. Mensagem sem resposta (silêncio) só limpa, como antes.
   if (consumo.pendenteLida && status !== 'erro' && intencao !== 'ajuda') {
-    const lim = await sb.from('conversas').update({ pendente: null, atualizado_em: new Date().toISOString() }).eq('telefone', telefone).eq('atualizado_em', consumo.pendenteLida)
+    let novo: unknown = null
+    let extra = ''
+    if (resposta) {
+      const cv = await sb.from('conversas').select('pendente, atualizado_em').eq('telefone', telefone).maybeSingle()
+      if (cv.error) console.error('[granninha] ler fila de perguntas', cv.error.message)
+      else if (cv.data && cv.data.atualizado_em === consumo.pendenteLida) {
+        const d = depoisDaFila(cv.data.pendente, !!consumo.consumiu, Date.now(), cv.data.atualizado_em as string)
+        novo = d.pendente
+        extra = d.texto
+      }
+    }
+    const lim = await sb.from('conversas').update({ pendente: novo, atualizado_em: new Date().toISOString() }).eq('telefone', telefone).eq('atualizado_em', consumo.pendenteLida).select('telefone')
     if (lim.error) console.error('[granninha] limpar pergunta em aberto', lim.error.message)
+    // Só diz que ficou algo esperando se a fila foi mesmo gravada (ninguém escreveu por cima no meio).
+    else if (extra && lim.data?.length) resposta = `${resposta}\n\n${extra}`
   }
 
   const up = await sb.from('mensagens').update({
@@ -469,7 +485,7 @@ interface Conversa {
   tokens: Uso
 }
 
-async function conversar(cliente: { id: string; nome: string; negocio?: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string, saida: { pendenteLida?: string | null } = {}, retomada = false): Promise<Conversa> {
+async function conversar(cliente: { id: string; nome: string; negocio?: string }, hoje: string, tipo: Origem, d: EventoGateway['data'], msgId: string, telefone: string, saida: { pendenteLida?: string | null; consumiu?: boolean } = {}, retomada = false): Promise<Conversa> {
   const tokens: Uso = { entrada: 0, saida: 0, audio: 0 }
   const soma = (u: Uso) => {
     tokens.entrada += u.entrada
@@ -492,6 +508,15 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
   // a pergunta sumia: o "2" seguinte chegava sem contexto. Quem apaga é o processar(), só quando
   // deu certo, e só se nada novo tiver sido gravado por cima (`pendenteLida` guarda o atualizado_em).
   saida.pendenteLida = pend?.tipo ? (conv!.atualizado_em as string) : null
+  /** Grava uma pergunta NOVA em aberto. A anterior, se ainda valia e não foi respondida por esta mensagem, vai para a fila (fila.ts). */
+  const guardar = async (nova: Record<string, unknown>) => {
+    const agora = Date.now()
+    const pendente = comNova(nova as ItemFila, fresco ? conv?.pendente : null, !!saida.consumiu, agora, (conv?.atualizado_em as string | undefined) ?? null)
+    const g = await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente, atualizado_em: new Date(agora).toISOString() })
+    if (g.error) console.error('[granninha] guardar pergunta', g.error.message)
+  }
+  /** Esta mensagem é a resposta da pergunta em aberto: marca, para a fila andar. */
+  const respondeu = <T>(x: T): T => ((saida.consumiu = true), x)
 
   if (tipo === 'audio') {
     const m = await baixarMidia(d.fileUrl ?? '')
@@ -523,26 +548,20 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
       const total = leitura.transacoes.reduce((a, t) => a + t.valor, 0)
       const opcoes = cartoes.map((c) => ({ id: c.id, nome: c.nome }))
       const venc = leitura.vencimento && /^\d{4}-\d{2}-\d{2}$/.test(leitura.vencimento) ? leitura.vencimento : null
-      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'importar_fatura', transacoes: leitura.transacoes, anexo, opcoes, vencimento: venc }, atualizado_em: new Date().toISOString() })
-      return {
-        status: 'pergunta',
-        resposta: `Achei ${leitura.transacoes.length} compras nessa fatura, somando ${brl(total)}${venc ? ` (vence ${venc.split('-').reverse().slice(0, 2).join('/')})` : ''}.\n\n${opcoes.length === 1 ? `Quer que eu importe no ${opcoes[0].nome}? Responda SIM ou NÃO.` : `Quer que eu importe? Responda com o número do cartão, ou NÃO:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`}`,
-        efeitos: {}, intencao: 'fatura', texto: leitura.resumo, tokens,
-      }
+      const perguntaFatura = `Achei ${leitura.transacoes.length} compras nessa fatura, somando ${brl(total)}${venc ? ` (vence ${venc.split('-').reverse().slice(0, 2).join('/')})` : ''}.\n\n${opcoes.length === 1 ? `Quer que eu importe no ${opcoes[0].nome}? Responda SIM ou NÃO.` : `Quer que eu importe? Responda com o número do cartão, ou NÃO:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`}`
+      await guardar({ tipo: 'importar_fatura', transacoes: leitura.transacoes, anexo, opcoes, vencimento: venc, pergunta: perguntaFatura })
+      return { status: 'pergunta', resposta: perguntaFatura, efeitos: {}, intencao: 'fatura', texto: leitura.resumo, tokens }
     }
     if (leitura.tipo === 'extrato' && leitura.transacoes.length > 1) {
       const ent = leitura.transacoes.filter((t) => t.movimento === 'entrada').reduce((a, t) => a + t.valor, 0)
       const sai = leitura.transacoes.filter((t) => t.movimento === 'saida').reduce((a, t) => a + t.valor, 0)
       const bancos = (await contextoDe(cliente.id, hoje)).carteiras.filter((c) => c.tipo === 'banco')
       const opcoes = bancos.length > 1 ? bancos.map((c) => ({ id: c.id, nome: c.nome })) : undefined
-      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'importar', transacoes: leitura.transacoes, anexo, opcoes }, atualizado_em: new Date().toISOString() })
-      return {
-        status: 'pergunta',
-        resposta: `Achei ${leitura.transacoes.length} lançamentos nesse extrato: ${brl(ent)} de entradas e ${brl(sai)} de saídas.\n\n` + (opcoes
+      const perguntaExtrato = `Achei ${leitura.transacoes.length} lançamentos nesse extrato: ${brl(ent)} de entradas e ${brl(sai)} de saídas.\n\n` + (opcoes
           ? `Quer que eu importe? Responda com o número da conta deste extrato, ou NÃO:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`
-          : 'Quer que eu importe? Responda SIM ou NÃO.'),
-        efeitos: {}, intencao: 'extrato', texto: leitura.resumo, tokens,
-      }
+          : 'Quer que eu importe? Responda SIM ou NÃO.')
+      await guardar({ tipo: 'importar', transacoes: leitura.transacoes, anexo, opcoes, pergunta: perguntaExtrato })
+      return { status: 'pergunta', resposta: perguntaExtrato, efeitos: {}, intencao: 'extrato', texto: leitura.resumo, tokens }
     }
     // Comprovante: cruza o banco de origem e o de destino com as contas do cliente. Entre duas contas dele é transferência (não é entrada nem saída);
     // só a origem dele é saída dessa conta; só o destino dele é entrada nessa conta. Sem reconhecer nenhuma, segue como antes.
@@ -586,14 +605,17 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
       const curta = /^\s*\d{1,2}\s*$/.test(texto) || (!/\d/.test(texto) && texto.trim().split(/\s+/).length <= 4)
       const esc = fresco && curta ? opcaoEscolhida(texto, pg.opcoes) : null
       if (esc) {
+        saida.consumiu = true
         baixaDoGancho = pg
         carteiraDoGancho = esc.id
       } else if (fresco && /^\s*\d{1,2}\s*$/.test(texto)) {
+        saida.consumiu = true
         await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pg, atualizado_em: new Date().toISOString() })
         return { status: 'pergunta', resposta: `Não achei essa opção. ${pg.pergunta ?? ''}`.trim(), efeitos: {}, intencao: 'acoes', texto, tokens }
       }
     } else if (Date.now() - new Date(conv!.atualizado_em).getTime() < VALE_MS) {
       const rg = respostaGancho(texto)
+      if (rg) saida.consumiu = true
       if (rg === 'nao') return { status: 'ok', resposta: textoNaoPagou(pg.conta), efeitos: {}, intencao: 'gancho', texto, tokens }
       if (rg === 'sim') baixaDoGancho = pg
     }
@@ -629,7 +651,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
       const pendente = conf.opcoes?.length && !carteiraDoGancho
         ? segundoPasso
         : { tipo: 'pergunta', texto: frase, pergunta: conf.perguntar, opcoes: conf.opcoes, forcar: carteiraDoGancho ? { carteira: carteiraDoGancho } : {}, origem: tipo }
-      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente, atualizado_em: new Date().toISOString() })
+      await guardar(pendente as unknown as Record<string, unknown>)
       return { status: 'pergunta', resposta: conf.perguntar, efeitos: {}, intencao: 'acoes', texto: frase, tokens }
     }
     const ex = await executar(cliente.id, ctx, conf.acoes, tipo, null)
@@ -643,6 +665,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
   if (pend?.tipo === 'baixa_diferente' && fresco && pend.acoes?.length) {
     const r = respostaBaixa(texto)
     if (r) {
+      saida.consumiu = true
       const final = pend.acoes.map((a): Acao => {
         if (!a.baixaDiferente) return a
         const { baixaDiferente: _b, ...resto } = a
@@ -654,7 +677,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
   }
   if (pend?.tipo === 'duplicata' && fresco && pend.acoes?.length) {
     const r = respostaDuplicata(texto)
-    if (r) return resolverDuplicata(cliente.id, ctx, pend.acoes, pend.anteriorMsg ?? '', r, pend.origem ?? tipo, pend.anexo ?? null, texto, tokens)
+    if (r) return respondeu(await resolverDuplicata(cliente.id, ctx, pend.acoes, pend.anteriorMsg ?? '', r, pend.origem ?? tipo, pend.anexo ?? null, texto, tokens))
   }
 
   // "NEGÓCIO" sozinho conserta a última retirada. A Granninha avisou na confirmação que tinha anotado
@@ -684,6 +707,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
   // Resposta à pergunta "quer desfazer o anterior também?" depois de dois DESFAZER seguidos.
   if (pend?.tipo === 'desfazer_mais' && fresco && pend.anteriorMsg) {
     const r = respostaSimNao(texto)
+    if (r) saida.consumiu = true
     if (r === 'nao') return { status: 'ok', resposta: 'Beleza, parei aí. Nada mais foi desfeito.', efeitos: {}, intencao: 'desfazer', texto, tokens }
     if (r === 'sim') {
       const alvo = await ultimaComEfeito(cliente.id)
@@ -701,6 +725,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
   // 2 grava como lançamento novo. Nada foi gravado antes, então "1" é só deixar como está.
   if (pend?.tipo === 'reenvio' && fresco && pend.acoes?.length) {
     const r = respostaDuplicata(texto)
+    if (r) saida.consumiu = true
     if (r === 'corrigir') {
       return { status: 'ok', resposta: 'Então deixei só o de antes, sem anotar de novo.', efeitos: {}, intencao: 'acoes', texto, tokens }
     }
@@ -711,6 +736,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
   }
 
   if (pend?.tipo === 'importar_fatura' && fresco) {
+    if (/^\s*(n[ãa]o|nao|n|sim|s|pode|importa|ok|isso|manda|\d+)\b/i.test(texto) || opcaoEscolhida(texto, pend.opcoes ?? [])) saida.consumiu = true
     if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei a fatura.', efeitos: {}, intencao: 'fatura', texto, tokens }
     const esc = opcaoEscolhida(texto, pend.opcoes ?? [])
     if (esc) return importarFatura(cliente.id, ctx, pend.transacoes ?? [], esc.id, (pend as { vencimento?: string | null }).vencimento ?? null, tipo, pend.anexo ?? null, tokens)
@@ -724,6 +750,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
     }
   }
   if (pend?.tipo === 'importar' && fresco) {
+    if (/^\s*(n[ãa]o|nao|n|sim|s|pode|importa|ok|isso|manda|\d+)\b/i.test(texto) || (pend.opcoes?.length && opcaoEscolhida(texto, pend.opcoes))) saida.consumiu = true
     if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei nada.', efeitos: {}, intencao: 'extrato', texto, tokens }
     if (pend.opcoes?.length) {
       const esc = opcaoEscolhida(texto, pend.opcoes)
@@ -744,8 +771,13 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
   const escolha = pend?.tipo === 'pergunta' && fresco && pend.opcoes?.length ? opcaoEscolhida(texto, pend.opcoes) : null
   // Pergunta aberta sobre um COMPROVANTE ("Li R$ 192,05. O que foi?") e a pessoa manda outra coisa com valor próprio (325,77, 209,85): é um registro novo, não a
   // resposta. Sem isto o comprovante antigo era herdado por toda mensagem seguinte, o valor nunca batia e a Granninha repetia a mesma pergunta para sempre.
-  const outroValor = !!pend?.documento && !documento && temNumeroDeValor(texto) && !valorConfere(texto, pend.documento.valor, null)
-  const continua = !pediuAjuda && !outroValor && pend?.tipo === 'pergunta' && fresco && !!pend.texto && (!pend.opcoes?.length || !!escolha || /^\s*\d{1,2}\s*$/.test(texto))
+  // Escolher uma opção ("1", "2") da pergunta sobre um comprovante não é outro valor: antes o "1" de "Gás de R$ 50,23: do negócio ou da casa?"
+  // contava como registro novo, e a pergunta nunca fechava (achado em 24/11 pelo teste da fila).
+  const opcaoDeNumero = !!pend?.opcoes?.length && /^\s*\d{1,2}\s*$/.test(texto)
+  const outroValor = !!pend?.documento && !documento && !escolha && !opcaoDeNumero && temNumeroDeValor(texto) && !valorConfere(texto, pend.documento.valor, null)
+  // Foto ou PDF novo nunca é a resposta da pergunta em aberto: é outro registro (rajada de comprovantes). A pergunta vai para a fila.
+  const continua = !pediuAjuda && !outroValor && !anexo && pend?.tipo === 'pergunta' && fresco && !!pend.texto && (!pend.opcoes?.length || !!escolha || /^\s*\d{1,2}\s*$/.test(texto))
+  if (continua) saida.consumiu = true
   const forcar: { carteira?: string; pessoal?: boolean } = continua ? { ...(pend!.forcar ?? {}) } : {}
   if (continua && pend!.documento && !documento) documento = pend!.documento
   if (carteiraDoComprovante && !forcar.carteira) forcar.carteira = carteiraDoComprovante
@@ -757,6 +789,13 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
     if (pend.opcoes?.length && !esc) {
       await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
       return { status: 'pergunta', resposta: `Não achei essa opção. ${pend.pergunta}`, efeitos: {}, intencao: 'acoes', texto, tokens }
+    }
+    // "2" sozinho para "Qual foi o valor?": quase sempre era a opção de outra pergunta (caso real de 16/11: virou uma saída de R$ 2,00).
+    // Confirma antes de anotar. A pergunta continua a mesma.
+    const duvida = !pend.opcoes?.length && !pend.documento ? valorSoltoDuvidoso(texto, pend.pergunta) : null
+    if (duvida !== null) {
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
+      return { status: 'pergunta', resposta: `Só ${brl(duvida)}? Pra eu não anotar errado, me manda o valor com o R$, tipo "R$ ${duvida}", ou o valor certo.`, efeitos: {}, intencao: 'acoes', texto, tokens }
     }
     if (esc?.id === NEGOCIO || esc?.id === PESSOAL) forcar.pessoal = esc.id === PESSOAL
     else if (esc) forcar.carteira = esc.id
@@ -788,7 +827,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
   const soValor = !continua && !documento && !anexo ? valorSozinho(texto) : null
   if (soValor !== null) {
     const pergunta = MSG.valorSozinho(brl(soValor))
-    await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta, forcar: {}, origem: tipo }, atualizado_em: new Date().toISOString() })
+    await guardar({ tipo: 'pergunta', texto, pergunta, forcar: {}, origem: tipo })
     return { status: 'pergunta', resposta: pergunta, efeitos: {}, intencao: 'acoes', texto, tokens }
   }
 
@@ -801,6 +840,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
     const it2 = await interpretar(novoTexto, ctx, { forcarCarteira: pend.forcar?.carteira, forcarPessoal: pend.forcar?.pessoal, documento: pend.documento })
     soma(it2.uso)
     if (it2.intencao === 'acoes') {
+      saida.consumiu = true
       it = it2
       texto = novoTexto
     }
@@ -808,7 +848,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
 
   if (it.intencao === 'acoes') {
     if (it.perguntar) {
-      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'pergunta', texto, pergunta: it.perguntar, opcoes: it.opcoes, forcar, documento, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
+      await guardar({ tipo: 'pergunta', texto, pergunta: it.perguntar, opcoes: it.opcoes, forcar, documento, origem: origemFinal, anexo })
       return { status: 'pergunta', resposta: it.perguntar, efeitos: {}, intencao: 'acoes', texto, tokens }
     }
     // O valor dito não bate com a conta em aberto que a frase nomeia: pergunta antes de gravar (nada é gravado ainda).
@@ -816,8 +856,9 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
     if (diferente?.baixaDiferente) {
       const b = diferente.baixaDiferente
       const venc = b.vencimento.split('-').reverse().slice(0, 2).join('/')
-      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'baixa_diferente', acoes: it.acoes, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
-      return { status: 'pergunta', resposta: MSG.baixaDiferente(b.tipo, b.descricao, brlComSinal(b.valorConta), venc, brlComSinal(diferente.valor!)), efeitos: {}, intencao: 'acoes', texto, tokens }
+      const pergunta = MSG.baixaDiferente(b.tipo, b.descricao, brlComSinal(b.valorConta), venc, brlComSinal(diferente.valor!))
+      await guardar({ tipo: 'baixa_diferente', acoes: it.acoes, origem: origemFinal, anexo, texto, pergunta })
+      return { status: 'pergunta', resposta: pergunta, efeitos: {}, intencao: 'acoes', texto, tokens }
     }
     // Travas contra lançar duas vezes a mesma coisa. Nada é gravado antes de a pessoa responder.
     const ultima = await ultimaComEfeito(cliente.id)
@@ -835,15 +876,17 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
         return { status: 'ignorada', resposta: '', efeitos: {}, intencao: 'retomada_duplicada', texto, tokens }
       }
       if (reenvio) {
-        await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'reenvio', acoes: it.acoes, anteriorMsg: ultima.id, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
-        return { status: 'pergunta', resposta: perguntaReenvio(reenvio, ctx, Math.floor(idade / 60_000)), efeitos: {}, intencao: 'acoes', texto, tokens }
+        const pergunta = perguntaReenvio(reenvio, ctx, Math.floor(idade / 60_000))
+        await guardar({ tipo: 'reenvio', acoes: it.acoes, anteriorMsg: ultima.id, origem: origemFinal, anexo, texto, pergunta })
+        return { status: 'pergunta', resposta: pergunta, efeitos: {}, intencao: 'acoes', texto, tokens }
       }
       // Texto: igual ao último e a frase soa como correção ("não, esse foi de...").
       if (!documento && !anexo && devePerguntar(texto, ultima.texto)) {
         const antigo = pareceMesmoLancamento(antigos, it.acoes)
         if (antigo) {
-          await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'duplicata', acoes: it.acoes, anteriorMsg: ultima.id, origem: origemFinal, anexo }, atualizado_em: new Date().toISOString() })
-          return { status: 'pergunta', resposta: perguntaDuplicata(antigo, ctx), efeitos: {}, intencao: 'acoes', texto, tokens }
+          const pergunta = perguntaDuplicata(antigo, ctx)
+          await guardar({ tipo: 'duplicata', acoes: it.acoes, anteriorMsg: ultima.id, origem: origemFinal, anexo, texto, pergunta })
+          return { status: 'pergunta', resposta: pergunta, efeitos: {}, intencao: 'acoes', texto, tokens }
         }
       }
     }
@@ -860,7 +903,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
     // lançamento ANTERIOR, que ela não pediu para desfazer. Pergunta antes.
     const anterior = await ultimaMensagem(cliente.id)
     if (anterior?.intencao === 'desfazer' && Date.now() - new Date(anterior.criado_em).getTime() < 10 * 60_000) {
-      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { tipo: 'desfazer_mais', anteriorMsg: ult.id }, atualizado_em: new Date().toISOString() })
+      await guardar({ tipo: 'desfazer_mais', anteriorMsg: ult.id })
       return {
         status: 'pergunta',
         resposta: `Eu já tinha desfeito o último. O anterior é: "${ult.texto.slice(0, 80)}". Quer desfazer esse também?\n\n1. Sim, desfaz\n2. Não, para aí\n\nResponda com o número.`,

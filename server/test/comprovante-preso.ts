@@ -35,7 +35,7 @@ await caso('a IA erra o valor do comprovante: vale o do documento (nunca o da IA
   assert.equal(Number(lancsU1()[0].valor), 192.05)
 })
 
-await caso('pergunta aberta do comprovante + mensagem NOVA com outro valor: registra a nova, não repete a pergunta (era o laço do print)', async () => {
+await caso('pergunta aberta do comprovante + mensagem NOVA com outro valor: registra a nova e a pergunta do comprovante volta UMA vez, separada (não é mais o laço do print)', async () => {
   semear()
   ia.documento = doc(192.05, 'Riachuelo')
   // A IA entende mal a legenda do comprovante e não devolve nada que bata: a pergunta "Li R$ 192,05" é inevitável aqui.
@@ -46,10 +46,19 @@ await caso('pergunta aberta do comprovante + mensagem NOVA com outro valor: regi
   const r1 = await msgFoto('f1.jpg', 'comprovante')
   assert.match(r1.resposta, /Li R\$ 192,05 nesse comprovante/)
   const r2 = await msg('Saiu 209,85 pagamento de parcelamento de Santander do Nubank')
-  assert.ok(!/Li R\$ 192,05/.test(r2), 'não pode voltar com a pergunta do comprovante antigo: ' + r2)
-  assert.match(r2, /209,85/)
+  assert.match(r2, /^Anotei, saiu R\$ 209,85|^Tá anotado, saiu R\$ 209,85|^Feito, saiu R\$ 209,85/, 'a mensagem nova é registrada sozinha: ' + r2)
   assert.equal(lancsU1().length, 1)
   assert.equal(Number(lancsU1()[0].valor), 209.85)
+  // O comprovante de 192,05 não foi gravado: a pergunta volta, uma vez e no fim, para ele não se perder calado.
+  assert.match(r2, /\n\nE ficou esse aqui esperando:\nLi R\$ 192,05 nesse comprovante/)
+  assert.equal((r2.match(/Li R\$ 192,05/g) ?? []).length, 1, 'repetida mais de uma vez: ' + r2)
+  // Ignorada de novo, sai, avisando. Não volta mais.
+  ia.regras.unshift([/padaria/, acoes(acao({ valor: 12, descricao: 'Padaria', carteira_id: 'nubank' }))])
+  const r3 = await msg('paguei 12 de padaria no nubank')
+  assert.doesNotMatch(r3, /Li R\$ 192,05/)
+  assert.match(r3, /Ficou sem anotar/)
+  const r4 = await msg('paguei 12 de padaria no nubank de novo')
+  assert.doesNotMatch(r4, /192,05|Ficou sem anotar/)
 })
 
 await caso('pergunta aberta do comprovante + resposta SEM número ("cartão CEA de nath"): continua e usa o valor do comprovante', async () => {
