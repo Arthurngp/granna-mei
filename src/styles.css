@@ -2194,6 +2194,58 @@ select.entrada {
   text-align: left;
 }
 
+/* ---------- Manutenção ---------- */
+.manut {
+  background: radial-gradient(120% 70% at 50% 0%, var(--mist) 0%, var(--bg) 60%);
+}
+.manut h1 {
+  text-wrap: balance;
+}
+.manut-selo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 13px;
+  font-weight: 680;
+}
+.manut-ponto {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: manut-pulsa 1.6s ease-in-out infinite;
+}
+@keyframes manut-pulsa {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .manut-ponto {
+    animation: none;
+  }
+}
+.manut-card {
+  display: grid;
+  gap: 4px;
+}
+.manut-card strong {
+  color: var(--indigo);
+  font-size: 15.5px;
+}
+.manut-card span {
+  color: var(--muted);
+  font-size: 14.5px;
+}
+
 /* ---------- Desktop ---------- */
 @media (min-width: 960px) {
   .tabbar {
