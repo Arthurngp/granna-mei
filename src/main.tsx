@@ -5,7 +5,11 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import { AvisoProvider } from './components/ui'
 import { AppProvider } from './lib/store'
+import { fluxoWhats } from './lib/config'
 import './styles.css'
+
+// Guarda a escolha do piloto do cadastro novo (?onboarding=whats) já na chegada: a URL muda antes de o cadastro abrir.
+fluxoWhats()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
