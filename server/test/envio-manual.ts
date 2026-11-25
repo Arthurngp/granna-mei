@@ -32,7 +32,7 @@ async function caso(nome: string, fn: () => Promise<void>) {
 const em = (hhmm: string, dia = '2026-11-23') => new Date(`${dia}T${hhmm}:00-03:00`)
 const minAntes = (d: Date, min: number) => new Date(d.getTime() - min * 60_000).toISOString()
 
-const pedido = (n: number, frio = false): Pedido => ({ id: `p${n}`, user_id: `u${n}`, contato_frio: frio, texto: `Oi, Pessoa${n}! Aqui é da Granninha. Vi que você já conectou seu WhatsApp, mas ainda não mandou o primeiro lançamento.` })
+const pedido = (n: number, frio = false, naoConfirmado = false): Pedido => ({ id: `p${n}`, user_id: `u${n}`, contato_frio: frio, nao_confirmado: naoConfirmado, texto: `Oi, Pessoa${n}! Aqui é da Granninha. Vi que você já conectou seu WhatsApp, mas ainda não mandou o primeiro lançamento.` })
 
 interface Opt {
   fila?: Pedido[]
@@ -45,6 +45,8 @@ interface Opt {
   falharEnvio?: boolean
   recusa?: string
   reservarGanha?: boolean
+  /** O que o WhatsApp responde sobre o número digitado. `Error` = não deu para conferir. Ausente = o servidor não tem como conferir. */
+  numero?: { existe: boolean; jid: string | null } | Error
 }
 
 /** Um banco de brinquedo: a fila e o "último envio" andam juntos, como no banco de verdade. */
@@ -52,7 +54,7 @@ function fake(opt: Opt = {}) {
   const fila = [...(opt.fila ?? [])]
   const enviados: { tel: string; texto: string }[] = []
   const resultados: { id: string; ok: boolean; erro?: string }[] = []
-  const chamadas = { gateway: 0, reservar: 0, enviar: 0, apto: 0, forcar: [] as boolean[] }
+  const chamadas = { gateway: 0, reservar: 0, enviar: 0, apto: 0, forcar: [] as boolean[], naoConfirmado: [] as boolean[], conferir: [] as string[], reservadoPara: [] as string[] }
   let ultimo: string | null = opt.ultimoEnvioEm ?? null
   let relogio = new Date()
   const deps: Deps = {
@@ -61,9 +63,10 @@ function fake(opt: Opt = {}) {
       if (opt.proximoErro) throw new Error('tabela não existe')
       return fila[0] ?? null
     },
-    apto: async (_u, forcar): Promise<Alvo> => {
+    apto: async (_u, forcar, naoConfirmado): Promise<Alvo> => {
       chamadas.apto++
       chamadas.forcar.push(forcar)
+      chamadas.naoConfirmado.push(!!naoConfirmado)
       return { telefone: opt.recusa ? null : '558199990001', nome: 'Pessoa Silva', recusa: opt.recusa ?? null }
     },
     gatewayConectado: async () => {
@@ -75,8 +78,9 @@ function fake(opt: Opt = {}) {
       if (opt.movimentoErro) throw new Error('não consegui contar')
       return { manuaisHoje: opt.manuaisHoje ?? 0, ultimoEnvioEm: ultimo }
     },
-    reservar: async () => {
+    reservar: async (_p, tel) => {
       chamadas.reservar++
+      chamadas.reservadoPara.push(tel)
       return opt.reservarGanha ?? true
     },
     concluir: async (p, r) => {
@@ -90,6 +94,13 @@ function fake(opt: Opt = {}) {
       ultimo = relogio.toISOString() // o envio entra em `avisos`: é o que o banco enxerga no próximo ciclo
     },
     outroCicloAndando: () => opt.outro ?? false,
+  }
+  if (opt.numero !== undefined) {
+    deps.conferirNumero = async (tel) => {
+      chamadas.conferir.push(tel)
+      if (opt.numero instanceof Error) throw opt.numero
+      return opt.numero as { existe: boolean; jid: string | null }
+    }
   }
   const rodar = (quando: Date) => {
     relogio = quando
@@ -351,6 +362,78 @@ await caso('3 falhas seguidas param o envio manual por 30 minutos', async () => 
   assert.equal(f.chamadas.enviar, 4, 'voltou')
 })
 
+/* ---------------- número só digitado no cadastro (WhatsApp não confirmado) ---------------- */
+
+const REAL = { existe: true, jid: '558199990001@s.whatsapp.net' }
+
+await caso('número digitado, autorizado: confere no WhatsApp e envia para o endereço REAL que ele devolve (sem o nono dígito, se for o caso)', async () => {
+  const f = fake({ fila: [pedido(1, true, true)], numero: REAL })
+  await f.rodar(em('10:00'))
+  assert.deepEqual(f.chamadas.naoConfirmado, [true], 'a conferência da pessoa leva a autorização própria do número digitado')
+  assert.deepEqual(f.chamadas.conferir, ['558199990001'])
+  assert.equal(f.enviados.length, 1)
+  assert.equal(f.enviados[0].tel, '558199990001@s.whatsapp.net')
+  assert.ok(f.enviados[0].texto.endsWith(R.RODAPE_SAIR), 'a linha do SAIR continua sendo a última')
+  assert.deepEqual(f.resultados, [{ id: 'p1', ok: true, erro: undefined }])
+})
+
+await caso('número digitado que NÃO existe no WhatsApp: não envia, não reserva, e o pedido vira "falhou" com o motivo', async () => {
+  const f = fake({ fila: [pedido(1, true, true)], numero: { existe: false, jid: null } })
+  await f.rodar(em('10:00'))
+  assert.equal(f.enviados.length, 0)
+  assert.equal(f.chamadas.reservar, 0)
+  assert.match(f.resultados[0].erro ?? '', /não tem WhatsApp/)
+})
+
+await caso('o WhatsApp diz que existe mas não devolve endereço: trata como inexistente (em dúvida, não envia)', async () => {
+  const f = fake({ fila: [pedido(1, true, true)], numero: { existe: true, jid: null } })
+  await f.rodar(em('10:00'))
+  assert.equal(f.enviados.length, 0)
+  assert.equal(f.resultados[0].ok, false)
+})
+
+await caso('não deu para conferir o número (gateway fora): nada sai, nada é reservado e o pedido CONTINUA na fila', async () => {
+  const f = fake({ fila: [pedido(1, true, true)], numero: new Error('gateway conferir número 503') })
+  const log = await f.rodar(em('10:00'))
+  assert.equal(f.enviados.length, 0)
+  assert.equal(f.chamadas.reservar, 0)
+  assert.equal(f.resultados.length, 0, 'não vira "falhou": tenta de novo no próximo minuto')
+  assert.equal(f.fila.length, 1)
+  assert.ok(log.some((l) => /não consegui conferir/.test(l)))
+})
+
+await caso('servidor sem como conferir no WhatsApp: número digitado NUNCA sai', async () => {
+  const f = fake({ fila: [pedido(1, true, true)] })
+  await f.rodar(em('10:00'))
+  assert.equal(f.enviados.length, 0)
+  assert.equal(f.chamadas.reservar, 0)
+  assert.equal(f.fila.length, 1)
+})
+
+await caso('pedido comum e contato frio NÃO passam pela conferência do número nem levam a autorização do número digitado', async () => {
+  const f = fake({ fila: [pedido(1), pedido(2, true)], numero: REAL })
+  await f.rodar(em('10:00'))
+  await f.rodar(em('10:05'))
+  assert.deepEqual(f.chamadas.conferir, [])
+  assert.deepEqual(f.chamadas.naoConfirmado, [false, false], 'autorizar contato frio não autoriza número digitado')
+  assert.deepEqual(f.enviados.map((e) => e.tel), ['558199990001', '558199990001'])
+})
+
+await caso('número digitado respeita as MESMAS travas: espera de 5 minutos, janela e SAIR de última hora', async () => {
+  const cedo = fake({ fila: [pedido(1, true, true)], numero: REAL, ultimoEnvioEm: minAntes(em('10:00'), 2) })
+  await cedo.rodar(em('10:00'))
+  assert.equal(cedo.enviados.length, 0)
+  assert.deepEqual(cedo.chamadas.conferir, [], 'dentro da espera nem pergunta ao WhatsApp')
+  const noite = fake({ fila: [pedido(1, true, true)], numero: REAL })
+  await noite.rodar(em('20:00'))
+  assert.equal(noite.enviados.length, 0)
+  const sair = fake({ fila: [pedido(1, true, true)], numero: REAL, recusa: 'esta pessoa respondeu SAIR e não quer receber mensagem' })
+  await sair.rodar(em('10:00'))
+  assert.equal(sair.enviados.length, 0)
+  assert.deepEqual(sair.chamadas.conferir, [])
+  assert.match(sair.resultados[0].erro ?? '', /respondeu SAIR/)
+})
+
 /* ---------------- as consultas de verdade, contra o banco falso ---------------- */
 
 const { caso: casoBanco, E, fim } = await import('./_falsos.ts')
@@ -378,6 +461,29 @@ await casoBanco('banco: o pedido lido da fila traz se foi autorizado como contat
   assert.equal((await depsBanco().deps.proximo())?.contato_frio, true)
   E.tabelas.envios_manuais = [linhaPedido(2)]
   assert.equal((await depsBanco().deps.proximo())?.contato_frio, false, 'sem autorização gravada, não é contato frio autorizado')
+})
+
+await casoBanco('banco: o pedido lido da fila traz se foi autorizado para número digitado (e, sem a coluna, vale como não autorizado)', async () => {
+  E.tabelas.envios_manuais = [linhaPedido(1, { contato_frio: true, nao_confirmado: true })]
+  assert.equal((await depsBanco().deps.proximo())?.nao_confirmado, true)
+  E.tabelas.envios_manuais = [linhaPedido(2, { contato_frio: true })]
+  assert.equal((await depsBanco().deps.proximo())?.nao_confirmado, false, 'banco de antes da migration: ninguém é número digitado autorizado')
+})
+
+await casoBanco('banco: a autorização do número digitado só vai para a função SQL quando o pedido a traz (o banco de antes da migration não conhece o parâmetro)', async () => {
+  const chamadas: unknown[] = []
+  const rpc = async (nome: string, args: unknown) => {
+    chamadas.push([nome, args])
+    return { data: [{ telefone: '5581999990001', nome: 'Ana', recusa: null }], error: null }
+  }
+  await depsBanco({ rpc }).deps.apto('u1', true)
+  await depsBanco({ rpc }).deps.apto('u2', true, false)
+  await depsBanco({ rpc }).deps.apto('u3', true, true)
+  assert.deepEqual(chamadas, [
+    ['envio_manual_apto', { p_user: 'u1', p_forcar: true }],
+    ['envio_manual_apto', { p_user: 'u2', p_forcar: true }],
+    ['envio_manual_apto', { p_user: 'u3', p_forcar: true, p_nao_confirmado: true }],
+  ])
 })
 
 await casoBanco('banco: reservar é atômico e grava o envio em avisos (tipo retencao_manual) para os lembretes enxergarem', async () => {

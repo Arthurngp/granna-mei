@@ -49,6 +49,24 @@ export async function enviarTexto(para: string, texto: string, tentativas = TENT
   throw new Error(ultimo || 'gateway envio: falhou')
 }
 
+/**
+ * Pergunta ao WhatsApp se um número existe e qual é o endereço real dele (rota lida no código do WA-AKG, commit 936b26b:
+ * POST /api/chat/{sessao}/check com { numbers: [...] } devolve data.results[{ number, exists, jid }]).
+ * Serve para número que ninguém confirmou: no Brasil o endereço real muitas vezes não tem o nono dígito. Qualquer resposta que não seja clara LANÇA,
+ * e quem chama trata como "não envia".
+ */
+export async function conferirNumero(telefone: string): Promise<{ existe: boolean; jid: string | null }> {
+  const numero = telefone.replace(/\D/g, '')
+  if (numero.length < 12) throw new Error('gateway conferir número: número curto demais')
+  const r = await fetch(`${base()}/api/chat/${sessao()}/check`, { method: 'POST', headers: cabecalhos(), body: JSON.stringify({ numbers: [numero] }), signal: AbortSignal.timeout(15_000) })
+  if (!r.ok) throw new Error(`gateway conferir número ${r.status}`)
+  const j = (await r.json()) as { status?: boolean; data?: { results?: { exists?: boolean; jid?: string | null; error?: string }[] } }
+  const l = j.data?.results?.[0]
+  if (j.status !== true || !l || l.error) throw new Error('gateway conferir número: resposta sem resultado')
+  const jid = typeof l.jid === 'string' && /^\d{10,15}@s\.whatsapp\.net$/.test(l.jid) ? l.jid : null
+  return { existe: l.exists === true && !!jid, jid }
+}
+
 /** Baixa a mídia que o gateway guardou ("/api/media/arquivo.ogg"). Limite de 15 MB. */
 export async function baixarMidia(fileUrl: string): Promise<{ buffer: Buffer; mime: string }> {
   if (!/^\/api\/media\/[A-Za-z0-9_.-]+$/.test(fileUrl)) throw new Error('caminho de mídia inválido')

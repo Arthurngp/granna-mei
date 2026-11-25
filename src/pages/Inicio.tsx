@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowUp, Check, ChevronRight, CreditCard, Eye, EyeOff, MessageCircle, Wallet } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { FaixaWhats } from '../components/ConfirmarWhats'
+import { ConfirmarWhats, FaixaWhats } from '../components/ConfirmarWhats'
 import { Conversa } from '../components/Conversa'
 import { AreaLinhas, Medidor, Rosca } from '../components/Graficos'
 import { BotaoZap, FaixaAssinatura, IconeCarteira, SeloCategoria, Topo } from '../components/Shell'
@@ -14,6 +14,8 @@ import { useApp } from '../lib/store'
 
 export default function Inicio() {
   const { s, mut, pagarConta, reabrirConta, carregarExemplo } = useApp()
+  // Conta de verdade com o WhatsApp ainda não confirmado (na demonstração não há o que confirmar).
+  const faltaConfirmar = !s.sessao.demo && !s.usuario.verificado
   const avisar = useAviso()
   const [ym, setYm] = useState(mesAtual())
   const [escala, setEscala] = useState<'mes' | 'semestre'>('mes')
@@ -137,15 +139,29 @@ export default function Inicio() {
             <div className="recado" style={{ marginBottom: 14 }}>
               <Mascote pose="hero" tam={88} anim="flutua" />
               <div className="balao">
-                Seu painel está esperando o <b>primeiro lançamento</b>. É só me mandar no WhatsApp, assim:
+                {faltaConfirmar ? (
+                  <>
+                    Falta só <b>confirmar seu WhatsApp</b> para eu começar a anotar. Depois é só me mandar assim:
+                  </>
+                ) : (
+                  <>
+                    Seu painel está esperando o <b>primeiro lançamento</b>. É só me mandar no WhatsApp, assim:
+                  </>
+                )}
               </div>
             </div>
             <Conversa />
             <div className="pilha" style={{ marginTop: 14, gap: 8 }}>
-              <a className="btn btn-wa btn-bloco" href={linkWhats()} target="_blank" rel="noopener noreferrer">
-                <MessageCircle size={19} />
-                Falar com a Granninha
-              </a>
+              {faltaConfirmar ? (
+                // Quem não confirmou o número não pode ir ao WhatsApp sem o código: a mensagem chegaria e a Granninha ficaria muda (ela só reconhece
+                // número confirmado). Aqui o botão principal vira o próprio passo de confirmar.
+                <ConfirmarWhats compacto />
+              ) : (
+                <a className="btn btn-wa btn-bloco" href={linkWhats()} target="_blank" rel="noopener noreferrer">
+                  <MessageCircle size={19} />
+                  Falar com a Granninha
+                </a>
+              )}
               {s.sessao.demo && (
                 <button type="button" className="btn btn-sec btn-bloco" onClick={carregarExemplo}>
                   Ver o painel com dados de exemplo

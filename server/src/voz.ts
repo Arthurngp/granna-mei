@@ -90,5 +90,10 @@ export const MSG = {
     `A conta de ${desc} está em ${valorConta} (vence ${vencimento}), e você disse ${valorDito}.\n1. Dar baixa na conta, ${tipo === 'receber' ? 'recebendo' : 'pagando'} ${valorDito}\n2. Anotar como ${tipo === 'receber' ? 'outro recebimento' : 'outro gasto'} e deixar a conta aberta\n\nResponda com o número.`,
   apagarTudo: 'Eu só desfaço o último registro: é só responder DESFAZER. Pra apagar mais de um, é pelo painel, em Lançamentos.',
   valorSozinho: (v: string) => `${v} de quê? Entrou ou saiu?`,
+  /** Quem digitou este número no cadastro, não confirmou e escreveu para cá: mostra como terminar. Só sai em resposta, nunca por iniciativa nossa. */
+  terminarCadastro: (nome: string, painel: string) =>
+    `Oi${nome ? `, ${nome}` : ''}! Falta só um passo pra eu começar a anotar pra você: confirmar este número.\n\nEntra em ${painel} com o seu e-mail e continua o cadastro de onde parou. No final aparece um código de 6 números, é só me mandar ele por aqui.`,
+  /** SAIR de quem ainda não confirmou o número: não há lembrete de conta para citar. */
+  sairSemConfirmar: 'Pronto. Não vou mais te mandar mensagem por aqui. Se quiser usar a Granninha, é só terminar o cadastro no painel.',
   numeroConfirmado: (nome: string) => `Pronto${nome ? `, ${nome}` : ''}, seu número tá confirmado e agora a gente tá conectado! Me manda o que entrou ou saiu que eu anoto.\n\nPor exemplo: "recebi 150 no pix" ou "paguei 89 de luz".`,
 }

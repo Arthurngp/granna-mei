@@ -6,7 +6,7 @@
 import { cruzarComprovante } from './cruzar.ts'
 import { contextoIA } from './ia-config.ts'
 import { temNumeroDeValor, valorConfere } from './numeros.ts'
-import { acessoDe, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, silenciarLembretes, usoDoMes } from './banco.ts'
+import { acessoDe, cadastrosPendentesDoNumero, chaveDoNumero, clientePorNumero, contextoDe, falhou, formatarNumero, historicoRecente, sb, silenciarLembretes, usoDoMes } from './banco.ts'
 import { ehAssuntoDaConta, ehPedidoDeAjuda, responderAjuda } from './ajuda.ts'
 import { ehApagarTudo, respostaBaixa, valorSozinho } from './atalhos.ts'
 import { despedidaDe, RESPOSTA_DESPEDIDA } from './despedida.ts'
@@ -333,6 +333,14 @@ async function marcarTentativa(telefone: string, atual: { n: number; desde: stri
 async function numeroDesconhecido(telefone: string, jid: string, texto: string): Promise<{ status: Status; resposta: string; userId: string | null }> {
   const codigo = texto.match(/\b(\d{6})\b/)?.[1]
   const mudo = { status: 'ignorada' as Status, resposta: '', userId: null }
+  // SAIR de quem digitou este número no cadastro e não confirmou: o admin pode ter chamado essa pessoa, e a mensagem diz "responda SAIR". Sem isto o
+  // pedido cairia no silêncio de quem não é cliente e ela seguiria recebendo. Se não conseguir gravar, lança: nunca responder "pronto" sem ter gravado.
+  if (ehSair(texto)) {
+    const pend = await cadastrosPendentesDoNumero(jid)
+    if (!pend.length) return mudo
+    for (const p of pend) await silenciarLembretes(p.id)
+    return { status: 'ignorada', resposta: MSG.sairSemConfirmar, userId: null }
+  }
   if (codigo) {
     const tent = await tentativasDe(telefone)
     if (tent.n >= LIMITE_CODIGOS) {
@@ -389,6 +397,20 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
     // esperando para sempre achando que a Granninha não funciona. Vale mesmo com o convite desligado.
     await marcarTentativa(telefone, tent)
     return { status: 'ignorada', resposta: `Esse código não confere ou já venceu. Gere um novo no painel em ${PAINEL()} e me mande de novo.`, userId: null }
+  }
+  // Quem escreve de um número que alguém digitou num cadastro ainda sem confirmar não é "externo": é quem ficou pelo caminho. Em vez de silêncio,
+  // mostra como terminar, no máximo uma vez por dia e sem gastar IA. Só responde a quem escreveu. Quem pediu SAIR segue no silêncio.
+  const pendentes = (await cadastrosPendentesDoNumero(jid)).filter((p) => !p.avisos_off)
+  if (pendentes.length) {
+    const t = await tentativasDe(telefone)
+    if (t.link_em && Date.now() - new Date(t.link_em).getTime() < 86400_000) return mudo
+    const quando = new Date().toISOString()
+    await sb.from('conversas').upsert({
+      telefone,
+      pendente: { link_em: quando, ...(t.n ? { codigo_tentativas: t.n, codigo_desde: t.desde } : {}) },
+      atualizado_em: quando,
+    })
+    return { status: 'ignorada', resposta: MSG.terminarCadastro((pendentes[0].nome ?? '').split(' ')[0], PAINEL()), userId: null }
   }
   // Sem código, a Granninha fica em silêncio para quem não é cliente: sem convite, sem link
   // (pedido do Arthur em 2026-11-16: "inativo para os externos"). GRANNINHA_CONVIDAR=1 religa o convite abaixo.

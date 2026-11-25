@@ -7,7 +7,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { estado as estadoAvisos, estadoTeste } from './avisos.ts'
-import type { AlvoManual, DepsManual, PedidoManual } from './envio-manual.ts'
+import type { AlvoManual, DepsManual, NumeroNoWhats, PedidoManual } from './envio-manual.ts'
 import { estado as estadoRetencao } from './retencao.ts'
 import { estadoResumo } from './resumo-diario.ts'
 
@@ -22,7 +22,12 @@ function falha(onde: string, e: { message: string } | null) {
 const SEM_TABELA = /could not find the table|schema cache|does not exist|PGRST205|42P01/i
 const semTabela = (e: { message: string; code?: string } | null) => !!e && SEM_TABELA.test(`${e.code ?? ''} ${e.message}`)
 
-export function depsEnvioManualDoBanco(sb: SupabaseClient, enviar: (telefone: string, texto: string) => Promise<void>, gatewayConectado: () => Promise<boolean>): DepsManual {
+export function depsEnvioManualDoBanco(
+  sb: SupabaseClient,
+  enviar: (telefone: string, texto: string) => Promise<void>,
+  gatewayConectado: () => Promise<boolean>,
+  conferirNumero?: (telefone: string) => Promise<NumeroNoWhats>,
+): DepsManual {
   const chaveAviso = (id: string) => `man:${id}`
   return {
     async liberarPresos() {
@@ -37,15 +42,19 @@ export function depsEnvioManualDoBanco(sb: SupabaseClient, enviar: (telefone: st
     },
 
     async proximo() {
-      const { data, error } = await sb.from('envios_manuais').select('id, user_id, texto, contato_frio').eq('status', 'fila').order('pedido_em', { ascending: true }).order('id', { ascending: true }).limit(1)
+      // select('*') de propósito: pedir uma coluna que ainda não existe (migration não aplicada) faria a leitura falhar e travaria a fila inteira.
+      const { data, error } = await sb.from('envios_manuais').select('*').eq('status', 'fila').order('pedido_em', { ascending: true }).order('id', { ascending: true }).limit(1)
       if (semTabela(error)) return null
       falha('ler a fila', error)
       const l = ((data ?? []) as PedidoManual[])[0]
-      return l ? { id: l.id, user_id: l.user_id, texto: l.texto, contato_frio: !!l.contato_frio } : null
+      return l ? { id: l.id, user_id: l.user_id, texto: l.texto, contato_frio: !!l.contato_frio, nao_confirmado: !!l.nao_confirmado } : null
     },
 
-    async apto(userId, forcar) {
-      const { data, error } = await sb.rpc('envio_manual_apto', { p_user: userId, p_forcar: forcar })
+    async apto(userId, forcar, naoConfirmado) {
+      // O terceiro parâmetro só vai quando o pedido o traz: assim o servidor novo continua falando com o banco de antes da migration.
+      const args: Record<string, unknown> = { p_user: userId, p_forcar: forcar }
+      if (naoConfirmado) args.p_nao_confirmado = true
+      const { data, error } = await sb.rpc('envio_manual_apto', args)
       falha('conferir a pessoa', error)
       const l = ((data ?? []) as { telefone: string | null; nome: string | null; recusa: string | null }[])[0]
       // Sem resposta clara, recusa: em dúvida não envia.
@@ -54,6 +63,7 @@ export function depsEnvioManualDoBanco(sb: SupabaseClient, enviar: (telefone: st
     },
 
     gatewayConectado,
+    conferirNumero,
 
     async movimento(inicioDoDia) {
       const hoje = await sb.from('avisos').select('chave', { count: 'exact', head: true }).eq('tipo', 'retencao_manual').gte('criado_em', inicioDoDia)

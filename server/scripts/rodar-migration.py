@@ -8,6 +8,9 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  contatoscadastro 20261124160000_contatos_cadastro.sql   quem DIGITOU o WhatsApp no cadastro e não confirmou aparece na lista do admin (parou no cadastro, terminou sem conectar, não deixou
+          telefone) e pode ser chamado pelo sistema, à mão, um por vez, com autorização própria por pedido. Troca envio_manual_apto (terceiro parâmetro, padrão falso), admin_envio_pedir
+          e admin_acoes; a fila aceita 2 grupos novos e ganha a coluna nao_confirmado. NÃO envia nada sozinha. Compatível com o servidor e o admin atuais. Depende de enviofrio e adminuso.
   enviofrio 20261123160000_envio_manual_contato_frio.sql   o admin pode AUTORIZAR, pedido a pedido e de propósito, o envio para quem nunca escreveu para o número atual (texto próprio: pede para salvar o número novo e começar a lançar).
           Só libera o contato frio: SAIR, exclusão, WhatsApp não confirmado e o resto seguem recusando. Freio próprio de 10 por dia. Troca as 2 funções do envio manual (sem deixar versão
           antiga). Compatível com o servidor e o admin atuais. Depende de enviomanual.
@@ -80,6 +83,7 @@ MIGRATIONS = {
     "enviomanual": "20261123120000_envio_manual.sql",
     "custofoto": "20261123140000_custo_foto_documento.sql",
     "enviofrio": "20261123160000_envio_manual_contato_frio.sql",
+    "contatoscadastro": "20261124160000_contatos_cadastro.sql",
     "configia": "20261124140000_config_ia.sql",
     "iaanthropic": "20261124150000_ia_chaves_anthropic.sql",
 }
@@ -263,6 +267,24 @@ CONFERE = {
             and has_function_privilege('anon', p.oid, 'execute')) as funcoes_abertas_ao_anon,
         (case when to_regclass('public.recursos_cliente') is null then null
               else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.recursos_cliente', false, true, '')))[1]::text end) as clientes_com_recurso""",
+    # Contatos do cadastro. Confere o que importa: a coluna nova existe, a fila aceita os grupos novos sem perder os antigos, cada função é UMA só (sem sobrecarga, que
+    # travaria o PostgREST), a conferência da pessoa tem a assinatura nova e só o serviço executa, a lista já traz os grupos de cadastro, e nenhum pedido existente
+    # virou "número não confirmado". As três últimas contagens dizem quantas pessoas a lista passa a mostrar (só números, nenhum dado pessoal).
+    "contatoscadastro": """select
+        (select count(*) from information_schema.columns where table_schema='public' and table_name='envios_manuais' and column_name='nao_confirmado') as coluna_nao_confirmado,
+        (select count(*) from pg_constraint where conrelid='public.envios_manuais'::regclass and contype='c' and pg_get_constraintdef(oid) ilike '%cadastro%' and pg_get_constraintdef(oid) ilike '%nunca%' and pg_get_constraintdef(oid) ilike '%sumiu%') as fila_aceita_os_4_grupos,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='envio_manual_apto') as apto_definicoes,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_envio_pedir') as pedir_definicoes,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_acoes' and pg_get_functiondef(p.oid) like '%semfone%') as lista_traz_grupos_de_cadastro,
+        (case when to_regprocedure('public.envio_manual_apto(uuid,boolean,boolean)') is null then null
+              else (has_function_privilege('anon', 'public.envio_manual_apto(uuid,boolean,boolean)', 'execute') or has_function_privilege('authenticated', 'public.envio_manual_apto(uuid,boolean,boolean)', 'execute')) end) as cliente_confere_pessoa,
+        (case when to_regprocedure('public.envio_manual_apto(uuid,boolean,boolean)') is null then null else has_function_privilege('service_role', 'public.envio_manual_apto(uuid,boolean,boolean)', 'execute') end) as servico_confere_pessoa,
+        has_function_privilege('anon', 'public.admin_acoes()', 'execute') as anon_le_a_lista,
+        (case when not exists (select 1 from information_schema.columns where table_schema='public' and table_name='envios_manuais' and column_name='nao_confirmado') then null
+              else (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.envios_manuais where nao_confirmado', false, true, '')))[1]::text end) as pedidos_para_numero_nao_confirmado,
+        (select count(*) from public.envios_manuais where status in ('fila', 'enviando')) as pedidos_na_fila_agora,
+        (select count(*) from public.perfis where papel='cliente' and exclusao_em is null and not whats_verificado and length(regexp_replace(coalesce(whats,''), '\\D', '', 'g')) >= 10) as com_telefone_sem_confirmar,
+        (select count(*) from public.perfis where papel='cliente' and exclusao_em is null and not whats_verificado and length(regexp_replace(coalesce(whats,''), '\\D', '', 'g')) < 10) as sem_telefone""",
     # Envio manual para contato frio. Confere o que importa: a coluna nova existe, cada função é UMA só (sem sobrecarga, que travaria o PostgREST), o pedido tem a assinatura nova
     # (com p_forcar), a conferência da pessoa só é executável pelo serviço, o anônimo não pede nada, e nenhum pedido existente virou "contato frio".
     "enviofrio": """select
@@ -424,7 +446,7 @@ if not ok:
     print("ANTES: não deu para consultar (%s)" % antes)
     mostrar_sql_para_colar()
     sys.exit(1)
-print("ANTES: " + antes.strip()[:400])
+print("ANTES: " + antes.strip()[:900])
 
 if not aplicar:
     print("\nNada foi aplicado. Para aplicar de verdade:")
@@ -438,5 +460,5 @@ if not ok:
     sys.exit(1)
 
 ok, depois = consultar(CONFERE[qual])
-print("DEPOIS: " + (depois.strip()[:400] if ok else "não deu para conferir (%s)" % depois))
+print("DEPOIS: " + (depois.strip()[:900] if ok else "não deu para conferir (%s)" % depois))
 print("\nPronto. Confira que o DEPOIS mudou em relação ao ANTES.")
