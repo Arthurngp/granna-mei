@@ -200,7 +200,7 @@ await caso('sem número para avisar: não reserva nada e diz no log', async () =
   const f = fake([{}], { u1: [conta('c1', 'Aluguel', 900, HOJE)] }, { sem: new Set(['u1']) })
   const log = await A.rodarAvisos(f.deps, CFG(), em('09:00'))
   assert.equal(f.ledger.size, 0)
-  assert.match(log.join(' '), /sem número/)
+  assert.match(log.join(' '), /não escreveu para o número atual/)
 })
 
 await caso('desligado por padrão: nem consulta o banco', async () => {
@@ -422,6 +422,8 @@ function semearBanco() {
   ]
   E.tabelas.mensagens = [{ id: 'm1', user_id: 'u1', telefone: '558188887777', status: 'ok', criado_em: '2026-11-19T10:00:00Z', texto: 'x', tipo: 'texto' }]
   E.tabelas.avisos = []
+  // O número atual da Granninha está em uso desde 15/11: a conversa de 19/11 foi com ele.
+  E.tabelas.granninha_saude = [{ id: 1, numero_desde: '2026-11-15T00:00:00Z' }]
 }
 
 await caso('banco: só conta a pagar, aberta, do dono, no intervalo; só cliente verificado, com acesso e sem exclusão, no horário', async () => {
@@ -438,18 +440,58 @@ await caso('banco: só conta a pagar, aberta, do dono, no intervalo; só cliente
   assert.ok(E.tabelas.avisos.every((a) => a.user_id === 'u1' && a.status === 'enviado' && a.tipo === 'vencimento' && a.para === '558188887777' && a.enviado_em), 'registrado com o número, o tipo e a hora do envio')
 })
 
-await caso('banco: o número é o da última conversa (sem o nono dígito, como o WhatsApp entrega), e cai no cadastrado se nunca conversou', async () => {
+await caso('banco: o número é o da última conversa (sem o nono dígito, como o WhatsApp entrega)', async () => {
   semearBanco()
   await A.rodarAvisos(depsBanco(), CFG(), em('09:00'))
   assert.equal(enviadosBanco[0].tel, '558188887777', 'o JID em que ela escreveu, não o formatado do cadastro')
+})
+
+await caso('banco: quem nunca escreveu para o número ATUAL não recebe (contato frio do chip novo é banimento)', async () => {
+  // Nunca conversou: antes caía no número cadastrado. Agora não recebe.
+  semearBanco()
+  E.tabelas.mensagens = []
+  let log = await A.rodarAvisos(depsBanco(), CFG(), em('09:00'))
+  assert.equal(enviadosBanco.length, 0, 'mandou para quem nunca conversou')
+  assert.equal(E.tabelas.avisos.length, 0, 'nada reservado')
+  assert.match(log.join(' '), /não escreveu para o número atual/)
+  // Só conversou com o número ANTIGO (antes da troca).
+  semearBanco()
+  E.tabelas.mensagens[0].criado_em = '2026-11-10T10:00:00Z'
+  await A.rodarAvisos(depsBanco(), CFG(), em('09:00'))
+  assert.equal(enviadosBanco.length, 0, 'mandou para quem só falou com o número antigo')
+  // Conversou com os dois: vale o telefone da conversa com o número atual.
+  semearBanco()
+  E.tabelas.mensagens.push({ id: 'm0', user_id: 'u1', telefone: '5581900000000', status: 'ok', criado_em: '2026-11-10T10:00:00Z', texto: 'x', tipo: 'texto' })
+  await A.rodarAvisos(depsBanco(), CFG(), em('09:00'))
+  assert.equal(enviadosBanco[0]?.tel, '558188887777')
+  // Mensagem ignorada (de antes de confirmar) não conta como conversa.
+  semearBanco()
+  E.tabelas.mensagens[0].status = 'ignorada'
+  await A.rodarAvisos(depsBanco(), CFG(), em('09:00'))
+  assert.equal(enviadosBanco.length, 0, 'mensagem ignorada contou como conversa')
+  // Sem o marco do número (linha de saúde ausente) não dá para saber: ninguém recebe.
+  semearBanco()
+  E.tabelas.granninha_saude = []
+  log = await A.rodarAvisos(depsBanco(), CFG(), em('09:00'))
+  assert.equal(enviadosBanco.length, 0, 'sem marco mandou mesmo assim')
+  // O pulo não se repete a cada minuto: quem foi pulado fica em silêncio por um tempo.
   semearBanco()
   E.tabelas.mensagens = []
   await A.rodarAvisos(depsBanco(), CFG(), em('09:00'))
-  assert.equal(enviadosBanco[0].tel, '5581988887777', 'sem conversa: 55 + número cadastrado')
+  const segunda = await A.rodarAvisos(depsBanco(), CFG(), em('09:01'))
+  assert.deepEqual(segunda, [], 'logou e consultou de novo um minuto depois')
+})
+
+await caso('banco: quem respondeu SAIR não recebe aviso de vencimento nem de fim do teste', async () => {
   semearBanco()
-  E.tabelas.mensagens = [{ id: 'm1', user_id: 'u1', telefone: '558100000000', status: 'ignorada', criado_em: '2026-11-19T10:00:00Z' }]
+  E.tabelas.perfis.find((p) => p.id === 'u1')!.avisos_off = true
   await A.rodarAvisos(depsBanco(), CFG(), em('09:00'))
-  assert.equal(enviadosBanco[0].tel, '5581988887777', 'mensagem ignorada não conta como conversa')
+  assert.equal(enviadosBanco.length, 0, 'aviso de vencimento para quem pediu SAIR')
+  E.tabelas.assinaturas.find((a) => a.user_id === 'u1')!.status = 'trial'
+  E.tabelas.assinaturas.find((a) => a.user_id === 'u1')!.trial_fim = AMANHA
+  assert.deepEqual((await depsBanco().emTeste!(HOJE, AMANHA)).map((p) => p.id), [], 'fim do teste para quem pediu SAIR')
+  E.tabelas.perfis.find((p) => p.id === 'u1')!.avisos_off = false
+  assert.deepEqual((await depsBanco().emTeste!(HOJE, AMANHA)).map((p) => p.id), ['u1'], 'sem SAIR, o fim do teste continua chegando')
 })
 
 await caso('banco: reservar é atômico: quem reserva primeiro é o único que envia, e a segunda tentativa volta vazia', async () => {

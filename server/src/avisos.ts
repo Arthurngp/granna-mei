@@ -250,7 +250,9 @@ export async function rodarAvisos(d: DepsAvisos, cfg: ConfigAvisos, agora = new 
       }
       const tel = await d.telefoneDe(p)
       if (!tel) {
-        log.push(`sem número para avisar a conta ${p.id}`)
+        // Nunca escreveu para o número atual (ou não há marco): não recebe. Silêncio por um tempo para não consultar e logar a cada minuto.
+        log.push(`não escreveu para o número atual, não avisei a conta ${p.id}`)
+        estado.semNovidadeAte.set(p.id, agora.getTime() + SILENCIO_MS)
         continue
       }
       if (cfg.modo === 'ensaio') {
@@ -338,6 +340,8 @@ export const estadoTeste = {
   falhas: 0,
   ultimoErro: null as string | null,
   falhasPorPessoa: new Map<string, { dia: string; n: number }>(),
+  /** Quem foi pulado hoje por nunca ter escrito para o número atual (só para não repetir a linha no log). */
+  semNumero: new Map<string, string>(),
 }
 export function zerarEstadoTeste() {
   estadoTeste.rodando = false
@@ -347,6 +351,7 @@ export function zerarEstadoTeste() {
   estadoTeste.falhas = 0
   estadoTeste.ultimoErro = null
   estadoTeste.falhasPorPessoa.clear()
+  estadoTeste.semNumero.clear()
 }
 
 export type QuandoTeste = 'amanha' | 'hoje'
@@ -396,7 +401,9 @@ export async function rodarAvisosTeste(d: DepsAvisos, cfg: ConfigTeste, agora = 
       }
       const tel = await d.telefoneDe(p)
       if (!tel) {
-        log.push(`sem número para avisar o fim do teste da conta ${p.id}`)
+        // Nunca escreveu para o número atual: não recebe (contato frio). Uma linha de log por pessoa e dia, não uma por minuto.
+        if (estadoTeste.semNumero.get(p.id) !== hoje) log.push(`não escreveu para o número atual, não avisei o fim do teste da conta ${p.id}`)
+        estadoTeste.semNumero.set(p.id, hoje)
         continue
       }
       if (cfg.modo === 'ensaio') {
