@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Granninha: voltamos já</title>
+<meta name="description" content="A Granninha está passando por uma melhoria para ajudar você a cuidar melhor do dinheiro do seu MEI. Volta já." />
+<meta name="robots" content="noindex, follow" />
+<meta name="theme-color" content="#15162B" />
+<link rel="icon" type="image/png" href="/img/logo-96.png" />
+<link rel="apple-touch-icon" href="/img/logo-192.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Figtree:wght@400..800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+<style>
+  :root { --ink: #15162b; --indigo: #292d54; --indigo-2: #454c83; --indigo-4: #b1b9d8; --menta: #8fe9b8; --wa: #17a34f; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100dvh; overflow-x: hidden; color: #fff; font-family: Figtree, system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 16px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    background: radial-gradient(110% 70% at 80% 0%, #454c83 0%, rgba(69,76,131,0) 55%), linear-gradient(170deg, #292d54 0%, #15162b 70%);
+    background-color: var(--ink);
+  }
+  img { display: block; max-width: 100%; }
+  a { color: inherit; }
+
+  /* Moedinhas caindo no fundo */
+  .chuva { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; }
+  .chuva i {
+    position: absolute; top: -40px; width: 22px; height: 22px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff6 0 18%, transparent 19%), #b1b9d8; box-shadow: inset -3px -3px 0 #747ead;
+    opacity: .16; animation: cai linear infinite;
+  }
+  .chuva i::after { content: '$'; position: absolute; inset: 0; display: grid; place-items: center; font: 800 12px Figtree, sans-serif; color: #454c83; }
+  @keyframes cai { to { transform: translateY(115vh) rotate(540deg); } }
+
+  .pagina { position: relative; z-index: 1; min-height: 100dvh; display: flex; flex-direction: column; width: 100%; max-width: 1040px; margin: 0 auto; padding: calc(18px + env(safe-area-inset-top, 0px)) 16px calc(18px + env(safe-area-inset-bottom, 0px)); }
+  .topo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; }
+  .topo img { width: 38px; height: 38px; border-radius: 50%; }
+
+  .miolo { flex: 1; display: grid; align-items: center; gap: 28px; padding: 28px 0; }
+  @media (min-width: 880px) { .miolo { grid-template-columns: 1.1fr .9fr; gap: 48px; } }
+
+  .selo { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: rgba(143,233,184,.12); color: var(--menta); font: 500 13px 'JetBrains Mono', monospace; box-shadow: inset 0 0 0 1px rgba(143,233,184,.3); }
+  .selo b { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pisca 1.4s ease-in-out infinite; }
+  @keyframes pisca { 50% { opacity: .25; } }
+
+  h1 { margin: 18px 0 0; font-family: 'Bricolage Grotesque', Figtree, sans-serif; font-weight: 800; font-size: clamp(40px, 9vw, 76px); line-height: .98; letter-spacing: -.035em; text-wrap: balance; }
+  h1 em { font-style: normal; color: var(--menta); }
+  .sub { margin: 18px 0 0; color: var(--indigo-4); font-size: 18px; max-width: 520px; }
+
+  /* Barra de progresso que nunca termina de terminar */
+  .obra { margin-top: 28px; max-width: 520px; padding: 16px 18px; border-radius: 16px; background: rgba(255,255,255,.05); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
+  .obra-linha { display: flex; justify-content: space-between; gap: 12px; font-size: 14.5px; }
+  .tarefa { color: #fff; font-weight: 650; min-height: 22px; }
+  .tarefa::after { content: ''; display: inline-block; width: 2px; height: 1em; margin-left: 3px; vertical-align: -2px; background: var(--menta); animation: pisca 1s steps(1) infinite; }
+  .pct { font: 500 14px 'JetBrains Mono', monospace; color: var(--menta); }
+  .trilho { margin-top: 12px; height: 12px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden; }
+  .barra { height: 100%; width: 12%; border-radius: inherit; background: repeating-linear-gradient(-45deg, #8fe9b8 0 10px, #6fd49f 10px 20px); background-size: 28px 28px; animation: listra .8s linear infinite; transition: width .9s cubic-bezier(.3,.8,.3,1); }
+  @keyframes listra { to { background-position: 28px 0; } }
+
+  .acoes { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; padding: 0 22px; border-radius: 12px; font-weight: 700; font-size: 16px; text-decoration: none; transition: transform .12s, background .15s; }
+  .btn:active { transform: scale(.97); }
+  .btn-menta { background: var(--menta); color: var(--ink); }
+  .btn-menta:hover { background: #a6efc7; }
+  .nota { margin-top: 12px; color: var(--indigo-4); font-size: 14px; }
+
+  /* Palco da moedinha */
+  .palco { position: relative; display: grid; justify-items: center; padding-top: 34px; }
+  .balao {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: max-content; max-width: min(300px, 86vw);
+    padding: 10px 16px; border-radius: 16px; background: #fff; color: var(--ink); font-weight: 700; font-size: 15px; text-align: center;
+    box-shadow: 0 12px 30px rgba(0,0,0,.3); animation: surge .35s ease-out;
+  }
+  .balao::after { content: ''; position: absolute; left: 50%; bottom: -8px; margin-left: -8px; border: 8px solid transparent; border-bottom: 0; border-top-color: #fff; }
+  @keyframes surge { from { opacity: 0; transform: translate(-50%, 6px) scale(.95); } }
+  .moeda { margin-top: 40px; background: none; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .moeda img { width: min(330px, 72vw); height: auto; filter: drop-shadow(0 24px 30px rgba(0,0,0,.35)); animation: flutua 3.2s ease-in-out infinite; }
+  .moeda.pula img { animation: pula .6s cubic-bezier(.3,1.6,.5,1); }
+  @keyframes flutua { 50% { transform: translateY(-12px) rotate(-1.5deg); } }
+  @keyframes pula { 40% { transform: translateY(-46px) rotate(8deg) scale(1.04); } 100% { transform: none; } }
+  .moeda:focus-visible { outline: 2px solid var(--menta); outline-offset: 8px; border-radius: 20px; }
+  .dica { margin-top: 10px; color: var(--indigo-4); font-size: 13px; }
+  .sombra { width: 46%; height: 16px; margin-top: 8px; border-radius: 50%; background: rgba(0,0,0,.28); filter: blur(4px); animation: sombra 3.2s ease-in-out infinite; }
+  @keyframes sombra { 50% { transform: scaleX(.85); opacity: .7; } }
+
+  footer { text-align: center; font-size: 13px; color: var(--indigo-4); border-top: 1px solid rgba(143,233,184,.18); padding-top: 14px; }
+  footer a { color: var(--menta); font-weight: 650; text-decoration: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .chuva { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="chuva" aria-hidden="true" id="chuva"></div>
+
+<div class="pagina">
+  <header class="topo">
+    <img src="/img/logo-192.png" alt="" />
+    Granninha
+  </header>
+
+  <main class="miolo">
+    <section>
+      <span class="selo"><b></b>em melhoria agora</span>
+      <h1>Tô melhorando para você <em>melhorar a sua vida financeira.</em></h1>
+      <p class="sub">A Granninha está fazendo uma arrumação caprichada nos bastidores. Seus lançamentos estão guardadinhos e eu volto rapidinho, mais esperta do que nunca.</p>
+
+      <div class="obra" role="status" aria-live="polite">
+        <div class="obra-linha">
+          <span class="tarefa" id="tarefa">Contando as moedinhas</span>
+          <span class="pct" id="pct">12%</span>
+        </div>
+        <div class="trilho"><div class="barra" id="barra"></div></div>
+      </div>
+
+      <div class="acoes">
+        <a class="btn btn-menta" href="https://www.instagram.com/granninha/" target="_blank" rel="noopener noreferrer">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg>
+          Me acompanha no Instagram
+        </a>
+      </div>
+      <p class="nota">Enquanto isso, dá uma olhada em como anda o caixa. Quando eu voltar, a gente coloca tudo em dia.</p>
+    </section>
+
+    <section class="palco">
+      <div class="balao" id="balao">Psiu, encosta em mim!</div>
+      <button class="moeda" id="moeda" type="button" aria-label="Tocar na moedinha da Granninha">
+        <img id="moedaImg" src="/img/laptop.png" alt="A moedinha da Granninha trabalhando no notebook" width="350" height="240" />
+      </button>
+      <div class="sombra" aria-hidden="true"></div>
+      <p class="dica">Toca na moedinha</p>
+    </section>
+  </main>
+
+  <footer>
+    Desenvolvido por <a href="https://grupongp.com.br" target="_blank" rel="noopener noreferrer">Amplasoft — Grupo NGP</a>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var calmo = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Moedinhas caindo
+  var chuva = document.getElementById('chuva');
+  if (!calmo) {
+    for (var i = 0; i < 14; i++) {
+      var m = document.createElement('i');
+      m.style.left = Math.random() * 100 + '%';
+      m.style.animationDuration = 9 + Math.random() * 10 + 's';
+      m.style.animationDelay = -Math.random() * 18 + 's';
+      var t = 14 + Math.random() * 16;
+      m.style.width = m.style.height = t + 'px';
+      chuva.appendChild(m);
+    }
+  }
+
+  // A obra: uma tarefa por vez, digitada, e a barra subindo até quase o fim
+  var tarefas = [
+    'Contando as moedinhas',
+    'Passando um café bem forte',
+    'Arrumando a gaveta do caixa',
+    'Ensinando o DAS a não atrasar',
+    'Separando o pessoal do negócio',
+    'Somando o troco do fiado',
+    'Dando polimento nos relatórios',
+    'Conferindo se sobrou lucro',
+    'Fazendo as contas de novo, por garantia'
+  ];
+  var elT = document.getElementById('tarefa'), elP = document.getElementById('pct'), elB = document.getElementById('barra');
+  var idx = 0, pct = 12;
+  function escreve(txt, fim) {
+    if (calmo) { elT.textContent = txt; return fim && fim(); }
+    var n = 0; elT.textContent = '';
+    var tm = setInterval(function () { n++; elT.textContent = txt.slice(0, n); if (n >= txt.length) { clearInterval(tm); fim && fim(); } }, 38);
+  }
+  function proxima() {
+    idx = (idx + 1) % tarefas.length;
+    pct = idx === 0 ? 12 : Math.min(97, pct + 6 + Math.round(Math.random() * 8));
+    elB.style.width = pct + '%'; elP.textContent = pct + '%';
+    escreve(tarefas[idx]);
+  }
+  elB.style.width = pct + '%';
+  setInterval(proxima, 3200);
+
+  // A moedinha responde quando tocam nela
+  var falas = [
+    'Ei, cócegas não! Tô trabalhando.',
+    'Já já eu volto, prometo.',
+    'Dinheiro organizado é dinheiro que rende.',
+    'Quase pronto. Quase mesmo.',
+    'Essa melhoria é toda pra você.',
+    'Guardei tudo direitinho, pode confiar.',
+    'Sabia que anotar um gasto leva 5 segundos?'
+  ];
+  var moeda = document.getElementById('moeda'), img = document.getElementById('moedaImg'), balao = document.getElementById('balao');
+  var f = -1, volta;
+  moeda.addEventListener('click', function () {
+    f = (f + 1) % falas.length;
+    balao.textContent = falas[f];
+    balao.style.animation = 'none'; void balao.offsetWidth; balao.style.animation = '';
+    img.src = '/img/festa.png';
+    moeda.classList.remove('pula'); void moeda.offsetWidth; moeda.classList.add('pula');
+    clearTimeout(volta);
+    volta = setTimeout(function () { img.src = '/img/laptop.png'; moeda.classList.remove('pula'); }, 1400);
+  });
+  new Image().src = '/img/festa.png';
+})();
+</script>
+</body>
+</html>
