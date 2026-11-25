@@ -153,6 +153,8 @@ const db = createServer(async (req, res) => {
   if (req.method === 'PATCH') {
     const alvo = filtra()
     for (const l of alvo) Object.assign(l, corpo)
+    // Como no POST acima: com .single() o PostgREST devolve o OBJETO (ou 406 sem linha), não a lista.
+    if (prefer.includes('return=representation') && umSo) return alvo.length ? enviar(200, alvo[0]) : enviar(406, { code: 'PGRST116', message: 'sem linhas' })
     return prefer.includes('return=representation') ? enviar(200, alvo) : enviar(204, undefined)
   }
   if (req.method === 'DELETE') {

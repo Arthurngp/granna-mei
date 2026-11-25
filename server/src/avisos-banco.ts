@@ -6,6 +6,10 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ContaAviso, DepsAvisos, PerfilAviso } from './avisos.ts'
+import { pendenteValido, type PendenteBaixa } from './gancho.ts'
+
+/** Pergunta de outro assunto ainda viva na conversa (a mesma meia hora do granninha.ts): o aviso não passa por cima dela. */
+const PERGUNTA_VIVA_MS = 30 * 60_000
 
 const LOTE = 100
 
@@ -93,6 +97,31 @@ export function depsAvisosDoBanco(sb: SupabaseClient, enviar: (telefone: string,
         ? await sb.from('avisos').update({ status: 'enviado', enviado_em: new Date().toISOString() }).eq('user_id', userId).in('chave', chaves)
         : await sb.from('avisos').delete().eq('user_id', userId).in('chave', chaves)
       falha(enviado ? 'marcar enviado' : 'soltar reserva', q.error)
+    },
+
+    async abrirPergunta(userId, telefone, conta) {
+      // A conversa é guardada pelo número EXATO em que a pessoa escreve. Só pergunta se ela já escreveu deste número: senão a resposta
+      // chegaria por outra chave (o WhatsApp às vezes omite o nono dígito) e o SIM ficaria sem contexto.
+      const m = await sb.from('mensagens').select('id').eq('user_id', userId).eq('telefone', telefone).limit(1)
+      falha('pergunta: mensagens', m.error)
+      if (!m.data?.length) return false
+      const c = await sb.from('conversas').select('pendente, atualizado_em').eq('telefone', telefone).maybeSingle()
+      falha('pergunta: conversa', c.error)
+      const viva = !!(c.data?.pendente as { tipo?: string } | null)?.tipo && Date.now() - new Date(c.data!.atualizado_em as string).getTime() < PERGUNTA_VIVA_MS
+      if (viva) return false
+      const pendente: PendenteBaixa = { tipo: 'baixa_conta', conta: { id: conta.id, descricao: conta.descricao, valor: conta.valor, vencimento: conta.vencimento }, de: 'aviso' }
+      const g = await sb.from('conversas').upsert({ telefone, user_id: userId, pendente, atualizado_em: new Date().toISOString() })
+      falha('pergunta: gravar', g.error)
+      return true
+    },
+
+    async fecharPergunta(telefone, contaId) {
+      const c = await sb.from('conversas').select('pendente').eq('telefone', telefone).maybeSingle()
+      falha('pergunta: reler', c.error)
+      // Só tira a pergunta DESTE aviso: se a pessoa escreveu no meio e ficou outra pergunta, ela não é nossa.
+      if (!pendenteValido(c.data?.pendente) || c.data!.pendente.conta.id !== contaId) return
+      const u = await sb.from('conversas').update({ pendente: null, atualizado_em: new Date().toISOString() }).eq('telefone', telefone)
+      falha('pergunta: tirar', u.error)
     },
 
     enviar,

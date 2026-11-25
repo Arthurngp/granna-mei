@@ -26,6 +26,7 @@ import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, pareceRe
 import { brl as brlComSinal, contasQueFicaramNegativas, ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta } from './consultas.ts'
 import { foraDoDisponivel } from './cartao.ts'
 import { confirma, ERROU, MSG } from './voz.ts'
+import { baixaPronta, escolherGancho, fraseDeBaixa, janelaDoGancho, pendenteValido, respostaGancho, TEXTO_JA_BAIXADA, textoConfirmacao, textoNaoPagou, VALE_MS, type ContaGancho, type PendenteBaixa } from './gancho.ts'
 
 const PAINEL = () => (process.env.PAINEL_URL ?? 'https://granninha.com.br/painel').replace(/\/+$/, '')
 
@@ -374,7 +375,7 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
           userId: null,
         }
       }
-      const up = await sb.from('perfis').update({ whats: formatarNumero(jid), whats_verificado: true }).eq('id', v.user_id).select('nome').single()
+      const up = await sb.from('perfis').update({ whats: formatarNumero(jid), whats_verificado: true }).eq('id', v.user_id).select('nome, ocultar').single()
       if (up.error?.code === '23505') {
         return {
           status: 'ignorada',
@@ -389,7 +390,7 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
       const nome = (up.data?.nome ?? '').split(' ')[0]
       return {
         status: 'ok',
-        resposta: MSG.numeroConfirmado(nome),
+        resposta: await confirmacaoComGancho(telefone, v.user_id as string, nome, !!(up.data as { ocultar?: boolean } | null)?.ocultar),
         userId: v.user_id,
       }
     }
@@ -429,6 +430,33 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
     status: 'ignorada',
     resposta: `Oi! Eu sou a Granninha. Eu organizo o dinheiro do seu MEI aqui pelo WhatsApp.\n\nPara começar, crie sua conta (${hojeSP() <= '2026-12-31' ? 'grátis até 31 de dezembro' : '7 dias grátis'}): ${PAINEL()}/criar-conta`,
     userId: null,
+  }
+}
+
+/**
+ * A resposta à confirmação do número. Se a pessoa cadastrou contas no onboarding, fala de uma delas em vez do exemplo genérico; se a conta
+ * vence por agora, pergunta "já pagou?" e deixa a pergunta em aberto, para um SIM dar baixa. Qualquer falha aqui cai na mensagem de sempre:
+ * a confirmação do número já aconteceu e nunca depende disto. E a pergunta só sai se ficou gravada: perguntar sem poder ouvir a resposta
+ * seria pior que não perguntar.
+ */
+async function confirmacaoComGancho(telefone: string, userId: string, nome: string, ocultar: boolean): Promise<string> {
+  try {
+    const hoje = hojeSP()
+    const jan = janelaDoGancho(hoje)
+    const cs = await sb.from('contas').select('id, descricao, valor, vencimento').eq('user_id', userId).eq('tipo', 'pagar').eq('status', 'aberta').gte('vencimento', jan.de).lte('vencimento', jan.ate).order('vencimento').limit(50)
+    if (cs.error) throw new Error(cs.error.message)
+    const contas = ((cs.data ?? []) as { id: string; descricao: string; valor: number | string; vencimento: string }[]).map((c): ContaGancho => ({ id: c.id, descricao: c.descricao, valor: Number(c.valor), vencimento: c.vencimento }))
+    const g = escolherGancho(contas, hoje)
+    if (!g) return MSG.numeroConfirmado(nome)
+    if (g.modo === 'pagou') {
+      const pendente: PendenteBaixa = { tipo: 'baixa_conta', conta: g.conta, de: 'confirmacao' }
+      const gr = await sb.from('conversas').upsert({ telefone, user_id: userId, pendente, atualizado_em: new Date().toISOString() })
+      if (gr.error) throw new Error(gr.error.message)
+    }
+    return textoConfirmacao(nome, g, ocultar, hoje)
+  } catch (e) {
+    console.error('[gancho] confirmação sem gancho:', (e as Error).message.slice(0, 200))
+    return MSG.numeroConfirmado(nome)
   }
 }
 
@@ -545,9 +573,35 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
     documento = { valor: leitura.transacoes[0].valor, movimento: leitura.transacoes[0].movimento }
   }
 
+  // Resposta ao "já pagou?" da confirmação do número ou do aviso de vencimento (gancho.ts). Vale 24 h, mais que as outras perguntas: o aviso
+  // sai de manhã e a resposta vem à noite. NÃO deixa a conta aberta; SIM dá baixa mais abaixo, por código; outra coisa segue o fluxo normal.
+  let baixaDoGancho: PendenteBaixa | null = null
+  let carteiraDoGancho: string | undefined
+  if (!documento && !anexo && pendenteValido(conv?.pendente)) {
+    const pg = conv!.pendente as PendenteBaixa
+    if (pg.opcoes?.length) {
+      // Segundo passo: ela já disse SIM e a pergunta agora é "saiu de qual conta?". Vale a meia hora de qualquer pergunta com opções.
+      // Só a resposta curta conta ("2", "Nubank", "no nubank"). Frase com valor ou comprida ("paguei 50 de gasolina no nubank") é outro assunto,
+      // mesmo citando o nome de uma das contas: tratá-la como escolha daria baixa na conta da pergunta por engano.
+      const curta = /^\s*\d{1,2}\s*$/.test(texto) || (!/\d/.test(texto) && texto.trim().split(/\s+/).length <= 4)
+      const esc = fresco && curta ? opcaoEscolhida(texto, pg.opcoes) : null
+      if (esc) {
+        baixaDoGancho = pg
+        carteiraDoGancho = esc.id
+      } else if (fresco && /^\s*\d{1,2}\s*$/.test(texto)) {
+        await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pg, atualizado_em: new Date().toISOString() })
+        return { status: 'pergunta', resposta: `Não achei essa opção. ${pg.pergunta ?? ''}`.trim(), efeitos: {}, intencao: 'acoes', texto, tokens }
+      }
+    } else if (Date.now() - new Date(conv!.atualizado_em).getTime() < VALE_MS) {
+      const rg = respostaGancho(texto)
+      if (rg === 'nao') return { status: 'ok', resposta: textoNaoPagou(pg.conta), efeitos: {}, intencao: 'gancho', texto, tokens }
+      if (rg === 'sim') baixaDoGancho = pg
+    }
+  }
+
   // Despedida, agradecimento e "ok" ("tá bom, volto mais tarde"): não é cumprimento nem pedido. Responde curto ou fica em
   // silêncio, sem recomeçar com "Oi, me manda o que entrou", e sem gastar IA. Com pergunta em aberto não entra: a resposta é dela.
-  if (!documento && !anexo && !(pend?.tipo && fresco)) {
+  if (!documento && !anexo && !(pend?.tipo && fresco) && !baixaDoGancho) {
     const dp = despedidaDe(texto)
     if (dp === 'silencio') return { status: 'ignorada', resposta: '', efeitos: {}, intencao: 'confirmacao', texto, tokens }
     if (dp) return { status: 'ok', resposta: RESPOSTA_DESPEDIDA[dp], efeitos: {}, intencao: 'despedida', texto, tokens }
@@ -559,6 +613,27 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
     ctx.historico = await historicoRecente(cliente.id, msgId)
   } catch (e) {
     console.error('[historico] não consegui ler a conversa recente:', (e as Error).message)
+  }
+
+  // SIM ao "já pagou?": a baixa é montada aqui e passa pela MESMA conferência de qualquer baixa (qual conta do banco, conta de mesmo nome em outro
+  // mês), só que sem IA: a conta já é conhecida. Se a conferência perguntar de onde saiu (quem tem banco e cartão sempre cai aqui), a pergunta
+  // fica em aberto como segundo passo do gancho e a resposta também fecha por código.
+  if (baixaDoGancho) {
+    const pedida = baixaDoGancho.conta
+    const alvo = ctx.contasAbertas.find((c) => c.id === pedida.id && c.tipo === 'pagar')
+    if (!alvo) return { status: 'ok', resposta: TEXTO_JA_BAIXADA, efeitos: {}, intencao: 'gancho', texto, tokens }
+    const frase = fraseDeBaixa({ ...pedida, descricao: alvo.descricao, vencimento: alvo.vencimento })
+    const conf = conferir(frase, ctx, baixaPronta({ ...pedida, descricao: alvo.descricao }), carteiraDoGancho ? { forcarCarteira: carteiraDoGancho } : {})
+    if (conf.perguntar) {
+      const segundoPasso: PendenteBaixa = { tipo: 'baixa_conta', conta: pedida, de: baixaDoGancho.de, opcoes: conf.opcoes, pergunta: conf.perguntar }
+      const pendente = conf.opcoes?.length && !carteiraDoGancho
+        ? segundoPasso
+        : { tipo: 'pergunta', texto: frase, pergunta: conf.perguntar, opcoes: conf.opcoes, forcar: carteiraDoGancho ? { carteira: carteiraDoGancho } : {}, origem: tipo }
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente, atualizado_em: new Date().toISOString() })
+      return { status: 'pergunta', resposta: conf.perguntar, efeitos: {}, intencao: 'acoes', texto: frase, tokens }
+    }
+    const ex = await executar(cliente.id, ctx, conf.acoes, tipo, null)
+    return { status: 'ok', resposta: `${ex.linhas.join('\n\n')}${await saldoDepois(cliente.id, conf.acoes)}\n\n${ERROU}`, efeitos: ex.efeitos, intencao: 'acoes', texto: frase, tokens }
   }
 
   // Resposta à pergunta "esse é o mesmo lançamento?": 1 corrige o anterior, 2 lança como outro. Outra mensagem qualquer
