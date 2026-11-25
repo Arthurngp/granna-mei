@@ -24,6 +24,7 @@
  */
 import { brl, somaDias } from './consultas.ts'
 import { erroSeguro } from './seguranca.ts'
+import { PERGUNTA_PAGOU } from './gancho.ts'
 
 export type Modo = 'off' | 'ensaio' | 'piloto' | 'todos'
 
@@ -90,6 +91,13 @@ export interface DepsAvisos {
   concluir: (userId: string, chaves: string[], enviado: boolean) => Promise<void>
   enviar: (telefone: string, texto: string) => Promise<void>
   esperar: (ms: number) => Promise<void>
+  /**
+   * Aviso de UMA conta: deixa a pergunta "já pagou?" em aberto para essa conta, de modo que um SIM dê baixa nela (gancho.ts). Devolve false quando
+   * não dá para perguntar (a pessoa nunca escreveu deste número, ou há outra pergunta viva na conversa): aí o aviso sai com o texto sem pergunta.
+   */
+  abrirPergunta?: (userId: string, telefone: string, conta: ContaAviso) => Promise<boolean>
+  /** O envio falhou depois de abrir a pergunta: tira ela do caminho, para um SIM solto não dar baixa numa conta de que a pessoa nunca ouviu falar. */
+  fecharPergunta?: (telefone: string, contaId: string) => Promise<void>
   /** Clientes com WhatsApp verificado cujo teste grátis termina hoje ou amanhã (aviso de fim de teste, ver abaixo). */
   emTeste?: (hoje: string, amanha: string) => Promise<PerfilAviso[]>
 }
@@ -148,8 +156,11 @@ function rotuloDia(d: string, hoje: string): string {
 
 export const MAX_LINHAS = 8
 
-/** A mensagem do aviso. Sem emoji, sem travessão, e sem valores quando a pessoa escolheu ocultar. */
-export function montarTexto(p: Pick<PerfilAviso, 'nome' | 'ocultar'>, contas: ContaAviso[], hoje: string): string {
+/**
+ * A mensagem do aviso. Sem emoji, sem travessão, e sem valores quando a pessoa escolheu ocultar.
+ * `comPergunta` só vale para UMA conta e só quando a pergunta ficou mesmo gravada na conversa: aí o aviso termina em "Já pagou?".
+ */
+export function montarTexto(p: Pick<PerfilAviso, 'nome' | 'ocultar'>, contas: ContaAviso[], hoje: string, comPergunta = false): string {
   const ordenadas = [...contas].sort((a, b) => a.vencimento.localeCompare(b.vencimento) || a.descricao.localeCompare(b.descricao))
   const nome = (p.nome ?? '').trim().split(/\s+/)[0]
   const linhas: string[] = [`${nome ? `Oi, ${nome}.` : 'Oi.'} ${ordenadas.length === 1 ? 'Tem uma conta vencendo:' : 'Estas contas estão vencendo:'}`]
@@ -165,6 +176,10 @@ export function montarTexto(p: Pick<PerfilAviso, 'nome' | 'ocultar'>, contas: Co
   const resto = ordenadas.length - mostradas.length
   if (resto > 0) linhas.push('', `E mais ${resto}. Veja no painel.`)
   if (!p.ocultar && ordenadas.length > 1) linhas.push('', `Total: ${brl(ordenadas.reduce((s, c) => s + c.valor, 0))}`)
+  if (comPergunta && ordenadas.length === 1) {
+    linhas.push('', PERGUNTA_PAGOU)
+    return linhas.join('\n')
+  }
   const exemplo = ordenadas[0].descricao.trim().toLowerCase()
   linhas.push('', `Quando pagar, me avisa. Por exemplo: "paguei ${exemplo.length <= 28 ? exemplo : 'a conta'}".`)
   return linhas.join('\n')
@@ -250,12 +265,17 @@ export async function rodarAvisos(d: DepsAvisos, cfg: ConfigAvisos, agora = new 
       const meus = novas.filter((x) => ganhas.has(x.chave))
       if (!meus.length) continue
       usados++
+      // Uma conta só: a pergunta "já pagou?" fica em aberto ANTES do envio (se o envio falhar, ela sai). Não conseguir abrir nunca impede o aviso.
+      const unica = meus.length === 1 ? meus[0].c : null
+      let perguntou = false
       try {
-        await d.enviar(tel, montarTexto(p, meus.map((x) => x.c), hoje))
+        if (unica && d.abrirPergunta) perguntou = await d.abrirPergunta(p.id, tel, unica).catch(() => false)
+        await d.enviar(tel, montarTexto(p, meus.map((x) => x.c), hoje, perguntou))
         await d.concluir(p.id, meus.map((x) => x.chave), true)
         estado.enviados++
         log.push(`enviado a ${mascarar(tel)} (${meus.length} conta${meus.length > 1 ? 's' : ''})`)
       } catch (e) {
+        if (perguntou && unica && d.fecharPergunta) await d.fecharPergunta(tel, unica.id).catch((e2) => log.push(`não consegui tirar a pergunta em aberto: ${(e2 as Error).message}`))
         await d.concluir(p.id, meus.map((x) => x.chave), false).catch((e2) => log.push(`não consegui soltar a reserva: ${(e2 as Error).message}`))
         estado.falhas++
         estado.ultimoErro = erroSeguro((e as Error).message)
