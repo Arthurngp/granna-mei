@@ -8,7 +8,9 @@ const anon = MOCK ? 'mock' : (import.meta.env.VITE_SUPABASE_ANON_KEY as string |
 if (!url || !anon) throw new Error('Faltam VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY')
 
 // Sessão guardada com outra chave: entrar no admin não mexe na sessão do painel do cliente.
-export const sb = createClient(url, anon, { auth: { storageKey: 'granna-mei-admin' } })
+// E na sessionStorage, não no localStorage: o painel e o site carregam um script de rastreio de terceiros no MESMO domínio, e o localStorage é
+// compartilhado por todas as páginas do domínio. Na sessionStorage a sessão do admin só existe na aba do admin (fecha a aba, sai).
+export const sb = createClient(url, anon, { auth: { storageKey: 'granna-mei-admin', storage: MOCK ? undefined : window.sessionStorage } })
 
 /** Endereço do serviço da Granninha (QR do WhatsApp e link de acesso). */
 export const API = ((import.meta.env.VITE_GRANNINHA_API as string | undefined) ?? 'https://api-grannamei.amplasoft.me').replace(/\/+$/, '')

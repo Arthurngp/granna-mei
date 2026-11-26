@@ -419,6 +419,7 @@ async function numeroDesconhecido(telefone: string, jid: string, texto: string):
       const dono = await sb.from('perfis').select('nome, whats_chave').eq('id', v.user_id).maybeSingle()
       falhou(dono.error, 'dono do código')
       const esperado = dono.data?.whats_chave as string | null
+      // Sem número na conta, quem manda o código é quem fica (cadastro sem digitar o número, decisão de produto provada em test/confirmar.ts).
       if (esperado && esperado !== chaveDoNumero(jid)) {
         await marcarTentativa(telefone, tent)
         return {

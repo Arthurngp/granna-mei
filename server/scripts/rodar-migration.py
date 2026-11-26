@@ -8,6 +8,9 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  segexclusao 20261126030000_seguranca_exclusao_codigo.sql   auditoria de 26/11: o cliente não consegue mais antecipar a própria exclusão (qualquer pedido vira hoje + 30 dias;
+          cancelar continua livre) e o código de confirmação do WhatsApp passa a vir do gerador forte. Troca 2 funções, mesma
+          assinatura; nenhuma linha muda. Compatível com o painel, o servidor e o admin atuais.
   custopormodelo 20261125120000_custo_por_modelo.sql   custo de IA pelo modelo que RODOU: duas colunas novas em mensagens (ia_chamadas, custo_usd), nulas para o passado,
           e admin_custo_periodo devolve o custo medido e o gasto por modelo (com as vezes em que o escolhido falhou e o de fábrica respondeu). Nenhuma linha muda.
           O servidor funciona com ou sem ela; o admin antigo também. Depende de custofoto.
@@ -96,11 +99,20 @@ MIGRATIONS = {
     "nuncalancou": "20261125010000_retencao_nunca_lancou.sql",
     "configwhats": "20261125020000_config_whats.sql",
     "custopormodelo": "20261125120000_custo_por_modelo.sql",
+    "segexclusao": "20261126030000_seguranca_exclusao_codigo.sql",
     "configia": "20261124140000_config_ia.sql",
     "iaanthropic": "20261124150000_ia_chaves_anthropic.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
+    # A trava do prazo de exclusão e o gerador forte do código estão no banco? E quantos pedidos de exclusão há hoje (só leitura).
+    "segexclusao": """select
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='perfil_antes_de_mudar'
+           and pg_get_functiondef(p.oid) like '%exclusao_em := %') as trava_exclusao,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='gerar_codigo_whats'
+           and pg_get_functiondef(p.oid) like '%gen_random_uuid%') as codigo_forte,
+        (select count(*) from public.perfis where exclusao_em is not null) as pedidos_de_exclusao,
+        (select count(*) from public.perfis where exclusao_em is not null and exclusao_em <= (now() at time zone 'America/Sao_Paulo')::date) as ja_vencidos""",
     # As 2 colunas novas existem? Quantas mensagens já têm o modelo gravado, e quantas caíram no reserva (só leitura).
     "custopormodelo": """select
         (select count(*) from information_schema.columns where table_schema='public' and table_name='mensagens' and column_name in ('ia_chamadas','custo_usd')) as colunas_novas,
