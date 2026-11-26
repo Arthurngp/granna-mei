@@ -38,7 +38,7 @@ function traduz(msg: string) {
   if (m.includes('already registered') || m.includes('already been registered')) return 'Já existe uma conta com este e-mail. Tente entrar.'
   if (m.includes('different from the old') || m.includes('should be different')) return 'A senha nova precisa ser diferente da que você já usava.'
   if (m.includes('session missing') || m.includes('session not found') || m.includes('expired')) return 'Esse link já venceu. Peça outro em "Esqueci minha senha".'
-  if (m.includes('password')) return 'A senha precisa ter pelo menos 6 caracteres.'
+  if (m.includes('password')) return 'A senha precisa ter pelo menos 8 caracteres.'
   if (m.includes('rate limit') || m.includes('too many')) return 'Muitas tentativas seguidas. Espere um minuto e tente de novo.'
   if (m.includes('failed to fetch') || m.includes('network')) return 'Sem conexão com o servidor. Confira sua internet.'
   return 'Não deu certo agora. Tente de novo em instantes.'

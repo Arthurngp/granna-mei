@@ -117,7 +117,7 @@ export async function excluirContaDefinitivo(
   // Digitar o e-mail do cliente é a trava contra clicar na conta errada.
   if (!email || emailConfirmado.trim().toLowerCase() !== email) throw new ErroExclusao(400, 'O e-mail digitado não confere com o da conta.')
 
-  const p = await sb.from('perfis').select('papel, nome, negocio, whats').eq('id', alvoId).maybeSingle()
+  const p = await sb.from('perfis').select('papel, nome, negocio, whats, whats_verificado').eq('id', alvoId).maybeSingle()
   if (p.error) throw new Error(`ler perfil: ${p.error.message}`)
   if (p.data?.papel === 'admin') throw new ErroExclusao(400, 'Conta de admin não se exclui por aqui. Tire o papel de admin antes.')
 
@@ -126,7 +126,8 @@ export async function excluirContaDefinitivo(
     sb.from('mensagens').select('id', { count: 'exact', head: true }).eq('user_id', alvoId),
   ])
 
-  const r = await apagarTudo(sb, alvoId, p.data?.whats ?? '')
+  // Só o número CONFIRMADO apaga mensagens soltas: o campo é editável pelo cliente, e com o número de outra pessoa ele apagaria o histórico dela.
+  const r = await apagarTudo(sb, alvoId, p.data?.whats_verificado ? (p.data?.whats ?? '') : '')
 
   // Auditoria só depois de confirmar que apagou. O vínculo com o cliente vira nulo na exclusão, então o que foi apagado fica no texto.
   await registrar(sb, adminId, {
@@ -184,10 +185,10 @@ export interface Vencida {
  * Conta de admin nunca é apagada aqui.
  */
 export async function excluirVencidas(sb: SupabaseClient, hoje: string, apagar: boolean): Promise<Vencida[]> {
-  const { data, error } = await sb.from('perfis').select('id, nome, negocio, whats, papel, exclusao_em').lte('exclusao_em', hoje)
+  const { data, error } = await sb.from('perfis').select('id, nome, negocio, whats, whats_verificado, papel, exclusao_em').lte('exclusao_em', hoje)
   if (error) throw new Error(`procurar vencidas: ${error.message}`)
   const fora: Vencida[] = []
-  for (const p of (data ?? []) as { id: string; nome: string; negocio: string; whats: string; papel: string; exclusao_em: string }[]) {
+  for (const p of (data ?? []) as { id: string; nome: string; negocio: string; whats: string; whats_verificado: boolean; papel: string; exclusao_em: string }[]) {
     const cliente = [p.nome, p.negocio].filter(Boolean).join(' · ') || '(sem nome)'
     // Trava contra catástrofe: isto apaga conta de verdade, sozinho. Se o filtro do banco
     // falhasse, apagaria quem nunca pediu. A data é conferida de novo, uma a uma, aqui.
@@ -201,7 +202,7 @@ export async function excluirVencidas(sb: SupabaseClient, hoje: string, apagar: 
       continue
     }
     try {
-      await apagarTudo(sb, p.id, p.whats)
+      await apagarTudo(sb, p.id, p.whats_verificado ? p.whats : '')
       await registrar(sb, null, { motivo: 'prazo de 30 dias pedido pelo cliente', cliente, exclusao_em: p.exclusao_em })
       fora.push({ id: p.id, cliente, exclusao_em: p.exclusao_em, apagada: true })
     } catch (e) {

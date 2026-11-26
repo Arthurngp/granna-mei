@@ -120,6 +120,10 @@ export async function rotaAdmin(req: IncomingMessage, res: ServerResponse, camin
     if (!user_id) return json(res, 400, { erro: 'user_id obrigatório' }), true
     const u = await sb.auth.admin.getUserById(user_id)
     if (u.error || !u.data.user?.email) return json(res, 404, { erro: 'Cliente não encontrado.' }), true
+    // Link de entrar na conta de OUTRO admin daria acesso total sem a segunda etapa dele: só para cliente.
+    const alvo = await sb.from('perfis').select('papel').eq('id', user_id).maybeSingle()
+    falhou(alvo.error, 'papel do alvo')
+    if (alvo.data?.papel === 'admin') return json(res, 403, { erro: 'Não dá para gerar link de acesso para uma conta de admin.' }), true
     const painel = (process.env.PAINEL_URL ?? 'https://granninha.com.br/painel').replace(/\/+$/, '')
     const senha = tipo === 'senha'
     const l = await sb.auth.admin.generateLink({
@@ -128,12 +132,14 @@ export async function rotaAdmin(req: IncomingMessage, res: ServerResponse, camin
       options: { redirectTo: painel + (senha ? '/nova-senha' : '/') },
     })
     falhou(l.error, 'gerar link')
-    await sb.from('admin_auditoria').insert({
+    // Sem registro na auditoria, o link não sai: entrar na conta de um cliente sempre deixa rastro.
+    const aud = await sb.from('admin_auditoria').insert({
       admin_id: admin,
       acao: senha ? 'link_nova_senha' : 'link_acesso',
       alvo_user_id: user_id,
       detalhes: { motivo: senha ? 'link para o cliente criar senha nova' : 'link de acesso gerado pelo admin' },
     })
+    falhou(aud.error, 'registrar o link na auditoria')
     json(res, 200, { link: l.data.properties?.action_link })
     return true
   }

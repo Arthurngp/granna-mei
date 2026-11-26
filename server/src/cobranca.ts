@@ -189,6 +189,18 @@ async function userIdDaAssinatura(sub: Stripe.Subscription, dica?: string | null
  * Aviso de assinatura que não é a que está gravada para a conta é ignorado: sem isso um "cancelada" atrasado da
  * assinatura velha bloquearia quem já assinou de novo.
  */
+/** No máximo 10 aberturas de cobrança por minuto por cliente: em laço, cada uma criaria uma sessão de Checkout na Stripe. */
+const aberturas = new Map<string, number[]>()
+function dentroDoLimite(userId: string, max = 10, janelaMs = 60_000): boolean {
+  const agora = Date.now()
+  const vezes = (aberturas.get(userId) ?? []).filter((t) => agora - t < janelaMs)
+  if (vezes.length >= max) return false
+  vezes.push(agora)
+  aberturas.set(userId, vezes)
+  if (aberturas.size > 5000) for (const [k, v] of aberturas) if (!v.some((t) => agora - t < janelaMs)) aberturas.delete(k)
+  return true
+}
+
 export async function sincronizar(s: Stripe, subId: string, dica?: string | null): Promise<string | null> {
   const sub = await s.subscriptions.retrieve(subId)
   if (!ehPrecoDaGranninha(sub.items.data[0]?.price?.lookup_key)) return null // outro produto da mesma conta Stripe
@@ -312,6 +324,7 @@ export async function rotaCobranca(req: IncomingMessage, res: ServerResponse, ca
     try {
       const u = await usuarioDo(req)
       if (!u) return json(res, 401, { erro: 'Entre na sua conta de novo para continuar.' }), true
+      if (!dentroDoLimite(u.id)) return json(res, 429, { erro: 'Muitas tentativas seguidas. Espere um minuto e tente de novo.' }), true
       if (!stripe()) return json(res, 503, { erro: AINDA_NAO }), true
       const corpo = await corpoCru(req, 10_000)
       const { plano } = JSON.parse(corpo.toString('utf8') || '{}') as { plano?: unknown }

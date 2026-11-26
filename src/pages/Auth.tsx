@@ -152,7 +152,7 @@ export function CriarConta() {
     }
     if (nome.trim().length < 2) return recusa('nome_curto', 'Como podemos te chamar?')
     if (!emailOk(email)) return recusa('email_invalido', 'Confira o e-mail: parece incompleto.')
-    if (senha.length < 6) return recusa('senha_curta', 'Crie uma senha com pelo menos 6 caracteres.')
+    if (senha.length < 8) return recusa('senha_curta', 'Crie uma senha com pelo menos 8 caracteres.')
     if (!aceito) return recusa('termos_nao_marcados', 'Marque que você concorda com os termos para continuar.')
     setOcupado(true)
     const falha = await criarConta(nome.trim(), email.trim(), senha)
@@ -172,7 +172,7 @@ export function CriarConta() {
           <span>E-mail</span>
           <input className="entrada" data-trk="email" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" />
         </label>
-        <CampoSenha valor={senha} onChange={setSenha} rotulo="Crie uma senha" dica="Pelo menos 6 caracteres." auto="new-password" campo="senha" />
+        <CampoSenha valor={senha} onChange={setSenha} rotulo="Crie uma senha" dica="Pelo menos 8 caracteres." auto="new-password" campo="senha" />
         <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 14, color: 'var(--muted)' }}>
           <input type="checkbox" data-trk="termos" checked={aceito} onChange={(e) => setAceito(e.target.checked)} style={{ width: 20, height: 20, marginTop: 1, accentColor: '#292D54', flex: 'none' }} />
           <span>Li e concordo com os termos de uso e a política de privacidade.</span>
@@ -203,7 +203,7 @@ export function NovaSenha() {
   const enviar = async (e: FormEvent) => {
     e.preventDefault()
     setErro('')
-    if (senha.length < 6) return setErro('A senha tem pelo menos 6 caracteres.')
+    if (senha.length < 8) return setErro('A senha tem pelo menos 8 caracteres.')
     if (senha !== repete) return setErro('As duas senhas não são iguais.')
     setOcupado(true)
     const falha = await trocarSenha(senha)
@@ -230,7 +230,7 @@ export function NovaSenha() {
     <Tela titulo="Criar uma senha nova" sub="Escolha a senha que você vai usar daqui para a frente." pose="checklist">
       <h2>Senha nova</h2>
       <form className="pilha" onSubmit={enviar} noValidate>
-        <CampoSenha valor={senha} onChange={setSenha} rotulo="Senha nova" dica="Pelo menos 6 caracteres" auto="new-password" />
+        <CampoSenha valor={senha} onChange={setSenha} rotulo="Senha nova" dica="Pelo menos 8 caracteres" auto="new-password" />
         <CampoSenha valor={repete} onChange={setRepete} rotulo="Repita a senha" auto="new-password" />
         <Erro texto={erro} />
         <BotaoEnviar ocupado={ocupado}>Salvar a senha</BotaoEnviar>

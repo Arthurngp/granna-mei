@@ -16,6 +16,9 @@ export function falhou(e: { message: string } | null, onde: string) {
 /** "558198765432@s.whatsapp.net" ou "5581987654321" → chave DDD + 8 últimos dígitos ("8187654321"). */
 export function chaveDoNumero(jidOuNumero: string): string | null {
   let d = jidOuNumero.split('@')[0].split(':')[0].replace(/\D/g, '')
+  // Endereço do WhatsApp sempre traz o código do país. A chave guarda só DDD + 8 dígitos, então número de fora do Brasil (Peru, +51 9...) cairia
+  // na chave de um cliente do DDD 51 e leria o financeiro dele. Remetente do WhatsApp que não é +55 não tem chave (é ignorado).
+  if (/@s\.whatsapp\.net$/.test(jidOuNumero) && !d.startsWith('55')) return null
   if (d.startsWith('55') && d.length >= 12) d = d.slice(2)
   if (d.length < 10) return null
   return d.slice(0, 2) + d.slice(-8)
