@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { PRECO_MENSAL } from '../../../../src/lib/config'
-import { CAMBIO, custoLeitura, custoReais, PRECO_USD, reais, type Consumo } from '../../custo'
+import { CAMBIO, custoLeitura, custoReais, reais, soTokens, type Consumo, type GastoModelo } from '../../custo'
 import { Falha } from '../comum'
 import { AreaDia } from './graficos'
 import { Cartao, Gaveta, Pagina, type HeadDef } from './layout'
@@ -22,8 +22,9 @@ interface Periodo {
   inicio: string
   fim: string
   dias: Dia[]
-  totais: { mensagens: number; clientes: number; estimadas: number; audios_sem_medida: number }
+  totais: { mensagens: number; clientes: number; estimadas: number; audios_sem_medida: number; com_modelo?: number }
   por_cliente: Cli[]
+  por_modelo?: GastoModelo[]
   meses: string[]
 }
 
@@ -36,8 +37,14 @@ const MODOS: [Modo, string][] = [
 
 const soma = (ds: Consumo[]): Consumo =>
   ds.reduce(
-    (a, d) => ({ entrada: a.entrada + d.entrada, saida: a.saida + d.saida, audio_tokens: a.audio_tokens + d.audio_tokens, audio_seg: a.audio_seg + d.audio_seg, entrada_foto: (a.entrada_foto ?? 0) + (d.entrada_foto ?? 0), entrada_pdf: (a.entrada_pdf ?? 0) + (d.entrada_pdf ?? 0) }),
-    { entrada: 0, saida: 0, audio_tokens: 0, audio_seg: 0, entrada_foto: 0, entrada_pdf: 0 },
+    (a, d) => ({
+      entrada: a.entrada + d.entrada, saida: a.saida + d.saida, audio_tokens: a.audio_tokens + d.audio_tokens, audio_seg: a.audio_seg + d.audio_seg,
+      entrada_foto: (a.entrada_foto ?? 0) + (d.entrada_foto ?? 0), entrada_pdf: (a.entrada_pdf ?? 0) + (d.entrada_pdf ?? 0),
+      custo_usd: Number(a.custo_usd ?? 0) + Number(d.custo_usd ?? 0),
+      entrada_medida: (a.entrada_medida ?? 0) + (d.entrada_medida ?? 0), saida_medida: (a.saida_medida ?? 0) + (d.saida_medida ?? 0),
+      audio_tokens_medido: (a.audio_tokens_medido ?? 0) + (d.audio_tokens_medido ?? 0), audio_seg_medido: (a.audio_seg_medido ?? 0) + (d.audio_seg_medido ?? 0),
+    }),
+    { entrada: 0, saida: 0, audio_tokens: 0, audio_seg: 0, entrada_foto: 0, entrada_pdf: 0, custo_usd: 0, entrada_medida: 0, saida_medida: 0, audio_tokens_medido: 0, audio_seg_medido: 0 },
   )
 
 const somaDias = (iso: string, d: number) => {
@@ -99,8 +106,8 @@ export function CustoIA() {
       entrada: leitura.texto,
       foto: leitura.foto,
       pdf: leitura.pdf,
-      saida: custoReais({ ...tot, entrada: 0, audio_tokens: 0, audio_seg: 0 }),
-      audio: custoReais({ ...tot, entrada: 0, saida: 0 }),
+      saida: custoReais({ ...soTokens(tot), entrada: 0, audio_tokens: 0, audio_seg: 0 }),
+      audio: custoReais({ ...soTokens(tot), entrada: 0, saida: 0 }),
     }
     const [ano, mes] = sel === '30d' ? [0, 0] : sel.split('-').map(Number)
     const diasMes = sel === '30d' ? 0 : new Date(Date.UTC(ano, mes, 0)).getUTCDate()
@@ -289,9 +296,37 @@ export function CustoIA() {
             )}
           </Cartao>
 
+          <Cartao g={12} titulo="Gasto por modelo" nota="o modelo que respondeu de verdade, não o configurado">
+            {!atual.dados ? (
+              <span className="skel" style={{ height: 120 }} />
+            ) : !atual.dados.por_modelo ? (
+              <p className="texto-ajuda">Falta rodar a migration custopormodelo no banco: até lá não dá para saber qual modelo respondeu, e o custo sai todo pelo preço do gpt-5.4-mini.</p>
+            ) : !atual.dados.por_modelo.length ? (
+              <p className="texto-ajuda">Nenhuma mensagem com o modelo gravado neste período. O registro começa a valer depois da migration custopormodelo.</p>
+            ) : (
+              <div className="linhas">
+                {atual.dados.por_modelo.map((m) => (
+                  <div key={m.modelo} className="cli-l">
+                    <div>
+                      <b>{m.modelo}</b>
+                      <span className="s">
+                        {n(m.chamadas)} {m.chamadas === 1 ? 'chamada' : 'chamadas'}
+                        {m.reserva > 0 ? `, ${n(m.reserva)} no lugar de ${(m.pedidos ?? []).join(', ')} (o escolhido falhou)` : ''}
+                        {m.sem_preco > 0 ? ', sem preço na tabela (contado pelo mais caro)' : ''}
+                      </span>
+                    </div>
+                    <div />
+                    <div className="cli-v">{reais(Number(m.custo_usd) * CAMBIO)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Cartao>
+
           {atual.dados && (
             <p className="texto-ajuda g12-nota">
-              Custo estimado pelo preço de tabela da OpenAI (entrada US$ {PRECO_USD.entrada.toLocaleString('pt-BR')} e saída US$ {PRECO_USD.saida.toLocaleString('pt-BR')} por milhão de tokens) e dólar a R$ {CAMBIO.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}; ajuste em admin/src/custo.ts. Dias no horário de São Paulo.
+              {atual.dados.totais.com_modelo ? `${n(atual.dados.totais.com_modelo)} mensagens com custo medido pelo preço do modelo que respondeu (tabela em server/src/precos.ts); o resto é estimado pelo preço do gpt-5.4-mini. ` : 'Custo estimado pelo preço do gpt-5.4-mini (o registro do modelo real começa com a migration custopormodelo). '}
+              Dólar a R$ {CAMBIO.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}. A divisão entre leitura, resposta e áudio é aproximada. Dias no horário de São Paulo.
               {atual.dados.totais.estimadas > 0 ? ` ${n(atual.dados.totais.estimadas)} mensagens antigas entram com a divisão estimada entre entrada e saída.` : ''}
               {atual.dados.totais.audios_sem_medida > 0 ? ` ${n(atual.dados.totais.audios_sem_medida)} áudios antigos não foram medidos e ficam de fora.` : ''}
             </p>
@@ -341,8 +376,8 @@ export function CustoIA() {
                 </>
               )
             })()}
-            <div className="fato"><span>Texto escrito</span><b>{reais(custoReais({ ...gav.c, entrada: 0, audio_tokens: 0, audio_seg: 0 }))}</b></div>
-            <div className="fato"><span>Áudio transcrito</span><b>{reais(custoReais({ ...gav.c, entrada: 0, saida: 0 }))}</b></div>
+            <div className="fato"><span>Texto escrito</span><b>{reais(custoReais({ ...soTokens(gav.c), entrada: 0, audio_tokens: 0, audio_seg: 0 }))}</b></div>
+            <div className="fato"><span>Áudio transcrito</span><b>{reais(custoReais({ ...soTokens(gav.c), entrada: 0, saida: 0 }))}</b></div>
             <p className="texto-ajuda">Comparado ao plano de {reais(PRECO_MENSAL)}: a IA deste cliente pesa {pct(custoReais(gav.c), PRECO_MENSAL)} do plano no período.</p>
           </>
         )}

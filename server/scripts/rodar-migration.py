@@ -8,6 +8,9 @@ Arthur, pelo terminal (a sessão de IA não aplica DDL em produção).
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar oferta
     /usr/bin/python3 -I server/scripts/rodar-migration.py --aplicar avisos
 
+  custopormodelo 20261125120000_custo_por_modelo.sql   custo de IA pelo modelo que RODOU: duas colunas novas em mensagens (ia_chamadas, custo_usd), nulas para o passado,
+          e admin_custo_periodo devolve o custo medido e o gasto por modelo (com as vezes em que o escolhido falhou e o de fábrica respondeu). Nenhuma linha muda.
+          O servidor funciona com ou sem ela; o admin antigo também. Depende de custofoto.
   configwhats 20261125020000_config_whats.sql   configuração da conta pela conversa do WhatsApp (cadastro só com o WhatsApp): duas colunas novas em perfis,
           onboarding_via (o cliente marca 'whats' ou 'site') e config_whats (estado da conversa, só o servidor grava). Nenhuma linha muda. Nada roda sem
           a chave ONBOARDING_WHATS=on no app granninha. Compatível com o servidor, o painel e o admin atuais.
@@ -92,11 +95,19 @@ MIGRATIONS = {
     "contatoscadastro": "20261124160000_contatos_cadastro.sql",
     "nuncalancou": "20261125010000_retencao_nunca_lancou.sql",
     "configwhats": "20261125020000_config_whats.sql",
+    "custopormodelo": "20261125120000_custo_por_modelo.sql",
     "configia": "20261124140000_config_ia.sql",
     "iaanthropic": "20261124150000_ia_chaves_anthropic.sql",
 }
 # O que olhar antes e depois de cada uma.
 CONFERE = {
+    # As 2 colunas novas existem? Quantas mensagens já têm o modelo gravado, e quantas caíram no reserva (só leitura).
+    "custopormodelo": """select
+        (select count(*) from information_schema.columns where table_schema='public' and table_name='mensagens' and column_name in ('ia_chamadas','custo_usd')) as colunas_novas,
+        (case when exists (select 1 from information_schema.columns where table_schema='public' and table_name='mensagens' and column_name='custo_usd')
+              then (xpath('/row/c/text()', query_to_xml('select count(*) as c from public.mensagens where custo_usd is not null', false, true, '')))[1]::text end) as com_modelo,
+        (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_custo_periodo'
+           and pg_get_functiondef(p.oid) like '%por_modelo%') as funcao_nova""",
     # Lista as funções admin_* que existem hoje (só leitura) e se admin_origens já está lá.
     "origens": """select
         (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='admin_origens') as admin_origens,

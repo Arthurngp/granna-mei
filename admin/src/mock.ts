@@ -83,6 +83,13 @@ function periodo(inicio: string, fim: string) {
     por_cliente: totalMsgs
       ? nomes.map(([nome, negocio], i) => ({ user_id: `u${i}`, nome, negocio, mensagens: Math.round(totalMsgs * pesos[i]), entrada: Math.round(soma.entrada * pesos[i]), saida: Math.round(soma.saida * pesos[i]), audio_tokens: Math.round(soma.audio_tokens * pesos[i]), audio_seg: 0, entrada_foto: Math.round(soma.entrada_foto * pesos[i]), entrada_pdf: Math.round(soma.entrada_pdf * pesos[i]) }))
       : [],
+    por_modelo: totalMsgs
+      ? [
+          { modelo: 'gpt-5.4-mini', chamadas: 212, reserva: 38, pedidos: ['gpt-4.1-nano'], sem_preco: 0, entrada: 640000, saida: 52000, cache: 210000, custo_usd: 0.6612 },
+          { modelo: 'gpt-4.1-mini', chamadas: 174, reserva: 0, pedidos: null, sem_preco: 0, entrada: 520000, saida: 31000, cache: 160000, custo_usd: 0.2136 },
+          { modelo: 'gpt-4o-mini-transcribe', chamadas: 41, reserva: 0, pedidos: null, sem_preco: 0, entrada: 0, saida: 3900, cache: 0, custo_usd: 0.0412 },
+        ]
+      : [],
     meses: ['2026-11', '2026-10', '2026-09'],
   }
 }
