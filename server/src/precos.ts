@@ -55,7 +55,8 @@ export function precoDe(modelo: string): { preco: Preco; conhecido: boolean } {
 export function custoDaChamada(c: ChamadaIA): number {
   const { preco } = precoDe(c.modelo)
   const cache = Math.min(c.cache ?? 0, c.entrada)
-  let usd = ((c.entrada - cache) * preco.entrada + cache * preco.cache + c.saida * preco.saida) / 1_000_000
+  const escrita = Math.min(c.cacheEscrita ?? 0, c.entrada - cache)
+  let usd = ((c.entrada - cache - escrita) * preco.entrada + cache * preco.cache + escrita * preco.entrada * 1.25 + c.saida * preco.saida) / 1_000_000
   if (c.audio) usd += (c.audio * (preco.audioToken ?? preco.entrada)) / 1_000_000
   if (c.audioSeg) usd += (c.audioSeg / 60) * (preco.audioMinuto ?? 0)
   return usd

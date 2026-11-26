@@ -59,6 +59,11 @@ await caso('modelo escolhido recusado (ex.: gpt-4.1-nano, desligado): grava que 
   ia.recusarModelos.delete('gpt-4.1-nano')
 })
 
+await caso('pura: escrita no cache da Anthropic cobrada a 1,25x da entrada', async () => {
+  // 1000 escritos x 2,00 x 1,25 = 2500; 1000 lidos x 0,10 = 100; 1000 cheios x 2,00 = 2000; total 4600 por milhão
+  assert.equal(P.custoUsd([{ tarefa: 'interpretacao', modelo: 'claude-sonnet-5-5', entrada: 3000, saida: 0, cache: 1000, cacheEscrita: 1000 }]), 0.0046)
+})
+
 await caso('banco sem a migration (coluna não existe): a mensagem é gravada como antes, sem quebrar', async () => {
   novo()
   E.recusarColuna = 'custo_usd'

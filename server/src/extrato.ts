@@ -10,6 +10,7 @@
  * Regra de igualdade (a de sempre): mesma data, mesmo valor, mesmo sentido. Transferência anotada casa com saída ou entrada do extrato.
  */
 import type { Transacao } from './midia.ts'
+import { temNumeroDeValor } from './numeros.ts'
 
 export interface Anotado {
   data: string
@@ -44,13 +45,21 @@ export function cruzar(ts: Transacao[], ja: Anotado[], hoje: string): { anotadas
   return { anotadas, faltam }
 }
 
-/** A pessoa quer saber o que já está anotado ou o que falta ("quais desses já foram lançados?", "tem algum faltando?"). */
+/**
+ * A pessoa quer saber o que já está anotado ou o que falta ("quais desses já foram lançados?", "tem algum faltando?").
+ * Só PERGUNTA conta (tem "?" ou começa como pergunta): "anotado", "não, já anotei" e "paguei 120 de luz, tá anotado?" são outra coisa. Texto com
+ * valor próprio só conta se fala "desses/deles" ("quais desses 3 já foram?"): "já anotei o aluguel, agora anota 50 de luz" é um lançamento.
+ */
 export function perguntaSobreAnotados(texto: string): boolean {
-  const t = texto.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  const t = texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+  const doExtrato = /\b(desses|dessas|deles|delas|disso|daqui|extrato|esse print|nesse print)\b/.test(t)
+  if (temNumeroDeValor(t) && !doExtrato) return false
+  const ehPergunta = t.includes('?') || /^(quais|qual|quantos|quantas|tem|algum|alguma|confere|confira|ve|ver|verifica|sera|o que|oque|ja (foi|foram|ta|tem|esta))\b/.test(t)
+  if (!ehPergunta) return false
   if (/\b(lancad|lancou|lancei|anotad|anotou|anotei|registrad|cadastrad)/.test(t)) return true
   if (/\bja (foi|foram|ta|esta|estao|tem) (tudo|todos|todas)\b/.test(t)) return true
   // "quais", "falta", "confere" só contam quando falam DESTE extrato ("desses", "algum"): "quais contas vencem?" e "quanto falta pro limite?" são outra conversa.
-  return /\b(desses|dessas|deles|delas|disso|daqui|algum|alguma|extrato|esse print|nesse print)\b/.test(t) && /\b(falta|faltando|faltam|quais|qual|confer\w*|ja (tem|ta|esta|estao|foi|foram|entrou|entraram)|todos|tudo)\b/.test(t)
+  return (doExtrato || /\b(algum|alguma)\b/.test(t)) && /\b(falta|faltando|faltam|quais|qual|confer\w*|ja (tem|ta|esta|estao|foi|foram|entrou|entraram)|todos|tudo)\b/.test(t)
 }
 
 const MAX_LINHAS = 8
@@ -90,18 +99,30 @@ export function falarDoExtrato(p: { ts: Transacao[]; anotadas: Transacao[]; falt
   return { texto: partes.join('\n\n'), pergunta: true }
 }
 
-const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[.!,?;:]+/g, ' ').replace(/\s+/g, ' ').trim()
+/** Sem acento, sem emoji, sem pontuação, minúsculo: "Sim 👍!" vira "sim". */
+const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, ' ').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()
 
-/** "Sim" curto para anotar o extrato ou a fatura. Frase com valor ou comprida ("anota 50 de gás") é outro assunto e não importa nada. */
+/** Palavras de quem só está dizendo sim, sem trazer assunto novo. "anota o gás" tem "gás": não é sim. */
+const VOCAB_SIM = new Set(('sim s ss pode podes anota anote anotar anotai lanca lance lancar importa importe importar quero bora beleza blz ok okay isso mesmo exato manda mandar ver claro fechou ' +
+  'faz fazer vai ai tudo todos todas esses essas eles elas os as pra mim por favor pfv obrigado obrigada valeu perfeito certo e la sim pode tambem com certeza agora').split(' '))
+const COMECA_SIM = /^(si+m+|s+|pode|anota|anote|anotar|lanca|lance|importa|importe|quero|bora|beleza|blz|ok|okay|isso|manda|claro|fechou|faz|vai|perfeito|certo|exato)$/
+const VOCAB_NAO = new Set(('nao n deixa pra la agora precisa esquece quero obrigado obrigada valeu por enquanto nem ja anotei anotado tenho fiz isso tudo bem nada nao').split(' '))
+const COMECA_NAO = /^(na+o+|n|deixa|esquece|nem|agora)$/
+
+/** "Sim" para anotar o extrato ou a fatura, do jeito que se fala ("Sim 👍", "sim, pode importar", "pode anotar todos por favor"). Sem número, sem assunto novo. */
 export function simParaAnotar(texto: string): boolean {
   const t = norm(texto)
-  if (!t || /\d/.test(t) || t.split(' ').length > 4) return false
-  return /^(sim|s|ss|pode|importa|anota|anote|lanca|quero|bora|beleza|blz|ok|isso|manda|claro|fechou|pode sim|sim pode|pode anotar|anota sim|anota ai|anota tudo|pode lancar|manda ver|faz isso|vai)( (ai|sim|tudo|todos|todas|esses|essas|eles|elas|pra mim|por favor|pfv))*$/.test(t)
+  if (!t || /\d/.test(t)) return false
+  const p = t.split(' ')
+  return p.length <= 8 && COMECA_SIM.test(p[0]) && !p.includes('nao') && p.every((w) => VOCAB_SIM.has(w) || /^si+m+$/.test(w))
 }
 
-/** "Não" curto para o extrato ou a fatura. */
+/** "Não" para o extrato ou a fatura ("não precisa não", "Não 👎", "não, já anotei", "agora não"). */
 export function naoParaAnotar(texto: string): boolean {
   const t = norm(texto)
-  if (!t || t.split(' ').length > 5) return false
-  return /^(nao|n|deixa|deixa pra la|agora nao|nao precisa|esquece|nao quero|nao obrigado|nao obrigada|nem)( (por enquanto|agora|valeu|obrigado|obrigada))*$/.test(t)
+  if (!t || /\d/.test(t)) return false
+  const p = t.split(' ')
+  if (p.length > 8 || !COMECA_NAO.test(p[0]) || !p.every((w) => VOCAB_NAO.has(w) || /^na+o+$/.test(w))) return false
+  // "agora" sozinho ou "agora sim" não é não.
+  return p[0] !== 'agora' || p.includes('nao')
 }

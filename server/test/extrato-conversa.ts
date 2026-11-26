@@ -5,7 +5,7 @@
  *   npx tsx test/extrato-conversa.ts
  */
 import assert from 'node:assert/strict'
-import { caso, E, fim, lancsU1, msg, msgFoto, ia, NUM, U1 } from './_falsos.ts'
+import { acao, acoes, caso, E, fim, lancsU1, msg, msgFoto, ia, NUM, U1 } from './_falsos.ts'
 
 const X = await import('../src/extrato.ts')
 
@@ -106,6 +106,29 @@ await caso('transferência já anotada casa com a saída do extrato', async () =
   ia.documento = extrato([T('Carla Mendes', 180, 'entrada'), T('Pix Joana', 50, 'saida', '2026-11-21')])
   const r = await msgFoto('extrato.jpg')
   assert.match(r.resposta, /os 2 movimentos já tão anotados aqui, não falta nada/, r.resposta)
+})
+
+await caso('sim e não do jeito que se fala: "Sim 👍" anota, "não precisa não" recusa, "não, já anotei" recusa', async () => {
+  ia.documento = extrato()
+  await msgFoto('extrato.jpg')
+  assert.match(await msg('Sim 👍'), /anotei os 3 que faltavam/)
+  for (const t of ['não precisa não', 'não, já anotei']) {
+    E.tabelas.lancamentos = E.tabelas.lancamentos.filter((l) => l.user_id !== U1)
+    E.tabelas.conversas = []
+    await msgFoto('extrato.jpg')
+    const r = await msg(t)
+    assert.match(r, /Não anotei nada desse extrato/, t)
+    assert.equal(lancsU1().length, 0, t)
+  }
+})
+
+await caso('com o extrato esperando, "paguei 120 de luz, tá anotado?" é um lançamento, não a lista do extrato de novo', async () => {
+  ia.regras = [[/120 de luz/, acoes(acao({ valor: 120, descricao: 'Luz' }))]]
+  ia.documento = extrato()
+  await msgFoto('extrato.jpg')
+  const r = await msg('paguei 120 de luz, tá anotado?')
+  assert.doesNotMatch(r, /^Conferi o extrato/, r)
+  assert.ok(lancsU1().some((l) => Number(l.valor) === 120), 'o lançamento de 120 foi engolido')
 })
 
 await caso('"deixa" recusa sem anotar nada', async () => {

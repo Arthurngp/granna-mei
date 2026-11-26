@@ -75,12 +75,14 @@ export async function jsonAnthropic<T>(modelo: string, sistema: string, usuario:
     const corpo = sem((await r.text()).slice(0, 300), cred.chave)
     throw new ErroIA(classificarFalhaIA(r.status, corpo), `Anthropic ${r.status}: ${corpo}`, r.status)
   }
-  const j = (await r.json()) as { content?: { type: string; name?: string; input?: unknown }[]; usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number } }
+  const j = (await r.json()) as { content?: { type: string; name?: string; input?: unknown }[]; usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } }
   const uso = j.content?.find((c) => c.type === 'tool_use' && c.name === nome)
   if (!uso || typeof uso.input !== 'object' || uso.input === null) throw new ErroIA('outro', 'Anthropic não devolveu a resposta no formato pedido')
   // Na Anthropic, input_tokens NÃO inclui o que veio do cache: soma aqui, para `entrada` ser sempre o total (como na OpenAI) e `cache` a parte dele.
+  // A escrita no cache também fica fora de input_tokens e é cobrada a 1,25x: entra no total e vai à parte para o preço.
   const cache = j.usage?.cache_read_input_tokens ?? 0
-  return { dados: uso.input as T, uso: { entrada: (j.usage?.input_tokens ?? 0) + cache, saida: j.usage?.output_tokens ?? 0, ...(cache ? { cache } : {}) } }
+  const cacheEscrita = j.usage?.cache_creation_input_tokens ?? 0
+  return { dados: uso.input as T, uso: { entrada: (j.usage?.input_tokens ?? 0) + cache + cacheEscrita, saida: j.usage?.output_tokens ?? 0, ...(cache ? { cache } : {}), ...(cacheEscrita ? { cacheEscrita } : {}) } }
 }
 
 /** Chamada mínima só para saber se uma chave (e, se informado, o modelo) da Anthropic funciona. Mesmo contrato de chamadaMinimaIA. */

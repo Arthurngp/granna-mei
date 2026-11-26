@@ -1082,8 +1082,13 @@ const extratoDe = (p: unknown) => {
 
 /** O que já está anotado desde a data mais antiga do extrato, para conferir (extrato.ts). */
 async function anotadosDesde(userId: string, ts: Transacao[], hoje: string): Promise<Anotado[]> {
-  const desde = ts.map((t) => dataDe(t, hoje)).sort()[0] ?? hoje
-  const { data, error } = await sb.from('lancamentos').select('data,valor,tipo').eq('user_id', userId).gte('data', desde)
+  // A data mais antiga vem da leitura da imagem (que a pessoa controla): no máximo 400 dias para trás, e só os valores que estão no extrato. Sem
+  // isso um extrato com data de 2000 puxava o histórico inteiro, a lista voltava cortada pelo teto do banco e o "sim" importava em dobro.
+  const piso = new Date(new Date(`${hoje}T12:00:00Z`).getTime() - 400 * 86_400_000).toISOString().slice(0, 10)
+  const datas = ts.map((t) => dataDe(t, hoje)).sort()
+  const desde = (datas[0] ?? hoje) < piso ? piso : (datas[0] ?? hoje)
+  const valores = [...new Set(ts.map((t) => String(Math.round(Number(t.valor) * 100) / 100)))]
+  const { data, error } = await sb.from('lancamentos').select('data,valor,tipo').eq('user_id', userId).gte('data', desde).lte('data', datas[datas.length - 1] ?? hoje).in('valor', valores)
   falhou(error, 'extrato: o que já está anotado')
   return (data ?? []) as Anotado[]
 }

@@ -90,6 +90,8 @@ export interface Uso {
   audioSeg?: number
   /** Parte da entrada que o provedor leu do cache de prompt (mais barata). Já está DENTRO de `entrada`. */
   cache?: number
+  /** Parte da entrada que foi ESCRITA no cache (Anthropic, cobrada a 1,25x). Já está DENTRO de `entrada`. */
+  cacheEscrita?: number
   /** Cada chamada feita de verdade: o modelo que RODOU (não o configurado), e o pedido quando caiu no reserva. É o que o custo por modelo usa. */
   chamadas?: ChamadaIA[]
 }
@@ -103,6 +105,7 @@ export interface ChamadaIA {
   entrada: number
   saida: number
   cache?: number
+  cacheEscrita?: number
   audio?: number
   audioSeg?: number
 }
@@ -112,6 +115,7 @@ function comChamada(uso: Uso, tarefa: string, modelo: string, pedido?: string): 
   const c: ChamadaIA = { tarefa, modelo, entrada: uso.entrada, saida: uso.saida }
   if (pedido) c.pedido = pedido
   if (uso.cache) c.cache = uso.cache
+  if (uso.cacheEscrita) c.cacheEscrita = uso.cacheEscrita
   if (uso.audio) c.audio = uso.audio
   if (uso.audioSeg) c.audioSeg = uso.audioSeg
   return { ...uso, chamadas: [c] }

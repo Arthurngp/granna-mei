@@ -158,6 +158,15 @@ await caso('número que não é cliente: nem lida nem digitando (ele recebe sil�
   assert.ok(!os().some((x) => x.startsWith('lida') || x === 'digitando'), 'mandou sinal para quem não é cliente: ' + os())
 })
 
+await caso('id de mensagem fora do formato (".", "..") não vai para a URL do gateway: nada de lida nem reação, a resposta sai', async () => {
+  ia.regras = [[/gasolina/, GASOLINA]]
+  await postar(evento('gastei 50 de gasolina', '..'))
+  await esperar(() => envios.length > 0)
+  await dorme(100)
+  assert.ok(!os().some((x) => x.startsWith('lida') || x.startsWith('reacao')), 'mandou sinal com id inválido: ' + os())
+  assert.equal(envios.length, 1)
+})
+
 await caso('GRANNINHA_SINAIS=off: nenhum sinal, a resposta sai igual', async () => {
   process.env.GRANNINHA_SINAIS = 'off'
   ia.regras = [[/gasolina/, GASOLINA]]

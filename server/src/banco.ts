@@ -176,8 +176,11 @@ export async function silenciarLembretes(userId: string) {
 /** Uso do mês: mensagens que viraram lançamento e mídias (áudio, foto, PDF) recebidas. */
 export async function usoDoMes(userId: string, inicioMes: string) {
   const base = () => sb.from('mensagens').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('criado_em', inicioMes)
-  const [l, m] = await Promise.all([base().eq('status', 'ok'), base().in('tipo', ['audio', 'foto', 'pdf'])])
+  // Mensagem juntada pela espera de 10 s (rajada.ts) fica 'ignorada' com "juntada em <id>": conta como contava antes da espera existir, senão
+  // 15 mensagens numa rajada valeriam 1 no limite.
+  const [l, j, m] = await Promise.all([base().eq('status', 'ok'), base().eq('status', 'ignorada').like('erro', 'juntada em %'), base().in('tipo', ['audio', 'foto', 'pdf'])])
   falhou(l.error, 'uso')
+  falhou(j.error, 'uso')
   falhou(m.error, 'uso')
-  return { lancamentos: l.count ?? 0, midias: m.count ?? 0 }
+  return { lancamentos: (l.count ?? 0) + (j.count ?? 0), midias: m.count ?? 0 }
 }
