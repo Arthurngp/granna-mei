@@ -74,11 +74,11 @@ await caso('extrato que diz o banco e bate com UMA conta: não pergunta qual, e 
   E.tabelas.carteiras.push({ user_id: 'u-1', id: 'itau', nome: 'Itaú', tipo: 'banco', saldo_inicial: 0, padrao: false, fechamento: null, vencimento: null, conta_pagamento_id: null })
   ia.documento = extrato('Itaú Unibanco')
   const r = await msgFoto('extrato.jpg')
-  assert.match(r.resposta, /Achei 2 lançamentos nesse extrato do Itaú:/)
-  assert.match(r.resposta, /Quer que eu importe no Itaú\? Responda SIM ou NÃO\./)
+  assert.match(r.resposta, /Conferi o extrato do Itaú: 2 movimentos/)
+  assert.match(r.resposta, /Quer que eu anote os dois\?$/)
   assert.equal(pendente()?.carteira, 'itau')
   const s = await msg('sim')
-  assert.match(s, /Importei 2 lançamentos/)
+  assert.match(s, /anotei os 2 que faltavam/)
   assert.ok(lancsU1().every((l) => l.carteira_id === 'itau'), 'importou em outra conta')
   assert.equal(saldoNoBanco('itau'), 83.6)
 })
@@ -89,7 +89,7 @@ await caso('extrato sem banco (ou de banco que ela não tem) com dois bancos: pe
     E.tabelas.conversas = []
     ia.documento = extrato(banco)
     const r = await msgFoto('extrato.jpg')
-    assert.match(r.resposta, /Responda com o número da conta deste extrato, ou NÃO:/, String(banco))
+    assert.match(r.resposta, /Só me diz de qual conta é esse extrato:/, String(banco))
     assert.ok(!pendente()?.carteira)
   }
 })

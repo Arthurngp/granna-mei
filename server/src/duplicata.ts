@@ -78,7 +78,7 @@ export function pareceReenvio(origemNova: string, origemAntiga: string | null | 
 
 export function perguntaReenvio(a: LancAntigo, ctx: Contexto, minutos: number): string {
   const quando = minutos < 1 ? 'agora mesmo' : `há ${minutos} ${minutos === 1 ? 'minuto' : 'minutos'}`
-  return `Já anotei ${quando}: ${descreverAntigo(a, ctx)}. É o mesmo?\n\n1. Sim, é o mesmo (não anoto de novo)\n2. Não, é outro lançamento\n\nResponda com o número.`
+  return `Já anotei ${quando}: ${descreverAntigo(a, ctx)}. É o mesmo?\n\n1. Sim, é o mesmo (não anoto de novo)\n2. Não, é outro lançamento\n\nMe manda o número.`
 }
 
 const nomeCat = (ctx: Contexto, id: string | null) => ctx.categorias.find((c) => c.id === id)?.nome ?? 'Sem categoria'
@@ -92,7 +92,7 @@ export function descreverNovo(n: Acao, ctx: Contexto): string {
 }
 
 export function perguntaDuplicata(a: LancAntigo, ctx: Contexto): string {
-  return `Você acabou de lançar ${descreverAntigo(a, ctx)}. Esse novo é o mesmo?\n\n1. Sim, corrigir o anterior\n2. Não, é outro lançamento\n\nResponda com o número.`
+  return `Você acabou de lançar ${descreverAntigo(a, ctx)}. Esse novo é o mesmo?\n\n1. Sim, corrigir o anterior\n2. Não, é outro lançamento\n\nMe manda o número.`
 }
 
 /** Linhas "Antes / Agora" que mostram exatamente o que mudou numa correção. Vazio se não for um para um. */

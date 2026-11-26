@@ -218,9 +218,9 @@ await caso('extrato importado depois do saldo, na mesma conta: o saldo de hoje c
     transacoes: [{ descricao: 'Cliente Ana', valor: 300, movimento: 'entrada', data: HOJE }, { descricao: 'Mercado', valor: 80, movimento: 'saida', data: HOJE }],
   }
   const e = await foto('extrato.jpg')
-  assert.match(e, /Achei 2 lançamentos nesse extrato do Nubank/)
+  assert.match(e, /Conferi o extrato do Nubank: 2 movimentos/)
   const s = await fala('sim')
-  assert.match(s, /Importei 2 lançamentos/)
+  assert.match(s, /anotei os 2 que faltavam/)
   assert.equal(lancs().length, 2)
   assert.equal(saldoDe('banco'), 1000, 'o histórico do extrato somou em cima do saldo de hoje')
   assert.match(s, /Usa mais algum banco/, 'a configuração segue depois do extrato')
@@ -266,7 +266,7 @@ await caso('banco que não é conhecido: confirma antes de virar conta; SIM cria
   semearNova()
   await confirmar()
   await fala('4')
-  assert.match(await fala('Cooperativa Rural'), /^Seu banco se chama Cooperativa Rural\? Responde SIM, ou me diz o nome certo\./)
+  assert.match(await fala('Cooperativa Rural'), /^Seu banco se chama Cooperativa Rural\? É isso, ou o nome é outro\?/)
   assert.equal(carteiras().find((c) => c.id === 'banco')?.nome, 'Conta do banco', 'virou conta antes de confirmar')
   assert.match(await fala('Coop Sertão'), /^Seu banco se chama Coop Sertão\?/)
   assert.match(await fala('sim'), /^E quanto tem no Coop Sertão hoje\?/)
@@ -287,9 +287,9 @@ await caso('extrato ANTES do saldo (na etapa do banco): o saldo de hoje vem do e
     transacoes: [{ descricao: 'Cliente Ana', valor: 180, movimento: 'entrada', data: HOJE }, { descricao: 'Atacadão', valor: 96.4, movimento: 'saida', data: HOJE }],
   }
   const e = await foto('extrato.jpg')
-  assert.match(e, /Achei 2 lançamentos nesse extrato/)
+  assert.match(e, /Conferi o extrato.*: 2 movimentos/)
   const s = await fala('sim')
-  assert.match(s, /Importei 2 lançamentos/)
+  assert.match(s, /anotei os 2 que faltavam/)
   assert.equal(saldoDe('banco'), 842.3, 'o saldo de hoje não é o do extrato')
   assert.equal(carteiras().find((c) => c.id === 'banco')?.nome, 'Inter')
   assert.equal(estado()?.etapa, 'mais_banco')
@@ -321,7 +321,7 @@ await caso('extrato na etapa do saldo e depois o valor dito: vale o do extrato, 
     transacoes: [{ descricao: 'Mercado', valor: 50, movimento: 'saida', data: HOJE }, { descricao: 'Cliente Rui', valor: 120, movimento: 'entrada', data: HOJE }],
   }
   const fx = await foto('extrato.jpg')
-  assert.match(fx, /Achei 2 lançamentos nesse extrato do Nubank/)
+  assert.match(fx, /Conferi o extrato do Nubank: 2 movimentos/)
   await fala('sim')
   assert.equal(saldoDe('banco'), 500)
   // Já foi para "mais algum banco?"; se mesmo assim disser um valor, nada muda (é resposta de outra coisa) e o saldo segue o do extrato.

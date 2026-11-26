@@ -7,12 +7,12 @@ import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { E, acao, acoes, ia, lancsU1, NUM, pedidos, semear, U1 } from './_falsos.ts'
+import { E, acao, acoes, ia, lancsU1, NUM, pedidos, semear } from './_falsos.ts'
 
 /* ---------------- gateway falso (conta envios e pode recusar) ---------------- */
 
 const envios: { para: string; texto: string }[] = []
-let recusar: { status: number; vezes: number } | null = null
+const recusar = null as { status: number; vezes: number } | null
 let tentativas = 0
 
 const wa = createServer(async (req, res) => {

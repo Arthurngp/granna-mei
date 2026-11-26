@@ -19,6 +19,7 @@ import { executar, reverter, ultimaComEfeito, ultimaMensagem, type Efeitos, type
 import { baixarMidia } from './gateway.ts'
 import { BOLETO, conferir, interpretar, NEGOCIO, opcaoEscolhida, PESSOAL, type Acao, type Contexto, type Opcao } from './interpretar.ts'
 import { lerDocumento, textoDoDocumento, type Transacao } from './midia.ts'
+import { cruzar as cruzarExtrato, dataDe, falarDoExtrato, naoParaAnotar, perguntaSobreAnotados, simParaAnotar, type Anotado } from './extrato.ts'
 import { transcrever, type Uso } from './openai.ts'
 import { responderPergunta } from './perguntas.ts'
 import { carregarBase } from './base.ts'
@@ -598,23 +599,23 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
       const total = leitura.transacoes.reduce((a, t) => a + t.valor, 0)
       const opcoes = cartoes.map((c) => ({ id: c.id, nome: c.nome }))
       const venc = leitura.vencimento && /^\d{4}-\d{2}-\d{2}$/.test(leitura.vencimento) ? leitura.vencimento : null
-      const perguntaFatura = `Achei ${leitura.transacoes.length} compras nessa fatura, somando ${brl(total)}${venc ? ` (vence ${venc.split('-').reverse().slice(0, 2).join('/')})` : ''}.\n\n${opcoes.length === 1 ? `Quer que eu importe no ${opcoes[0].nome}? Responda SIM ou NÃO.` : `Quer que eu importe? Responda com o número do cartão, ou NÃO:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`}`
+      const perguntaFatura = `Li a fatura: ${leitura.transacoes.length === 1 ? '1 compra' : `${leitura.transacoes.length} compras`}, somando ${brl(total)}${venc ? `, com vencimento em ${venc.split('-').reverse().slice(0, 2).join('/')}` : ''}.\n\n${opcoes.length === 1 ? `Quer que eu anote no ${opcoes[0].nome}?` : `Quer que eu anote? Só me diz em qual cartão:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`}`
       await guardar({ tipo: 'importar_fatura', transacoes: leitura.transacoes, anexo, opcoes, vencimento: venc, pergunta: perguntaFatura })
       return { status: 'pergunta', resposta: perguntaFatura, efeitos: {}, intencao: 'fatura', texto: leitura.resumo, tokens }
     }
     if (leitura.tipo === 'extrato' && leitura.transacoes.length > 1) {
-      const ent = leitura.transacoes.filter((t) => t.movimento === 'entrada').reduce((a, t) => a + t.valor, 0)
-      const sai = leitura.transacoes.filter((t) => t.movimento === 'saida').reduce((a, t) => a + t.valor, 0)
       const bancos = (await contextoDe(cliente.id, hoje)).carteiras.filter((c) => c.tipo === 'banco')
       // O extrato diz de que banco é e ele bate com UMA conta da pessoa: é dessa, sem perguntar qual.
       const doBanco = carteiraDoBanco(leitura.banco, bancos)
       const opcoes = !doBanco && bancos.length > 1 ? bancos.map((c) => ({ id: c.id, nome: c.nome })) : undefined
-      const perguntaExtrato = `Achei ${leitura.transacoes.length} lançamentos nesse extrato${doBanco ? ` do ${doBanco.nome}` : ''}: ${brl(ent)} de entradas e ${brl(sai)} de saídas.\n\n` + (opcoes
-          ? `Quer que eu importe? Responda com o número da conta deste extrato, ou NÃO:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`
-          : doBanco ? `Quer que eu importe no ${doBanco.nome}? Responda SIM ou NÃO.` : 'Quer que eu importe? Responda SIM ou NÃO.')
-      await guardar({ tipo: 'importar', transacoes: leitura.transacoes, anexo, opcoes, carteira: doBanco?.id, pergunta: perguntaExtrato, saldoExtrato: leitura.saldo ?? null, bancoExtrato: leitura.banco ?? null })
-      return { status: 'pergunta', resposta: perguntaExtrato, efeitos: {}, intencao: 'extrato', texto: leitura.resumo, tokens }
+      // Confere com o que já está anotado antes de falar (extrato.ts): a pessoa quer saber o que falta, e a importação anota só isso.
+      const { anotadas, faltam } = cruzarExtrato(leitura.transacoes, await anotadosDesde(cliente.id, leitura.transacoes, hoje), hoje)
+      const fala = falarDoExtrato({ ts: leitura.transacoes, anotadas, faltam, banco: doBanco?.nome, perguntou: perguntaSobreAnotados(d.caption ?? ''), opcoes, hoje })
+      if (!fala.pergunta) return { status: 'ok', resposta: fala.texto, efeitos: {}, intencao: 'extrato', texto: leitura.resumo, tokens }
+      await guardar({ tipo: 'importar', transacoes: leitura.transacoes, anexo, opcoes, carteira: doBanco?.id, banco: doBanco?.nome, pergunta: fala.texto, saldoExtrato: leitura.saldo ?? null, bancoExtrato: leitura.banco ?? null })
+      return { status: 'pergunta', resposta: fala.texto, efeitos: {}, intencao: 'extrato', texto: leitura.resumo, tokens }
     }
+
     // Comprovante: cruza o banco de origem e o de destino com as contas do cliente. Entre duas contas dele é transferência (não é entrada nem saída);
     // só a origem dele é saída dessa conta; só o destino dele é entrada nessa conta. Sem reconhecer nenhuma, segue como antes.
     if (leitura.tipo === 'comprovante') {
@@ -794,30 +795,42 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
   }
 
   if (pend?.tipo === 'importar_fatura' && fresco) {
-    if (/^\s*(n[ãa]o|nao|n|sim|s|pode|importa|ok|isso|manda|\d+)\b/i.test(texto) || opcaoEscolhida(texto, pend.opcoes ?? [])) saida.consumiu = true
-    if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei a fatura.', efeitos: {}, intencao: 'fatura', texto, tokens }
+    if (naoParaAnotar(texto) || simParaAnotar(texto) || /^\s*\d{1,2}\s*$/.test(texto) || opcaoEscolhida(texto, pend.opcoes ?? [])) saida.consumiu = true
+    if (naoParaAnotar(texto)) return { status: 'ok', resposta: 'Beleza, deixei a fatura quieta. Não anotei nada.', efeitos: {}, intencao: 'fatura', texto, tokens }
     const esc = opcaoEscolhida(texto, pend.opcoes ?? [])
     if (esc) return importarFatura(cliente.id, ctx, pend.transacoes ?? [], esc.id, (pend as { vencimento?: string | null }).vencimento ?? null, tipo, pend.anexo ?? null, tokens)
     // Um cartão só: o "sim" já escolhe esse cartão. Perguntar "em qual cartão?" de novo era a mesma pergunta duas vezes.
-    if (pend.opcoes?.length === 1 && /^\s*(sim|s|pode|importa|ok|isso|manda)\b/i.test(texto)) {
+    if (pend.opcoes?.length === 1 && simParaAnotar(texto)) {
       return importarFatura(cliente.id, ctx, pend.transacoes ?? [], pend.opcoes[0].id, (pend as { vencimento?: string | null }).vencimento ?? null, tipo, pend.anexo ?? null, tokens)
     }
-    if (/^\s*(sim|s|pode|importa|ok|isso|manda|\d+)\b/i.test(texto)) {
+    if (simParaAnotar(texto) || /^\s*\d{1,2}\s*$/.test(texto)) {
       await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
-      return { status: 'pergunta', resposta: `Em qual cartão? Responda com o número:\n${(pend.opcoes ?? []).map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, efeitos: {}, intencao: 'fatura', texto, tokens }
+      return { status: 'pergunta', resposta: `Anoto sim. Em qual cartão? Me manda o número:\n${(pend.opcoes ?? []).map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, efeitos: {}, intencao: 'fatura', texto, tokens }
     }
   }
   if (pend?.tipo === 'importar' && fresco) {
-    if (/^\s*(n[ãa]o|nao|n|sim|s|pode|importa|ok|isso|manda|\d+)\b/i.test(texto) || (pend.opcoes?.length && opcaoEscolhida(texto, pend.opcoes))) saida.consumiu = true
-    if (/^\s*(n[ãa]o|nao|n)\b/i.test(texto)) return { status: 'ok', resposta: 'Tudo bem, não importei nada.', efeitos: {}, intencao: 'extrato', texto, tokens }
-    if (pend.opcoes?.length) {
-      const esc = opcaoEscolhida(texto, pend.opcoes)
-      if (esc) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens, esc.id, saida.config, extratoDe(pend))
-      if (/^\s*(sim|s|pode|importa|ok|isso|manda|\d+)\b/i.test(texto)) {
-        await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
-        return { status: 'pergunta', resposta: `De qual conta é esse extrato? Responda com o número:\n${pend.opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, efeitos: {}, intencao: 'extrato', texto, tokens }
+    const ts = pend.transacoes ?? []
+    // "Quais desses já foram lançados?" depois da pergunta: responde conferindo de novo, e a pergunta de anotar continua em aberto (não é resposta dela).
+    if (perguntaSobreAnotados(texto) && !simParaAnotar(texto) && !naoParaAnotar(texto)) {
+      const { anotadas, faltam } = cruzarExtrato(ts, await anotadosDesde(cliente.id, ts, hoje), hoje)
+      const fala = falarDoExtrato({ ts, anotadas, faltam, banco: (pend as { banco?: string }).banco, perguntou: true, opcoes: pend.opcoes, hoje })
+      if (!fala.pergunta) {
+        saida.consumiu = true
+        return { status: 'ok', resposta: fala.texto, efeitos: {}, intencao: 'extrato', texto, tokens }
       }
-    } else if (/^\s*(sim|s|pode|importa|ok|isso|manda)\b/i.test(texto)) return importar(cliente.id, ctx, pend.transacoes ?? [], tipo, pend.anexo ?? null, tokens, (pend as { carteira?: string }).carteira, saida.config, extratoDe(pend))
+      await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: { ...pend, pergunta: fala.texto }, atualizado_em: new Date().toISOString() })
+      return { status: 'pergunta', resposta: fala.texto, efeitos: {}, intencao: 'extrato', texto, tokens }
+    }
+    const esc = pend.opcoes?.length ? opcaoEscolhida(texto, pend.opcoes) : null
+    if (naoParaAnotar(texto) || simParaAnotar(texto) || esc) saida.consumiu = true
+    if (naoParaAnotar(texto)) return { status: 'ok', resposta: 'Beleza, deixei quieto. Não anotei nada desse extrato.', efeitos: {}, intencao: 'extrato', texto, tokens }
+    if (pend.opcoes?.length) {
+      if (esc) return importar(cliente.id, ctx, ts, tipo, pend.anexo ?? null, tokens, esc.id, saida.config, extratoDe(pend))
+      if (simParaAnotar(texto)) {
+        await sb.from('conversas').upsert({ telefone, user_id: cliente.id, pendente: pend, atualizado_em: new Date().toISOString() })
+        return { status: 'pergunta', resposta: `Anoto sim. Só me diz de qual conta é esse extrato:\n${pend.opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, efeitos: {}, intencao: 'extrato', texto, tokens }
+      }
+    } else if (simParaAnotar(texto)) return importar(cliente.id, ctx, ts, tipo, pend.anexo ?? null, tokens, (pend as { carteira?: string }).carteira, saida.config, extratoDe(pend))
   }
   // Resposta a uma pergunta com opções: o número (ou o nome) decide no código, sem depender da IA.
   // As respostas se acumulam (ex.: "do negócio" e depois "Nubank") até o lançamento fechar.
@@ -964,7 +977,7 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
       await guardar({ tipo: 'desfazer_mais', anteriorMsg: ult.id })
       return {
         status: 'pergunta',
-        resposta: `Eu já tinha desfeito o último. O anterior é: "${ult.texto.slice(0, 80)}". Quer desfazer esse também?\n\n1. Sim, desfaz\n2. Não, para aí\n\nResponda com o número.`,
+        resposta: `Eu já tinha desfeito o último. O anterior é: "${ult.texto.slice(0, 80)}". Quer desfazer esse também?\n\n1. Sim, desfaz\n2. Não, para aí\n\nMe manda o número.`,
         efeitos: {}, intencao: 'desfazer', texto, tokens,
       }
     }
@@ -1042,7 +1055,7 @@ async function importarFatura(userId: string, ctx: Contexto, ts: Transacao[], ca
   const total = acoes.reduce((a, x) => a + (x.valor ?? 0), 0)
   return {
     status: 'ok',
-    resposta: `Importei ${acoes.length} compras no ${cartao.nome}, somando ${brl(total)}${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Elas entram nos gastos quando você pagar a fatura. Confira as categorias no painel.${await saldoDepois(userId, acoes)}\n\n${ERROU}`,
+    resposta: `Pronto, anotei ${acoes.length === 1 ? 'a compra' : `as ${acoes.length} compras`} no ${cartao.nome}, somando ${brl(total)}${pulou ? ` (${pulou === 1 ? '1 já estava aqui' : `${pulou} já estavam aqui`} e deixei de fora)` : ''}. Elas entram nos gastos quando você pagar a fatura. Se quiser ajustar alguma categoria, dá pra ver no painel.${await saldoDepois(userId, acoes)}\n\n${ERROU}`,
     efeitos: r.efeitos, intencao: 'fatura', texto: 'importar fatura', tokens,
   }
 }
@@ -1054,32 +1067,36 @@ const extratoDe = (p: unknown) => {
   return { saldo: typeof x.saldoExtrato === 'number' ? x.saldoExtrato : null, banco: typeof x.bancoExtrato === 'string' ? x.bancoExtrato : null }
 }
 
+/** O que já está anotado desde a data mais antiga do extrato, para conferir (extrato.ts). */
+async function anotadosDesde(userId: string, ts: Transacao[], hoje: string): Promise<Anotado[]> {
+  const desde = ts.map((t) => dataDe(t, hoje)).sort()[0] ?? hoje
+  const { data, error } = await sb.from('lancamentos').select('data,valor,tipo').eq('user_id', userId).gte('data', desde)
+  falhou(error, 'extrato: o que já está anotado')
+  return (data ?? []) as Anotado[]
+}
+
 async function importar(userId: string, ctx: Contexto, ts: Transacao[], tipo: Origem, anexo: string | null, tokens: Uso, carteira?: string, config?: EstadoConfig | null, extrato: { saldo: number | null; banco: string | null } = { saldo: null, banco: null }): Promise<Conversa> {
-  const { data: ja, error } = await sb.from('lancamentos').select('data,valor,tipo').eq('user_id', userId).gte('data', ts.map((t) => t.data ?? ctx.hoje).sort()[0])
-  falhou(error, 'extrato: duplicados')
-  const existe = new Set((ja ?? []).map((l) => `${l.data}|${Number(l.valor).toFixed(2)}|${l.tipo}`))
+  // Mesma conferência que a conversa mostrou (um a um): se ela disse "faltam 2", aqui entram 2.
+  const { faltam, anotadas } = cruzarExtrato(ts, await anotadosDesde(userId, ts, ctx.hoje), ctx.hoje)
   const padrao = carteira ?? ctx.carteiras.find((c) => c.tipo === 'banco' && c.padrao)?.id ?? ctx.carteiras.find((c) => c.tipo === 'banco')?.id ?? ctx.carteiras.find((c) => c.padrao)?.id ?? ctx.carteiras[0]?.id ?? ''
   const acoes: Acao[] = []
-  let pulou = 0
-  for (const t of ts) {
-    const data = t.data && /^\d{4}-\d{2}-\d{2}$/.test(t.data) && t.data <= ctx.hoje ? t.data : ctx.hoje
-    if (existe.has(`${data}|${t.valor.toFixed(2)}|${t.movimento}`)) {
-      pulou++
-      continue
-    }
+  for (const t of faltam) {
+    const data = dataDe(t, ctx.hoje)
     const base = conferir(`${t.valor.toFixed(2).replace('.', ',')}`, ctx, {
       intencao: 'acoes', pergunta: null, correcao: null, falta: null,
       acoes: [{ tipo_acao: 'lancamento', movimento: t.movimento, valor: t.valor, descricao: t.descricao, categoria_id: null, carteira_id: padrao, carteira_destino_id: null, meio: null, data, pessoal: false, vencimento: null, dia_do_mes: null, parcelas: null, conta_id: null, talvez_pessoal: false }],
     }, { perguntarMeio: false })
     acoes.push(...base.acoes)
   }
-  if (!acoes.length) return { status: 'ok', resposta: `Todos os ${ts.length} lançamentos desse extrato já estavam anotados.`, efeitos: {}, intencao: 'extrato', texto: 'importar extrato', tokens }
+  if (!acoes.length) return { status: 'ok', resposta: 'Conferi de novo e tudo desse extrato já tá anotado. Não precisei mexer em nada.', efeitos: {}, intencao: 'extrato', texto: 'importar extrato', tokens }
   const r = await executar(userId, ctx, acoes, tipo, anexo)
   // Na configuração, o saldo posto pelo print ou pelo valor dito já contém o que o extrato trouxe: corrige para não somar em dobro.
   if (config) await corrigirSaldoImportado(userId, config, r.efeitos.lancamentos ?? [], extrato)
+  const n = acoes.length
+  const feito = n === 1 ? 'Pronto, anotei o que faltava' : `Pronto, anotei os ${n} que faltavam`
   return {
     status: 'ok',
-    resposta: `Importei ${acoes.length} lançamentos${pulou ? ` (${pulou} já existiam e pulei)` : ''}. Confira as categorias no painel.${await saldoDepois(userId, acoes)}\n\n${ERROU}`,
+    resposta: `${feito}${anotadas.length === 1 ? ' (o outro já estava aqui)' : anotadas.length ? ` (os outros ${anotadas.length} já estavam aqui)` : ''}. Se quiser ajustar alguma categoria, dá pra ver no painel.${await saldoDepois(userId, acoes)}\n\n${ERROU}`,
     efeitos: r.efeitos, intencao: 'extrato', texto: 'importar extrato', tokens,
   }
 }

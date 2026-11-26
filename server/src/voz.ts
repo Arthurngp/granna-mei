@@ -87,7 +87,7 @@ export const MSG = {
         : 'Não consegui ler o valor nessa foto. Tenta mandar de mais perto, ou me diz o que foi e quanto.',
   /** O valor dito é diferente do da conta em aberto: o jeito de a pessoa escolher entre dar baixa na conta e anotar como outro lançamento. */
   baixaDiferente: (tipo: 'pagar' | 'receber', desc: string, valorConta: string, vencimento: string, valorDito: string) =>
-    `A conta de ${desc} está em ${valorConta} (vence ${vencimento}), e você disse ${valorDito}.\n1. Dar baixa na conta, ${tipo === 'receber' ? 'recebendo' : 'pagando'} ${valorDito}\n2. Anotar como ${tipo === 'receber' ? 'outro recebimento' : 'outro gasto'} e deixar a conta aberta\n\nResponda com o número.`,
+    `A conta de ${desc} está em ${valorConta} (vence ${vencimento}), e você disse ${valorDito}.\n1. Dar baixa na conta, ${tipo === 'receber' ? 'recebendo' : 'pagando'} ${valorDito}\n2. Anotar como ${tipo === 'receber' ? 'outro recebimento' : 'outro gasto'} e deixar a conta aberta\n\nMe manda o número.`,
   apagarTudo: 'Eu só desfaço o último registro: é só responder DESFAZER. Pra apagar mais de um, é pelo painel, em Lançamentos.',
   valorSozinho: (v: string) => `${v} de quê? Entrou ou saiu?`,
   /** Quem digitou este número no cadastro, não confirmou e escreveu para cá: mostra como terminar. Só sai em resposta, nunca por iniciativa nossa. */

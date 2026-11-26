@@ -82,7 +82,7 @@ const nomeCurto = (descricao: string) => {
 const linhaDaConta = (c: ContaGancho, ocultar: boolean, hoje: string) => `${c.descricao.trim()}${ocultar ? '' : `, ${brl(c.valor)}`}, ${quandoVence(c.vencimento, hoje)}`
 
 /** A pergunta de uma palavra. É a mesma na confirmação e no aviso, para a resposta ser lida do mesmo jeito. */
-export const PERGUNTA_PAGOU = 'Já pagou? Responde SIM que eu dou baixa, ou NÃO que eu deixo em aberto.'
+export const PERGUNTA_PAGOU = 'Já pagou? Me diz que eu dou baixa, ou deixo em aberto se ainda não.'
 
 /** A mensagem de confirmação do número, com o gancho. Sem emoji e sem travessão, na voz da moedinha. */
 export function textoConfirmacao(nome: string, g: Gancho, ocultar: boolean, hoje: string): string {
