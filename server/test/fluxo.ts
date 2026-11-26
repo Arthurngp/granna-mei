@@ -44,6 +44,7 @@ const gw = createServer((req, res) => {
 await new Promise<void>((ok) => gw.listen(0, ok))
 process.env.WA_GATEWAY_URL = `http://127.0.0.1:${(gw.address() as AddressInfo).port}`
 
+process.env.GRANNINHA_ESPERA_MS ??= '0' // a espera da rajada tem teste próprio (test/rajada.ts)
 const { iniciar } = await import('../src/index.ts')
 const { sb } = await import('../src/banco.ts')
 const srv = iniciar(0)
@@ -93,7 +94,7 @@ async function responderAte(de: string, conteudo: string, limite = 4) {
   let r = await mandar(de, { content: conteudo })
   diario.push(`eu: "${conteudo}" -> ela: ${trecho(r.texto)}`)
   const perguntas: string[] = []
-  for (let i = 0; i < limite && /Responda com o n[úu]mero/i.test(r.texto); i++) {
+  for (let i = 0; i < limite && /(Responda com|Me manda) o n[úu]mero/i.test(r.texto); i++) {
     perguntas.push(r.texto.split('\n')[0].slice(0, 60))
     r = await mandar(de, { content: '1' })
     diario.push(`eu: "1" -> ela: ${trecho(r.texto)}`)
@@ -201,7 +202,7 @@ try {
     const r1 = await mandar(FONE, { content: 'paguei 20 de pão' })
     // Qual pergunta ela faz aqui depende da IA (se marcar "pão" como talvez pessoal, vem a de
     // negócio/pessoal antes da conta). O que o caso prova é que o lançamento fica em aberto.
-    assert.match(r1.texto, /Responda com o n[úu]mero/i, 'ela pergunta algo e não grava ainda: ' + r1.texto.slice(0, 80))
+    assert.match(r1.texto, /(Responda com|Me manda) o n[úu]mero/i, 'ela pergunta algo e não grava ainda: ' + r1.texto.slice(0, 80))
     assert.equal((await lancs(uid)).length, n, 'nada gravado enquanto a pergunta está em aberto')
     const r2 = await mandar(FONE, { content: 'recebi 300 de uma escova no pix' })
     assert.match(r2.texto, /entrada de R\$ 300,00/)
@@ -239,7 +240,7 @@ try {
     const pediuCadastro = /ainda n[ãa]o cadastrou cart[ãa]o/i.test(r.texto)
     assert.ok(pediuCartaoOuBoleto || /R\$ 900,00|3 parcelas|parcela/i.test(r.texto), 'a resposta fala do parcelamento: ' + r.texto.slice(0, 120))
     if (pediuCadastro) return // caminho legítimo: sem cartão cadastrado, ela ensina o caminho
-    if (pediuCartaoOuBoleto && /Responda com o n[úu]mero/i.test(r.texto)) {
+    if (pediuCartaoOuBoleto && /(Responda com|Me manda) o n[úu]mero/i.test(r.texto)) {
       const op = r.texto.split('\n').find((l) => /boleto|carn[êe]/i.test(l))
       assert.ok(op, 'a lista de opções inclui boleto ou carnê: ' + r.texto)
       await mandar(FONE, { content: op!.trim().slice(0, 1) }) // responde com o número da opção
@@ -315,20 +316,20 @@ try {
     midias.set('granninha-PDF1.pdf', { buf: readFileSync(new URL('./fixtures/extrato.pdf', import.meta.url)), mime: 'application/pdf' })
     const antes = (await lancs(uid)).length
     const r1 = await mandar(FONE, { type: 'DOCUMENT', content: 'extrato.pdf', fileUrl: '/api/media/granninha-PDF1.pdf' })
-    assert.match(r1.texto, /Achei 3 lançamentos/)
+    assert.match(r1.texto, /Conferi o extrato.*: 3 movimentos/)
     assert.equal((await lancs(uid)).length, antes)
     const r2 = await mandar(FONE, { content: 'sim' })
-    assert.match(r2.texto, /Importei 3/)
+    assert.match(r2.texto, /anotei os 3 que faltavam/)
     assert.equal((await lancs(uid)).length, antes + 3)
   })
   await caso('fatura do cartão em foto: pergunta o cartão e importa as 3 compras na fatura de dezembro', async () => {
     await sb.from('carteiras').insert({ user_id: uid, id: 'cartao-nu', nome: 'Cartão Nubank', tipo: 'cartao', saldo_inicial: 0, padrao: false, fechamento: 3, vencimento: 10, conta_pagamento_id: 'banco' })
     midias.set('granninha-FAT1.png', { buf: readFileSync(new URL('./fixtures/fatura-cartao.png', import.meta.url)), mime: 'image/png' })
     const r1 = await mandar(FONE, { type: 'IMAGE', content: '', caption: '', fileUrl: '/api/media/granninha-FAT1.png' })
-    assert.match(r1.texto, /Achei 3 compras/)
+    assert.match(r1.texto, /Li a fatura: 3 compras/)
     assert.match(r1.texto, /Cartão Nubank/)
     const r2 = await mandar(FONE, { content: '1' })
-    assert.match(r2.texto, /Importei 3 compras/)
+    assert.match(r2.texto, /anotei as 3 compras/)
     const cs = (await sb.from('lancamentos').select('valor,fatura,tipo').eq('user_id', uid).eq('tipo', 'compra_cartao')).data!
     assert.equal(cs.length, 3)
     assert.ok(cs.every((c) => c.fatura === '2026-12'))
@@ -336,7 +337,7 @@ try {
   })
   await caso('a mesma fatura de novo não duplica', async () => {
     const r1 = await mandar(FONE, { type: 'IMAGE', content: '', caption: '', fileUrl: '/api/media/granninha-FAT1.png' })
-    assert.match(r1.texto, /Achei 3 compras/)
+    assert.match(r1.texto, /Li a fatura: 3 compras/)
     const r2 = await mandar(FONE, { content: '1' })
     assert.match(r2.texto, /já estavam anotadas/)
     assert.equal(((await sb.from('lancamentos').select('id').eq('user_id', uid).eq('tipo', 'compra_cartao')).data ?? []).length, 3)

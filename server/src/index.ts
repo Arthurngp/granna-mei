@@ -12,7 +12,8 @@ import { rotaAdmin } from './admin.ts'
 import { bloquearAtrasadas, rotaCobranca } from './cobranca.ts'
 import { assinaturaValida, conferirNumero, enviarTexto, statusSessao } from './gateway.ts'
 import { excluirVencidas, soltarNumerosDeExcluidas } from './excluir.ts'
-import { hojeSP, marcarColunaEventoFaltando, processar, registrarChegada, semColunaEvento, type EventoGateway } from './granninha.ts'
+import { agrupar, ESPERA_MAX_MS, esperaMs, RAJADA_MAX } from './rajada.ts'
+import { hojeSP, marcarColunaEventoFaltando, NA_FILA, processar, registrarChegada, semColunaEvento, type EventoGateway } from './granninha.ts'
 import { clientePorNumero } from './banco.ts'
 import { PISO_MS, varrerPresas, varrerRetomarIA, type Presa } from './presas.ts'
 import { estadoIA, MARCA_RETOMAR } from './ia-estado.ts'
@@ -44,6 +45,60 @@ function enfileirar(chave: string, tarefa: () => Promise<void>) {
     if (filas.get(chave) === proxima) filas.delete(chave)
   })
   filas.set(chave, proxima)
+}
+
+/**
+ * Rajadas em espera, uma por número (rajada.ts). Cada mensagem nova reinicia o relógio; quando a pessoa para de escrever por
+ * esperaMs(), a rajada vai para a fila do número e é atendida de uma vez. As linhas seguem gravadas como 'na fila' no banco e
+ * protegidas pelo emVoo: se o processo morrer no meio da espera, a varredura (presas.ts) atende cada uma sozinha, nenhuma se perde.
+ */
+const rajadas = new Map<string, { eventos: EventoGateway[]; timer: ReturnType<typeof setTimeout>; desde: number }>()
+function esperarRajada(chave: string, ev: EventoGateway) {
+  const r = rajadas.get(chave) ?? { eventos: [], timer: undefined as unknown as ReturnType<typeof setTimeout>, desde: Date.now() }
+  clearTimeout(r.timer)
+  r.eventos.push(ev)
+  rajadas.set(chave, r)
+  const espera = Math.min(esperaMs(), Math.max(0, r.desde + ESPERA_MAX_MS - Date.now()))
+  if (r.eventos.length >= RAJADA_MAX || espera === 0) return soltarRajada(chave)
+  r.timer = setTimeout(() => soltarRajada(chave), espera)
+}
+function soltarRajada(chave: string) {
+  const r = rajadas.get(chave)
+  if (!r) return
+  clearTimeout(r.timer)
+  rajadas.delete(chave)
+  for (const u of agrupar(r.eventos)) {
+    enfileirar(chave, async () => {
+      const ids = [u.ev.data?.key?.id, ...u.juntadas].filter(Boolean) as string[]
+      try {
+        // As mensagens juntadas saem de 'recebida' antes de a principal começar: a varredura nunca as atende sozinhas depois.
+        // Se a marcação falhar (ou pegar menos linhas), atende cada mensagem sozinha, como antes da espera: juntar sem marcar deixaria as
+        // outras 'na fila', e a varredura as atenderia de novo minutos depois (lançamento em dobro).
+        let fila: EventoGateway[] = [u.ev]
+        if (u.juntadas.length) {
+          const j = await sb.from('mensagens').update({ status: 'ignorada', erro: `juntada em ${u.ev.data?.key?.id ?? '?'}`, resposta: '' })
+            .in('id', u.juntadas).eq('status', 'recebida').eq('erro', NA_FILA).select('id')
+          if (j.error || (j.data?.length ?? 0) !== u.juntadas.length) {
+            console.error('[rajada] não marquei as juntadas, atendendo uma a uma:', j.error?.message ?? `${j.data?.length ?? 0} de ${u.juntadas.length}`)
+            // As que chegaram a ser marcadas voltam para 'na fila', senão o processar não as pega e elas sumiriam.
+            const marcadas = (j.data ?? []).map((x) => x.id as string)
+            if (marcadas.length) await sb.from('mensagens').update({ status: 'recebida', erro: NA_FILA }).in('id', marcadas)
+            fila = u.originais
+          }
+        }
+        for (const ev of fila) {
+          const res = await processar(ev, { jaRegistrada: true })
+          if (res.status !== 'ignorada' || res.resposta) ultimaMensagem = new Date().toISOString()
+          if (res.para && res.resposta) await entregar(res.para, res.resposta, res.msgId)
+        }
+      } catch (e) {
+        erros++
+        console.error('[webhook]', (e as Error).message)
+      } finally {
+        for (const id of ids) emVoo.delete(id)
+      }
+    })
+  }
 }
 
 /**
@@ -194,18 +249,7 @@ export function iniciar(porta = PORTA) {
         const chave = (ev.data?.from ?? ev.data?.key?.remoteJid ?? 'x').split('@')[0]
         const idEmVoo = ev.data?.key?.id
         if (idEmVoo) emVoo.add(idEmVoo)
-        enfileirar(chave, async () => {
-          try {
-            const r = await processar(ev, { jaRegistrada: true })
-            if (r.status !== 'ignorada' || r.resposta) ultimaMensagem = new Date().toISOString()
-            if (r.para && r.resposta) await entregar(r.para, r.resposta, r.msgId)
-          } catch (e) {
-            erros++
-            console.error('[webhook]', (e as Error).message)
-          } finally {
-            if (idEmVoo) emVoo.delete(idEmVoo)
-          }
-        })
+        esperarRajada(chave, ev)
         return
       }
       if (req.method === 'GET' && url.pathname === '/saude') {

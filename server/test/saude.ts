@@ -21,6 +21,7 @@ process.env.WEBHOOK_SEGREDO = 'falso'
 process.env.SEM_BATIMENTO = '1' // nada de batimento nem de varredura de exclusão no teste
 process.env.SAUDE_CHAVE = 'chave-de-teste'
 
+process.env.GRANNINHA_ESPERA_MS ??= '0' // a espera da rajada tem teste próprio (test/rajada.ts)
 const { iniciar } = await import('../src/index.ts')
 const srv = iniciar(0)
 await new Promise<void>((ok) => srv.once('listening', ok))

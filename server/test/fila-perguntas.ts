@@ -248,7 +248,7 @@ await caso('extrato chega com uma pergunta em aberto: a pergunta vai para a fila
     transacoes: [{ descricao: 'Cliente Ana', valor: 300, movimento: 'entrada', data: null }, { descricao: 'Mercado', valor: 80, movimento: 'saida', data: null }],
   }
   const e = await msgFoto('extrato.jpg')
-  assert.match(e.resposta, /Achei 2 lançamentos nesse extrato/)
+  assert.match(e.resposta, /Conferi o extrato.*: 2 movimentos/)
   assert.equal(pendente()?.fila?.length, 1)
   const s = await msg('sim')
   assert.match(s, /E ficou esse aqui esperando:\nGás de R\$ [\d,]+: é gasto do negócio ou da casa\?/, s)

@@ -51,6 +51,7 @@ process.env.SEM_BATIMENTO = '1' // a varredura é chamada à mão em cada caso
 process.env.ENVIO_ESPERA_MS = '0'
 process.env.PRESAS_PISO_MS = '1000'
 process.env.PRESAS_TETO_MS = '5000'
+process.env.GRANNINHA_ESPERA_MS = '0' // a espera da rajada tem teste próprio (test/rajada.ts)
 
 const { iniciar, varredura } = await import('../src/index.ts')
 const { varrerPresas, varrerRetomarIA, decidir, AVISO_INTERROMPIDA } = await import('../src/presas.ts')

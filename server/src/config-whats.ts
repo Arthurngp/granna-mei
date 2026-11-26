@@ -101,8 +101,8 @@ export function pergunta(e: EstadoConfig, nomeConta?: string): string {
     case 'mais_banco': return 'Usa mais algum banco, ou guarda dinheiro em espécie? Me diz qual, ou NÃO.'
     case 'cartao': return 'Usa cartão de crédito? Me diz de qual banco e o dia que a fatura vence, tipo: Nubank dia 10. Se não usa, responde NÃO.'
     case 'cartao_dia': return `Que dia vence a fatura do ${e.cartao ?? 'cartão'}? Me manda só o número do dia, tipo 10.`
-    case 'banco_confirma': return `Seu banco se chama ${e.bancoNome ?? 'assim'}? Responde SIM, ou me diz o nome certo.`
-    case 'das': return `Quer que eu já guarde o DAS do MEI, de ${real(DAS.valor)}, todo dia ${DAS.dia}? Responde SIM ou NÃO.`
+    case 'banco_confirma': return `Seu banco se chama ${e.bancoNome ?? 'assim'}? É isso, ou o nome é outro?`
+    case 'das': return `Quer que eu já guarde o DAS do MEI, de ${real(DAS.valor)}, todo dia ${DAS.dia}?`
     case 'fixas': return 'Última: quais contas chegam todo mês? Me manda uma de cada vez, tipo: aluguel 900 dia 10. Quando acabar, responde PRONTO.'
     case 'fim': return ''
   }

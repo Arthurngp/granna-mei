@@ -240,11 +240,11 @@ await caso('fatura com UM cartão: uma pergunta só, e o "sim" já importa nesse
   ia.documento = FATURA
   const a = await msgPdf('fatura.pdf')
   assert.equal(a.status, 'pergunta')
-  assert.match(a.resposta, /Achei 3 compras nessa fatura, somando R\$ 489,70 \(vence 10\/12\)\./)
-  assert.match(a.resposta, /Quer que eu importe no Cartão Inter\? Responda SIM ou NÃO\./)
+  assert.match(a.resposta, /Li a fatura: 3 compras, somando R\$ 489,70, com vencimento em 10\/12\./)
+  assert.match(a.resposta, /Quer que eu anote no Cartão Inter\?$/)
   assert.doesNotMatch(a.resposta, /número do cartão/, 'com um cartão só não pede número')
   const b = await msg('sim')
-  assert.match(b, /Importei 3 compras no Cartão Inter, somando R\$ 489,70/, b)
+  assert.match(b, /Pronto, anotei as 3 compras no Cartão Inter, somando R\$ 489,70/, b)
   assert.doesNotMatch(b, /Em qual cartão/)
   assert.equal(lancsU1().filter((l) => l.tipo === 'compra_cartao').length, 3)
 })
@@ -252,21 +252,21 @@ await caso('fatura com UM cartão: uma pergunta só, e o "sim" já importa nesse
 await caso('fatura com um cartão: "não" não importa nada, e o número "1" também continua valendo', async () => {
   ia.documento = FATURA
   await msgPdf('fatura.pdf')
-  assert.match(await msg('não'), /Tudo bem, não importei a fatura/)
+  assert.match(await msg('não'), /Beleza, deixei a fatura quieta/)
   assert.equal(lancsU1().length, 0)
   await msgPdf('fatura.pdf')
-  assert.match(await msg('1'), /Importei 3 compras no Cartão Inter/)
+  assert.match(await msg('1'), /anotei as 3 compras no Cartão Inter/)
 })
 
 await caso('fatura com DOIS cartões: pergunta o número, e o "sim" ainda pergunta qual', async () => {
   E.tabelas.carteiras.push({ user_id: U1, id: 'cartao2', nome: 'Nubank Cartão', tipo: 'cartao', saldo_inicial: 0, padrao: false, fechamento: 5, vencimento: 12, conta_pagamento_id: 'nubank' })
   ia.documento = FATURA
   const a = await msgPdf('fatura.pdf')
-  assert.match(a.resposta, /Responda com o número do cartão, ou NÃO:\n1\. Cartão Inter\n2\. Nubank Cartão/, a.resposta)
+  assert.match(a.resposta, /Quer que eu anote\? Só me diz em qual cartão:\n1\. Cartão Inter\n2\. Nubank Cartão/, a.resposta)
   const b = await msg('sim')
-  assert.match(b, /Em qual cartão\? Responda com o número:\n1\. Cartão Inter\n2\. Nubank Cartão/, b)
+  assert.match(b, /Em qual cartão\? Me manda o número:\n1\. Cartão Inter\n2\. Nubank Cartão/, b)
   const c = await msg('2')
-  assert.match(c, /Importei 3 compras no Nubank Cartão/, c)
+  assert.match(c, /anotei as 3 compras no Nubank Cartão/, c)
   assert.equal(lancsU1().filter((l) => l.carteira_id === 'cartao2').length, 3)
 })
 
@@ -339,7 +339,7 @@ await caso('"paguei 140 de energia" com a conta de 150 em aberto: pergunta antes
   ia.regras = ENERGIA_140
   const r = await msgCompleta('paguei 140 de energia no pix')
   assert.equal(r.status, 'pergunta')
-  assert.match(r.resposta, /^A conta de Energia está em R\$ 150,00 \(vence \d\d\/\d\d\), e você disse R\$ 140,00\.\n1\. Dar baixa na conta, pagando R\$ 140,00\n2\. Anotar como outro gasto e deixar a conta aberta\n\nResponda com o número\.$/, r.resposta)
+  assert.match(r.resposta, /^A conta de Energia está em R\$ 150,00 \(vence \d\d\/\d\d\), e você disse R\$ 140,00\.\n1\. Dar baixa na conta, pagando R\$ 140,00\n2\. Anotar como outro gasto e deixar a conta aberta\n\nMe manda o número\.$/, r.resposta)
   assert.equal(lancsU1().length, 0, 'nada gravado até ela escolher')
   assert.equal(contaDe('c1')?.status, 'aberta')
 })

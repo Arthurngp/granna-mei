@@ -495,7 +495,7 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
       let cartaoId = cart(a.carteira_destino_id)?.tipo === 'cartao' ? a.carteira_destino_id! : cartoes.length === 1 ? cartoes[0].id : forcada?.tipo === 'cartao' ? forcada.id : null
       if (!cartaoId) {
         const opcoes = cartoes.map((x) => ({ id: x.id, nome: x.nome }))
-        return { acoes: [], perguntar: `Qual fatura você pagou? Responda com o número:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, opcoes }
+        return { acoes: [], perguntar: `Qual fatura você pagou? Me manda o número:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, opcoes }
       }
       const aberta = (c.faturasAbertas ?? []).find((f) => f.cartaoId === cartaoId && f.falta > 0)
       if (a.valor === null && !aberta) return { acoes: [], perguntar: `Não achei fatura em aberto no ${cart(cartaoId)!.nome}. Quanto você pagou?` }
@@ -510,7 +510,7 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
         ?? (bancos.length === 1 || !perguntarMeio ? bancos[0]?.id ?? padrao : null)
       if (!origem) {
         const opcoes = bancos.map((x) => ({ id: x.id, nome: x.nome }))
-        return { acoes: [], perguntar: `De qual conta saiu o pagamento da fatura? Responda com o número:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, opcoes }
+        return { acoes: [], perguntar: `De qual conta saiu o pagamento da fatura? Me manda o número:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, opcoes }
       }
       out.push({ ...a, valor, movimento: null, categoria_id: null, carteira_id: origem, carteira_destino_id: cartaoId, data: dataValida(a.data) && a.data! <= c.hoje ? a.data! : c.hoje, fatura: aberta?.fatura ?? null, noCartao: false, descricao: `Fatura ${cart(cartaoId)!.nome}` })
       continue
@@ -608,7 +608,7 @@ export function conferir(texto: string, c: Contexto, r: RespostaIA, op: Opcoes =
         if (possiveis.length === 1 || !perguntarMeio) origem = possiveis[0]?.id ?? padrao
         else {
           const opcoes = possiveis.map((x) => ({ id: x.id, nome: x.nome }))
-          return { acoes: [], perguntar: `De qual conta saiu o dinheiro para ${destino.nome}? Responda com o número:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, opcoes }
+          return { acoes: [], perguntar: `De qual conta saiu o dinheiro para ${destino.nome}? Me manda o número:\n${opcoes.map((o, i) => `${i + 1}. ${o.nome}`).join('\n')}`, opcoes }
         }
       }
       if (origem === destino.id) return { acoes: [], perguntar: 'De qual carteira para qual? Ex.: "do dinheiro para o banco".' }
