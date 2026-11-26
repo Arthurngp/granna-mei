@@ -72,14 +72,25 @@ function soltarRajada(chave: string) {
       const ids = [u.ev.data?.key?.id, ...u.juntadas].filter(Boolean) as string[]
       try {
         // As mensagens juntadas saem de 'recebida' antes de a principal começar: a varredura nunca as atende sozinhas depois.
+        // Se a marcação falhar (ou pegar menos linhas), atende cada mensagem sozinha, como antes da espera: juntar sem marcar deixaria as
+        // outras 'na fila', e a varredura as atenderia de novo minutos depois (lançamento em dobro).
+        let fila: EventoGateway[] = [u.ev]
         if (u.juntadas.length) {
           const j = await sb.from('mensagens').update({ status: 'ignorada', erro: `juntada em ${u.ev.data?.key?.id ?? '?'}`, resposta: '' })
-            .in('id', u.juntadas).eq('status', 'recebida').eq('erro', NA_FILA)
-          if (j.error) console.error('[rajada] marcar juntadas', j.error.message)
+            .in('id', u.juntadas).eq('status', 'recebida').eq('erro', NA_FILA).select('id')
+          if (j.error || (j.data?.length ?? 0) !== u.juntadas.length) {
+            console.error('[rajada] não marquei as juntadas, atendendo uma a uma:', j.error?.message ?? `${j.data?.length ?? 0} de ${u.juntadas.length}`)
+            // As que chegaram a ser marcadas voltam para 'na fila', senão o processar não as pega e elas sumiriam.
+            const marcadas = (j.data ?? []).map((x) => x.id as string)
+            if (marcadas.length) await sb.from('mensagens').update({ status: 'recebida', erro: NA_FILA }).in('id', marcadas)
+            fila = u.originais
+          }
         }
-        const res = await processar(u.ev, { jaRegistrada: true })
-        if (res.status !== 'ignorada' || res.resposta) ultimaMensagem = new Date().toISOString()
-        if (res.para && res.resposta) await entregar(res.para, res.resposta, res.msgId)
+        for (const ev of fila) {
+          const res = await processar(ev, { jaRegistrada: true })
+          if (res.status !== 'ignorada' || res.resposta) ultimaMensagem = new Date().toISOString()
+          if (res.para && res.resposta) await entregar(res.para, res.resposta, res.msgId)
+        }
       } catch (e) {
         erros++
         console.error('[webhook]', (e as Error).message)

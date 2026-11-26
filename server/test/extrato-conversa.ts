@@ -26,7 +26,7 @@ await caso('pura: conferência um a um (dois iguais no mesmo dia, um anotado: fa
 })
 
 await caso('pura: o que é pergunta sobre o anotado, e o que é sim e não curtos', async () => {
-  for (const t of ['quais desses já foram lançados?', 'algum já tá anotado?', 'tem algum faltando?', 'confere pra mim', 'já foram todos?']) assert.ok(X.perguntaSobreAnotados(t), t)
+  for (const t of ['quais desses já foram lançados?', 'algum já tá anotado?', 'tem algum faltando?', 'confere esse extrato pra mim', 'já foram todos?']) assert.ok(X.perguntaSobreAnotados(t), t)
   for (const t of ['sim', 'pode', 'anota', 'pode anotar', 'bora', 'manda ver', 'anota aí', 'quero', 'ok']) assert.ok(X.simParaAnotar(t), t)
   for (const t of ['anota 50 de gás', 'sim mas o de 50 foi pessoal e o resto do negócio', 'quais desses já foram lançados?']) assert.ok(!X.simParaAnotar(t), t)
   for (const t of ['não', 'deixa', 'agora não', 'não precisa', 'esquece']) assert.ok(X.naoParaAnotar(t), t)
@@ -87,6 +87,25 @@ await caso('com o extrato esperando, "anota 50 de gás" NÃO anota o extrato', a
   await msg('anota 50 de gás')
   assert.ok(lancsU1().length <= antes + 1, 'importou o extrato junto com o gás')
   assert.ok(!lancsU1().some((l) => Number(l.valor) === 96.4), 'o extrato foi anotado sem a pessoa pedir')
+})
+
+await caso('com o extrato esperando, "quais contas vencem essa semana?" e "quanto falta pro limite?" NÃO viram conversa do extrato', async () => {
+  ia.documento = extrato()
+  await msgFoto('extrato.jpg')
+  for (const t of ['quais contas vencem essa semana?', 'quanto falta pro limite?']) {
+    assert.ok(!X.perguntaSobreAnotados(t), t)
+    const r = await msg(t)
+    // A resposta é sobre o que ela perguntou; a pergunta do extrato pode voltar no fim (fila de perguntas), não no lugar.
+    assert.doesNotMatch(r, /^Conferi o extrato/, t)
+  }
+})
+
+await caso('transferência já anotada casa com a saída do extrato', async () => {
+  E.tabelas.lancamentos.push({ id: 'tr-1', user_id: U1, tipo: 'transferencia', valor: 50, data: '2026-11-21', descricao: 'Nubank para Inter', carteira_id: 'nubank', carteira_destino_id: 'dinheiro', categoria_id: null, pessoal: false, origem: 'texto', criado_em: new Date().toISOString() })
+  anotado(180, 'entrada')
+  ia.documento = extrato([T('Carla Mendes', 180, 'entrada'), T('Pix Joana', 50, 'saida', '2026-11-21')])
+  const r = await msgFoto('extrato.jpg')
+  assert.match(r.resposta, /os 2 movimentos já tão anotados aqui, não falta nada/, r.resposta)
 })
 
 await caso('"deixa" recusa sem anotar nada', async () => {

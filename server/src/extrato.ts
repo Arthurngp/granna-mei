@@ -7,7 +7,7 @@
  *
  * A conferência é a MESMA que a importação usa (`cruzar`), um a um: dois Pix de R$ 10 no mesmo dia, com um só anotado, contam como um anotado
  * e um faltando. Antes a importação usava um conjunto e pulava os dois. Se a resposta diz "faltam 2", a importação anota 2.
- * Regra de igualdade (a de sempre): mesma data, mesmo valor, mesmo sentido.
+ * Regra de igualdade (a de sempre): mesma data, mesmo valor, mesmo sentido. Transferência anotada casa com saída ou entrada do extrato.
  */
 import type { Transacao } from './midia.ts'
 
@@ -34,10 +34,10 @@ export function cruzar(ts: Transacao[], ja: Anotado[], hoje: string): { anotadas
   const anotadas: Transacao[] = []
   const faltam: Transacao[] = []
   for (const t of ts) {
-    const k = `${dataDe(t, hoje)}|${cent(t.valor)}|${t.movimento}`
-    const n = sobra.get(k) ?? 0
-    if (n > 0) {
-      sobra.set(k, n - 1)
+    // Transferência entre contas aparece no extrato como saída (de uma) ou entrada (da outra): também é "já anotado".
+    const k = [`${dataDe(t, hoje)}|${cent(t.valor)}|${t.movimento}`, `${dataDe(t, hoje)}|${cent(t.valor)}|transferencia`].find((x) => (sobra.get(x) ?? 0) > 0)
+    if (k) {
+      sobra.set(k, sobra.get(k)! - 1)
       anotadas.push(t)
     } else faltam.push(t)
   }
@@ -47,7 +47,10 @@ export function cruzar(ts: Transacao[], ja: Anotado[], hoje: string): { anotadas
 /** A pessoa quer saber o que já está anotado ou o que falta ("quais desses já foram lançados?", "tem algum faltando?"). */
 export function perguntaSobreAnotados(texto: string): boolean {
   const t = texto.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-  return /\b(lancad|lancou|anotad|anotou|registrad|cadastrad)|\bfalta|\bfaltando|\bja (tem|ta|esta|estao|foi|foram|entrou|entraram)\b|\bquais\b|\bconfer/.test(t)
+  if (/\b(lancad|lancou|lancei|anotad|anotou|anotei|registrad|cadastrad)/.test(t)) return true
+  if (/\bja (foi|foram|ta|esta|estao|tem) (tudo|todos|todas)\b/.test(t)) return true
+  // "quais", "falta", "confere" só contam quando falam DESTE extrato ("desses", "algum"): "quais contas vencem?" e "quanto falta pro limite?" são outra conversa.
+  return /\b(desses|dessas|deles|delas|disso|daqui|algum|alguma|extrato|esse print|nesse print)\b/.test(t) && /\b(falta|faltando|faltam|quais|qual|confer\w*|ja (tem|ta|esta|estao|foi|foram|entrou|entraram)|todos|tudo)\b/.test(t)
 }
 
 const MAX_LINHAS = 8

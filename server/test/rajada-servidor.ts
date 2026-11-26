@@ -145,6 +145,23 @@ await caso('"gastei 50 de gasolina" e "DESFAZER" na mesma rajada: duas respostas
   assert.notEqual(linha('J-f')?.status, 'ignorada')
 })
 
+await caso('a marcação das juntadas falha em parte: desfaz e atende uma a uma, nenhuma some e nenhuma fica na fila', async () => {
+  ia.regras = [[/gastei 50/, GASOLINA]]
+  await postar(evento('oi', 'J-g'))
+  await postar(evento('gastei 50', 'J-h'))
+  await postar(evento('de gasolina', 'J-i'))
+  // Outro processo pegou a J-g no meio da espera: a marcação vai achar só 1 de 2.
+  const g = linha('J-g')!
+  g.erro = 'processando'
+  await esperar(() => envios.length >= 2)
+  await dorme(300)
+  assert.equal(linha('J-h')?.status, 'ok', 'a J-h ficou presa: ' + JSON.stringify(linha('J-h')))
+  assert.notEqual(linha('J-h')?.erro, 'na fila')
+  assert.ok(!String(linha('J-h')?.erro ?? '').startsWith('juntada'), 'a J-h ficou marcada como juntada e não foi atendida')
+  assert.notEqual(linha('J-i')?.status, 'recebida')
+  assert.equal(lancsU1().length, 1)
+})
+
 srv.close()
 wa.close()
 console.log(falhas ? `\n${falhas} falha(s) de ${n + falhas}` : `\nrajada no servidor: ${n} de ${n}`)

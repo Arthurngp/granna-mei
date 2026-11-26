@@ -15,10 +15,13 @@
  *   e juntar estragaria a leitura. "sim", "não", "2", "pronto", "pular", "SAIR", "DESFAZER", o código de 6 números da confirmação,
  *   "já paguei". Ex.: "sim" e depois "anota 50 de gás" continuam duas mensagens, para o "sim" não importar o extrato E engolir o gás.
  * - Sticker, reação e tipo que a Granninha não lê ficam sozinhos (são ignorados ou recebem a ajuda, como antes).
+ * - Rajada com mídia: texto com valor próprio ("gastei 20 de pão") fica sozinho, para não virar legenda do comprovante e sumir.
  */
 import type { EventoGateway } from './granninha.ts'
 import { ehNao, ehPronto, ehPular, ehSim } from './config-whats.ts'
 import { respostaDuplicata } from './duplicata.ts'
+import { naoParaAnotar, simParaAnotar } from './extrato.ts'
+import { temNumeroDeValor } from './numeros.ts'
 import { respostaGancho } from './gancho.ts'
 import { ehSair } from './retencao.ts'
 
@@ -37,6 +40,8 @@ export interface Unidade {
   ev: EventoGateway
   /** Ids das outras mensagens que foram juntadas nesta e não serão processadas sozinhas. */
   juntadas: string[]
+  /** As mensagens como chegaram, na ordem: se não der para marcar as juntadas, cada uma é atendida sozinha. */
+  originais: EventoGateway[]
 }
 
 const tipo = (ev: EventoGateway): 'texto' | 'midia' | 'outro' => {
@@ -56,7 +61,7 @@ export function ehSozinha(texto: string): boolean {
   if (/\b\d{6}\b/.test(t) && t.length <= 60) return true // código de confirmação do número
   if (/^desfa[zç]/i.test(t)) return true
   if (ehSair(t)) return true
-  return ehSim(t) || ehNao(t) || ehPronto(t) || ehPular(t) || respostaDuplicata(t) !== null || respostaGancho(t) !== null
+  return ehSim(t) || ehNao(t) || ehPronto(t) || ehPular(t) || simParaAnotar(t) || naoParaAnotar(t) || respostaDuplicata(t) !== null || respostaGancho(t) !== null
 }
 
 const comTexto = (ev: EventoGateway, campo: 'content' | 'caption', valor: string): EventoGateway => ({ ...ev, data: { ...ev.data, [campo]: valor } })
@@ -67,10 +72,10 @@ function trecho(evs: EventoGateway[]): Unidade[] {
   const midias = evs.map((e, i) => (tipo(e) === 'midia' ? i : -1)).filter((i) => i >= 0)
   const id = (e: EventoGateway) => e.data?.key?.id ?? ''
   if (!midias.length) {
-    if (evs.length === 1) return [{ ev: evs[0], juntadas: [] }]
+    if (evs.length === 1) return [{ ev: evs[0], juntadas: [], originais: evs }]
     // A mensagem processada é a última: a resposta sai depois de tudo que a pessoa mandou.
     const ultima = evs[evs.length - 1]
-    return [{ ev: comTexto(ultima, 'content', juntar(evs.map(textoDe))), juntadas: evs.slice(0, -1).map(id) }]
+    return [{ ev: comTexto(ultima, 'content', juntar(evs.map(textoDe))), juntadas: evs.slice(0, -1).map(id), originais: evs }]
   }
   const out: Unidade[] = []
   midias.forEach((mi, k) => {
@@ -80,13 +85,13 @@ function trecho(evs: EventoGateway[]): Unidade[] {
     const m = evs[mi]
     const textos = [...antes, ...depois]
     if (!textos.length) {
-      out.push({ ev: m, juntadas: [] })
+      out.push({ ev: m, juntadas: [], originais: [m] })
       return
     }
     // O texto vira a legenda da mídia. Foto e PDF: a leitura do documento e a pergunta feita sobre ele usam a legenda.
     // Áudio: a legenda entra como complemento da transcrição (conversar() junta as duas).
     const legenda = juntar([...antes.map(textoDe), m.data?.caption ?? '', ...depois.map(textoDe)])
-    out.push({ ev: comTexto(m, 'caption', legenda), juntadas: textos.map(id) })
+    out.push({ ev: comTexto(m, 'caption', legenda), juntadas: textos.map(id), originais: [...antes, m, ...depois] })
   })
   return out
 }
@@ -95,19 +100,21 @@ function trecho(evs: EventoGateway[]): Unidade[] {
 export function agrupar(evs: EventoGateway[]): Unidade[] {
   const out: Unidade[] = []
   let atual: EventoGateway[] = []
+  const temMidia = evs.some((e) => tipo(e) === 'midia')
   const fecha = () => {
     if (atual.length) out.push(...trecho(atual))
     atual = []
   }
   for (const ev of evs) {
     const t = tipo(ev)
-    if (t === 'outro' || (t === 'texto' && ehSozinha(textoDe(ev)))) {
+    // Com mídia na rajada, texto com valor próprio ("gastei 20 de pão") é outro registro: virar legenda do comprovante o faria sumir.
+    if (t === 'outro' || (t === 'texto' && (ehSozinha(textoDe(ev)) || (temMidia && temNumeroDeValor(textoDe(ev)))))) {
       fecha()
-      out.push({ ev, juntadas: [] })
+      out.push({ ev, juntadas: [], originais: [ev] })
     } else if (t === 'texto' && !textoDe(ev)) {
       // texto vazio: não soma nada, mas também não pode sumir sem passar pelo processar (que o tira de 'recebida').
       fecha()
-      out.push({ ev, juntadas: [] })
+      out.push({ ev, juntadas: [], originais: [ev] })
     } else atual.push(ev)
   }
   fecha()

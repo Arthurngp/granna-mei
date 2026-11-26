@@ -101,6 +101,31 @@ await caso('sticker no meio fica sozinho e não quebra a ordem', () => {
   assert.deepEqual(u.map((x) => x.ev.data.type), ['TEXT', 'STICKER', 'TEXT'])
 })
 
+await caso('"pode anotar" e "esquece" ficam sozinhos (são resposta inteira do extrato)', () => {
+  const u = agrupar([txt('pode anotar'), txt('gastei 20 de pão')])
+  assert.deepEqual(u.map((x) => x.ev.data.content), ['pode anotar', 'gastei 20 de pão'])
+  assert.equal(agrupar([txt('esquece'), txt('oi')]).length, 2)
+})
+
+await caso('comprovante e depois "gastei 20 de pão": são dois registros, o 20 não vira legenda', () => {
+  const f = foto(), t = txt('gastei 20 de pão')
+  const u = agrupar([f, t])
+  assert.equal(u.length, 2)
+  assert.equal(u[0].ev.data.caption ?? '', '')
+  assert.equal(u[1].ev.data.content, 'gastei 20 de pão')
+})
+
+await caso('sem mídia, texto com valor junta normal ("lança isso" + "10 reais")', () => {
+  assert.equal(agrupar([txt('lança isso'), txt('10 reais')]).length, 1)
+})
+
+await caso('a unidade guarda as originais na ordem (para atender uma a uma se a marcação falhar)', () => {
+  const a = txt('olha'), f = foto(), q = txt('quais desses já foram?')
+  const u = agrupar([a, f, q])
+  assert.equal(u.length, 1)
+  assert.deepEqual(u[0].originais.map((e) => e.data.key?.id), [a, f, q].map((e) => e.data.key?.id))
+})
+
 await caso('mensagem única sai do jeito que chegou', () => {
   const a = txt('recebi 150 no pix')
   const u = agrupar([a])
