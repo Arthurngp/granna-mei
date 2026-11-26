@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { E, acao, acoes, ia, lancsU1, NUM, pedidos, semear } from './_falsos.ts'
+import { E, acao, acoes, ia, lancsU1, NUM, pedidos, semear, U1 } from './_falsos.ts'
 
 /* ---------------- gateway falso (conta envios e pode recusar) ---------------- */
 
@@ -116,6 +116,12 @@ await caso('"oi", "gastei 50", "de gasolina" com menos de 400 ms entre elas: o r
   assert.equal(Number(lancsU1()[0].valor), 50)
   assert.equal(linha('J-c')?.status, 'ok')
   assert.equal(linha('J-c')?.texto, 'oi\ngastei 50\nde gasolina')
+  // A linha principal guarda o evento JUNTADO: se a IA cair, a retomada reprocessa tudo, não só "de gasolina".
+  assert.equal((linha('J-c')?.evento as any)?.data?.content, 'oi\ngastei 50\nde gasolina', 'a retomada perderia o texto juntado')
+  // As juntadas contam no limite do mês como contavam antes da espera (3 mensagens = 3).
+  const { usoDoMes } = await import('../src/banco.ts')
+  const uso = await usoDoMes(U1, new Date(Date.now() - 86_400_000).toISOString())
+  assert.equal(uso.lancamentos, 3, 'a rajada furou o limite mensal')
   for (const id of ['J-a', 'J-b']) {
     assert.equal(linha(id)?.status, 'ignorada', id)
     assert.match(String(linha(id)?.erro), /juntada em J-c/)

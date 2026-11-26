@@ -101,10 +101,31 @@ await caso('sticker no meio fica sozinho e não quebra a ordem', () => {
   assert.deepEqual(u.map((x) => x.ev.data.type), ['TEXT', 'STICKER', 'TEXT'])
 })
 
-await caso('"pode anotar" e "esquece" ficam sozinhos (são resposta inteira do extrato)', () => {
-  const u = agrupar([txt('pode anotar'), txt('gastei 20 de pão')])
+await caso('com pergunta em aberto, a primeira fica sozinha: "pode anotar" + "gastei 20 de pão", "pessoal" + "e anota 20 de café"', () => {
+  const u = agrupar([txt('pode anotar'), txt('gastei 20 de pão')], { primeiraSozinha: true })
   assert.deepEqual(u.map((x) => x.ev.data.content), ['pode anotar', 'gastei 20 de pão'])
-  assert.equal(agrupar([txt('esquece'), txt('oi')]).length, 2)
+  assert.deepEqual(agrupar([txt('pessoal'), txt('e anota 20 de café')], { primeiraSozinha: true }).map((x) => x.ev.data.content), ['pessoal', 'e anota 20 de café'])
+  assert.equal(agrupar([txt('lança isso'), txt('10 reais')]).length, 1, 'sem pergunta em aberto, "lança isso" junta')
+})
+
+await caso('pergunta com número continua virando legenda do print ("quais desses 3 já foram lançados?", "esse é do dia 24")', () => {
+  for (const q of ['quais desses 3 já foram lançados?', 'esse é do dia 24', 'extrato de novembro 2026']) {
+    const u = agrupar([foto(), txt(q)])
+    assert.equal(u.length, 1, q)
+    assert.equal(u[0].ev.data.caption, q)
+  }
+})
+
+await caso('tetos: legenda até 450 caracteres (o resto vira texto próprio) e texto juntado até 1800 (o resto vira outro bloco); nada se perde', () => {
+  const grande = 'a'.repeat(300)
+  const u = agrupar([foto(), txt(grande), txt(grande)])
+  assert.equal(u.length, 2)
+  assert.equal(u[0].ev.data.caption, grande)
+  assert.equal(u[1].ev.data.content, grande)
+  const mil = 'b'.repeat(1000)
+  const v = agrupar([txt(mil), txt(mil), txt('oi')])
+  assert.ok(v.every((x) => (x.ev.data.content ?? '').length <= 1800), 'bloco passou do teto')
+  assert.equal(v.reduce((a, x) => a + 1 + x.juntadas.length, 0), 3, 'perdeu mensagem')
 })
 
 await caso('comprovante e depois "gastei 20 de pão": são dois registros, o 20 não vira legenda', () => {

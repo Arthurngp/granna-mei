@@ -163,11 +163,28 @@ async function sinal(caminho: string, metodo: 'POST' | 'PUT', corpo: unknown): P
     return false
   }
 }
-const jidDe = (para: string) => (para.includes('@') ? para : `${para.replace(/\D/g, '')}@s.whatsapp.net`)
+/**
+ * O jid e o id da mensagem vêm do webhook, e o id é escolhido pelo aparelho de quem envia (um cliente modificado manda qualquer texto). Antes de
+ * irem para a URL do gateway, só passam no formato do WhatsApp: "." ou ".." virariam outra rota do gateway, com a nossa credencial.
+ */
+export const JID_VALIDO = /^\d{8,15}(:\d{1,3})?@(s\.whatsapp\.net|lid)$/
+export const ID_VALIDO = /^[A-Za-z0-9_-]{1,128}$/
+const jidDe = (para: string): string | null => {
+  const j = para.includes('@') ? para : `${para.replace(/\D/g, '')}@s.whatsapp.net`
+  return JID_VALIDO.test(j) ? j : null
+}
+const nada = Promise.resolve(false)
 
-export const digitando = (para: string, ligado: boolean) =>
-  sinal(`/api/chat/${sessao()}/${encodeURIComponent(jidDe(para))}/presence`, 'POST', { presence: ligado ? 'composing' : 'paused' })
-export const marcarLidas = (para: string, ids: string[]) =>
-  ids.length ? sinal(`/api/chat/${sessao()}/${encodeURIComponent(jidDe(para))}/read`, 'PUT', { messageIds: ids }) : Promise.resolve(true)
-export const reagir = (para: string, msgId: string, emoji: string) =>
-  sinal(`/api/messages/${sessao()}/${encodeURIComponent(jidDe(para))}/${encodeURIComponent(msgId)}/react`, 'POST', { emoji })
+export const digitando = (para: string, ligado: boolean) => {
+  const j = jidDe(para)
+  return j ? sinal(`/api/chat/${sessao()}/${encodeURIComponent(j)}/presence`, 'POST', { presence: ligado ? 'composing' : 'paused' }) : nada
+}
+export const marcarLidas = (para: string, ids: string[]) => {
+  const j = jidDe(para)
+  const validos = ids.filter((i) => ID_VALIDO.test(i))
+  return j && validos.length ? sinal(`/api/chat/${sessao()}/${encodeURIComponent(j)}/read`, 'PUT', { messageIds: validos }) : nada
+}
+export const reagir = (para: string, msgId: string, emoji: string) => {
+  const j = jidDe(para)
+  return j && ID_VALIDO.test(msgId) ? sinal(`/api/messages/${sessao()}/${encodeURIComponent(j)}/${encodeURIComponent(msgId)}/react`, 'POST', { emoji }) : nada
+}

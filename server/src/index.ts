@@ -12,7 +12,7 @@ import { rotaAdmin } from './admin.ts'
 import { bloquearAtrasadas, rotaCobranca } from './cobranca.ts'
 import { assinaturaValida, conferirNumero, digitando, enviarTexto, marcarLidas, reagir, statusSessao } from './gateway.ts'
 import { excluirVencidas, soltarNumerosDeExcluidas } from './excluir.ts'
-import { agrupar, ESPERA_MAX_MS, esperaMs, RAJADA_MAX } from './rajada.ts'
+import { agrupar, ESPERA_MAX_MS, esperaMs, RAJADA_MAX, type Unidade } from './rajada.ts'
 import { hojeSP, marcarColunaEventoFaltando, NA_FILA, processar, registrarChegada, semColunaEvento, type EventoGateway } from './granninha.ts'
 import { clientePorNumero } from './banco.ts'
 import { PISO_MS, varrerPresas, varrerRetomarIA, type Presa } from './presas.ts'
@@ -66,34 +66,119 @@ const digitarMs = () => Number(process.env.GRANNINHA_DIGITAR_MS ?? 3000)
 const lidaMs = () => Number(process.env.GRANNINHA_LIDA_MS ?? 1000)
 /** WhatsApp apaga o "digitando..." sozinho depois de uns segundos: renova enquanto a resposta não sai. */
 const RENOVA_DIGITANDO_MS = 8000
-const digitandoEm = new Map<string, ReturnType<typeof setInterval>>()
-/** Quantas unidades de cada número estão sendo processadas agora (mensagem nova não apaga o digitando de quem já está pensando). */
+/** Teto do "digitando": se algo travar (banco sem resposta), ele não fica ligado para sempre. */
+const DIGITANDO_MAX_MS = 2 * 60_000
+const digitandoEm = new Map<string, { intervalo: ReturnType<typeof setInterval>; desde: number }>()
+/** Quantas rajadas de cada número estão sendo processadas agora (mensagem nova não apaga o digitando de quem já está pensando). */
 const ocupados = new Map<string, number>()
 function ligarDigitando(chave: string, jid: string) {
   if (!sinaisLigados()) return
   void digitando(jid, true)
   if (digitandoEm.has(chave)) return
-  digitandoEm.set(chave, setInterval(() => void digitando(jid, true), RENOVA_DIGITANDO_MS))
+  const desde = Date.now()
+  const intervalo = setInterval(() => {
+    if (Date.now() - desde > DIGITANDO_MAX_MS) return desligarDigitando(chave, jid)
+    void digitando(jid, true)
+  }, RENOVA_DIGITANDO_MS)
+  digitandoEm.set(chave, { intervalo, desde })
 }
 function desligarDigitando(chave: string, jid: string, avisar = true) {
   const i = digitandoEm.get(chave)
   if (!i) return
-  clearInterval(i)
+  clearInterval(i.intervalo)
   digitandoEm.delete(chave)
   if (avisar && sinaisLigados()) void digitando(jid, false)
 }
+/**
+ * Quem é cliente, para decidir se manda sinal. "Sim" vale 5 min; "não" vale 30 s (quem acabou de confirmar o número logo passa a ver os sinais).
+ * Entradas vencidas saem na leitura e numa limpeza a cada inserção, com teto de tamanho: número desconhecido escrevendo não enche a memória.
+ */
 const cacheCliente = new Map<string, { ok: boolean; em: number }>()
+const CACHE_CLIENTE_MAX = 5000
+const validade = (ok: boolean) => (ok ? 5 * 60_000 : 30_000)
 async function ehClienteParaSinais(jid: string): Promise<boolean> {
   if (!sinaisLigados()) return false
   const k = jid.split('@')[0]
   const c = cacheCliente.get(k)
-  if (c && Date.now() - c.em < 5 * 60_000) return c.ok
+  if (c && Date.now() - c.em < validade(c.ok)) return c.ok
+  if (c) cacheCliente.delete(k)
   try {
     const ok = !!(await clientePorNumero(jid))
+    if (cacheCliente.size >= CACHE_CLIENTE_MAX) {
+      const agora = Date.now()
+      for (const [n, v] of cacheCliente) if (agora - v.em >= validade(v.ok)) cacheCliente.delete(n)
+      // Ainda cheio: sai o mais antigo (o Map guarda a ordem de inserção).
+      while (cacheCliente.size >= CACHE_CLIENTE_MAX) cacheCliente.delete(cacheCliente.keys().next().value as string)
+    }
     cacheCliente.set(k, { ok, em: Date.now() })
     return ok
   } catch {
     return false
+  }
+}
+
+/** Há pergunta em aberto (com opções, ou extrato/fatura esperando sim)? Então a primeira mensagem da rajada é a resposta dela e vai sozinha. */
+async function temPerguntaAberta(telefone: string): Promise<boolean> {
+  try {
+    const { data } = await sb.from('conversas').select('pendente,atualizado_em').eq('telefone', telefone).maybeSingle()
+    const p = data?.pendente as { tipo?: string; opcoes?: unknown[] } | null | undefined
+    if (!p?.tipo || Date.now() - new Date(data!.atualizado_em as string).getTime() > 30 * 60_000) return false
+    return (Array.isArray(p.opcoes) && p.opcoes.length > 0) || ['importar', 'importar_fatura', 'pergunta', 'baixa_diferente', 'desfazer_mais', 'duplicata', 'reenvio'].includes(p.tipo)
+  } catch {
+    return false
+  }
+}
+const telefoneDe = (chave: string) => chave.split(':')[0].replace(/\D/g, '')
+
+/** Processa UMA unidade da rajada: grava a mensagem juntada na linha principal, marca as juntadas, processa, reage e responde. */
+async function atenderUnidade(u: Unidade, chave: string, jid: string, cliente: boolean) {
+  const telefone = telefoneDe(chave)
+  const principal = u.ev.data?.key?.id ?? ''
+  let fila: EventoGateway[] = [u.ev]
+  if (u.juntadas.length) {
+    // 1) A linha principal passa a guardar a mensagem JUNTADA (texto e evento): se a IA cair ou o processo reiniciar, a retomada pela varredura
+    //    reprocessa tudo o que a pessoa mandou, não só a última mensagem.
+    const merged = { texto: (u.ev.data?.content ?? u.ev.data?.caption ?? '').slice(0, 2000), ...(semColunaEvento() ? {} : { evento: u.ev }) }
+    const g = await sb.from('mensagens').update(merged).eq('id', principal).eq('telefone', telefone).eq('status', 'recebida').eq('erro', NA_FILA).select('id')
+    // 2) As juntadas saem da fila, presas a ESTE número (o id vem de quem envia).
+    const j = g.error || !g.data?.length ? null
+      : await sb.from('mensagens').update({ status: 'ignorada', erro: `juntada em ${principal}`, resposta: '' })
+        .in('id', u.juntadas).eq('telefone', telefone).eq('status', 'recebida').eq('erro', NA_FILA).select('id')
+    if (!j || j.error || (j.data?.length ?? 0) !== u.juntadas.length) {
+      // Não deu para juntar com segurança: atende cada mensagem sozinha, como antes da espera. Juntar sem marcar deixaria as outras 'na fila', e a
+      // varredura as atenderia de novo depois (lançamento em dobro). O que chegou a ser mexido volta ao estado original.
+      console.error('[rajada] não juntei, atendendo uma a uma:', g.error?.message ?? j?.error?.message ?? `${j?.data?.length ?? 0} de ${u.juntadas.length}`)
+      const orig = u.originais.find((e) => e.data?.key?.id === principal)
+      if (g.data?.length && orig) {
+        await sb.from('mensagens').update({ texto: (orig.data?.content ?? orig.data?.caption ?? '').slice(0, 2000), ...(semColunaEvento() ? {} : { evento: orig }) }).eq('id', principal).eq('telefone', telefone)
+      }
+      const marcadas = (j?.data ?? []).map((x) => x.id as string)
+      for (let i = 0; marcadas.length && i < 2; i++) {
+        const v = await sb.from('mensagens').update({ status: 'recebida', erro: NA_FILA }).in('id', marcadas).eq('telefone', telefone)
+        if (!v.error) break
+        if (i === 1) console.error('[rajada] NÃO consegui devolver à fila, mensagens sem resposta:', marcadas.join(','), v.error.message)
+      }
+      fila = u.originais
+    }
+  }
+  for (const ev of fila) {
+    const res = await processar(ev, { jaRegistrada: true })
+    // As juntadas herdam o cliente da principal (só ali ele é descoberto): é por ele que o limite do mês conta e o admin atribui as mensagens.
+    if (fila.length === 1 && u.juntadas.length) {
+      const pr = await sb.from('mensagens').select('user_id').eq('id', principal).maybeSingle()
+      if (pr.data?.user_id) {
+        const h = await sb.from('mensagens').update({ user_id: pr.data.user_id }).in('id', u.juntadas).eq('telefone', telefone).like('erro', 'juntada em %')
+        if (h.error) console.error('[rajada] juntadas sem cliente:', h.error.message)
+      }
+    }
+    if (res.status !== 'ignorada' || res.resposta) ultimaMensagem = new Date().toISOString()
+    // A reação vem antes da resposta, como quem acena e depois fala, mas nunca a atrasa mais que 1,5 s.
+    if (cliente && res.reacao && res.msgId) await Promise.race([reagir(jid, res.msgId, res.reacao), new Promise((ok) => setTimeout(ok, 1500))])
+    if (res.para && res.resposta) {
+      // A resposta enviada já apaga o "digitando" no WhatsApp: só para a renovação, sem mandar "parou".
+      desligarDigitando(chave, jid, false)
+      await entregar(res.para, res.resposta, res.msgId)
+    }
   }
 }
 
@@ -122,56 +207,35 @@ function soltarRajada(chave: string) {
   clearTimeout(r.timer)
   clearTimeout(r.timerDigitar)
   rajadas.delete(chave)
-  const unidades = agrupar(r.eventos)
-  ocupados.set(chave, (ocupados.get(chave) ?? 0) + unidades.length)
-  for (const u of unidades) {
-    enfileirar(chave, async () => {
-      const ids = [u.ev.data?.key?.id, ...u.juntadas].filter(Boolean) as string[]
-      const cliente = await r.cliente
-      // Pensando: o digitando fica ligado até a resposta sair.
-      if (cliente) ligarDigitando(chave, r.jid)
-      try {
-        // As mensagens juntadas saem de 'recebida' antes de a principal começar: a varredura nunca as atende sozinhas depois.
-        // Se a marcação falhar (ou pegar menos linhas), atende cada mensagem sozinha, como antes da espera: juntar sem marcar deixaria as
-        // outras 'na fila', e a varredura as atenderia de novo minutos depois (lançamento em dobro).
-        let fila: EventoGateway[] = [u.ev]
-        if (u.juntadas.length) {
-          const j = await sb.from('mensagens').update({ status: 'ignorada', erro: `juntada em ${u.ev.data?.key?.id ?? '?'}`, resposta: '' })
-            .in('id', u.juntadas).eq('status', 'recebida').eq('erro', NA_FILA).select('id')
-          if (j.error || (j.data?.length ?? 0) !== u.juntadas.length) {
-            console.error('[rajada] não marquei as juntadas, atendendo uma a uma:', j.error?.message ?? `${j.data?.length ?? 0} de ${u.juntadas.length}`)
-            // As que chegaram a ser marcadas voltam para 'na fila', senão o processar não as pega e elas sumiriam.
-            const marcadas = (j.data ?? []).map((x) => x.id as string)
-            if (marcadas.length) await sb.from('mensagens').update({ status: 'recebida', erro: NA_FILA }).in('id', marcadas)
-            fila = u.originais
-          }
-        }
-        for (const ev of fila) {
-          const res = await processar(ev, { jaRegistrada: true })
-          if (res.status !== 'ignorada' || res.resposta) ultimaMensagem = new Date().toISOString()
-          // A reação vem antes da resposta, como quem acena e depois fala. Na mensagem que foi processada (a última da rajada).
-          if (cliente && res.reacao && res.msgId) await reagir(r.jid, res.msgId, res.reacao)
-          if (res.para && res.resposta) {
-            // A resposta enviada já apaga o "digitando" no WhatsApp: só para a renovação, sem mandar "parou".
-            desligarDigitando(chave, r.jid, false)
-            await entregar(res.para, res.resposta, res.msgId)
-          }
-        }
-      } catch (e) {
-        erros++
-        console.error('[webhook]', (e as Error).message)
-      } finally {
-        for (const id of ids) emVoo.delete(id)
-        const resta = (ocupados.get(chave) ?? 1) - 1
-        if (resta > 0) ocupados.set(chave, resta)
-        else {
-          ocupados.delete(chave)
-          // Acabou tudo (inclusive o caso de não ter resposta, ex.: "ok" que fica em silêncio): o digitando não pode ficar pendurado.
-          desligarDigitando(chave, r.jid)
+  ocupados.set(chave, (ocupados.get(chave) ?? 0) + 1)
+  // Uma tarefa por rajada na fila do número: a pergunta em aberto é lida na hora de processar (depois da rajada anterior terminar).
+  enfileirar(chave, async () => {
+    const ids = r.eventos.map((e) => e.data?.key?.id).filter(Boolean) as string[]
+    const cliente = await r.cliente
+    // Pensando: o digitando fica ligado até a resposta sair.
+    if (cliente) ligarDigitando(chave, r.jid)
+    try {
+      const unidades = agrupar(r.eventos, { primeiraSozinha: await temPerguntaAberta(telefoneDe(chave)) })
+      for (const u of unidades) {
+        try {
+          await atenderUnidade(u, chave, r.jid, cliente)
+        } catch (e) {
+          erros++
+          console.error('[webhook]', (e as Error).message)
         }
       }
-    })
-  }
+    } finally {
+      for (const id of ids) emVoo.delete(id)
+      const resta = (ocupados.get(chave) ?? 1) - 1
+      if (resta > 0) ocupados.set(chave, resta)
+      else {
+        ocupados.delete(chave)
+        // Acabou tudo (inclusive sem resposta, ex.: "ok" que fica em silêncio): o digitando não fica pendurado. Se já há outra rajada esperando,
+        // quem cuida do digitando é ela.
+        if (!rajadas.has(chave)) desligarDigitando(chave, r.jid)
+      }
+    }
+  })
 }
 
 /**
