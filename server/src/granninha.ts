@@ -20,6 +20,7 @@ import { baixarMidia } from './gateway.ts'
 import { BOLETO, conferir, interpretar, NEGOCIO, opcaoEscolhida, PESSOAL, type Acao, type Contexto, type Opcao } from './interpretar.ts'
 import { lerDocumento, textoDoDocumento, type Transacao } from './midia.ts'
 import { cruzar as cruzarExtrato, dataDe, falarDoExtrato, naoParaAnotar, perguntaSobreAnotados, simParaAnotar, type Anotado } from './extrato.ts'
+import { custoUsd, marcarColunaCustoFaltando, semColunaCusto } from './precos.ts'
 import { transcrever, type Uso } from './openai.ts'
 import { responderPergunta } from './perguntas.ts'
 import { carregarBase } from './base.ts'
@@ -323,10 +324,18 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
     }
   }
 
-  const up = await sb.from('mensagens').update({
+  const linhaFinal: Record<string, unknown> = {
     user_id: userId, intencao, status, resposta, efeitos, erro, texto: textoFinal.slice(0, 2000), ms: Date.now() - t0,
     tokens: tokens.entrada + tokens.saida, tokens_entrada: tokens.entrada, tokens_saida: tokens.saida, audio_tokens: tokens.audio || null, audio_seg: tokens.audioSeg ?? null,
-  }).eq('id', msgId)
+  }
+  // Qual modelo rodou de verdade em cada chamada e o custo pelo preço DELE (precos.ts). Colunas da migration `custopormodelo`: sem ela, grava como antes.
+  const chamadas = tokens.chamadas ?? []
+  const comModelo = chamadas.length ? { ...linhaFinal, ia_chamadas: chamadas, custo_usd: custoUsd(chamadas) } : linhaFinal
+  let up = await sb.from('mensagens').update(semColunaCusto() ? linhaFinal : comModelo).eq('id', msgId)
+  if (up.error && comModelo !== linhaFinal && (up.error.code === 'PGRST204' || up.error.code === '42703')) {
+    marcarColunaCustoFaltando()
+    up = await sb.from('mensagens').update(linhaFinal).eq('id', msgId)
+  }
   if (up.error) console.error('[granninha] atualizar mensagem', up.error.message)
   return { status, para: telefone, resposta, msgId }
 }
@@ -530,6 +539,8 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
     tokens.saida += u.saida
     tokens.audio = (tokens.audio ?? 0) + (u.audio ?? 0)
     if (u.audioSeg) tokens.audioSeg = (tokens.audioSeg ?? 0) + u.audioSeg
+    if (u.cache) tokens.cache = (tokens.cache ?? 0) + u.cache
+    if (u.chamadas?.length) tokens.chamadas = [...(tokens.chamadas ?? []), ...u.chamadas]
   }
   let texto = (d.content ?? '').trim()
   let anexo: string | null = null

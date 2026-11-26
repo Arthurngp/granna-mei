@@ -88,6 +88,33 @@ export interface Uso {
   audio?: number
   /** Duração do áudio, quando a API devolve em segundos */
   audioSeg?: number
+  /** Parte da entrada que o provedor leu do cache de prompt (mais barata). Já está DENTRO de `entrada`. */
+  cache?: number
+  /** Cada chamada feita de verdade: o modelo que RODOU (não o configurado), e o pedido quando caiu no reserva. É o que o custo por modelo usa. */
+  chamadas?: ChamadaIA[]
+}
+
+export interface ChamadaIA {
+  tarefa: string
+  /** O modelo que respondeu. */
+  modelo: string
+  /** O modelo configurado, só quando ele falhou e a chamada caiu no de fábrica. */
+  pedido?: string
+  entrada: number
+  saida: number
+  cache?: number
+  audio?: number
+  audioSeg?: number
+}
+
+/** Marca no uso qual modelo rodou (e se foi o reserva). */
+function comChamada(uso: Uso, tarefa: string, modelo: string, pedido?: string): Uso {
+  const c: ChamadaIA = { tarefa, modelo, entrada: uso.entrada, saida: uso.saida }
+  if (pedido) c.pedido = pedido
+  if (uso.cache) c.cache = uso.cache
+  if (uso.audio) c.audio = uso.audio
+  if (uso.audioSeg) c.audioSeg = uso.audioSeg
+  return { ...uso, chamadas: [c] }
 }
 
 /** O erro é a OpenAI recusando o MODELO (nome inexistente ou sem acesso), e não cota, chave ou instabilidade? */
@@ -115,19 +142,22 @@ export async function jsonEstruturado<T>(sistema: string, usuario: string | { ty
         response_format: { type: 'json_schema', json_schema: { name: nome, strict: true, schema: esquema } },
       }),
     })
-    const j = (await r.json()) as { choices: { message: { content: string; refusal?: string } }[]; usage?: { prompt_tokens: number; completion_tokens: number } }
+    const j = (await r.json()) as { choices: { message: { content: string; refusal?: string } }[]; usage?: { prompt_tokens: number; completion_tokens: number; prompt_tokens_details?: { cached_tokens?: number } } }
     const msg = j.choices[0].message
     if (msg.refusal) throw new Error('Recusa do modelo: ' + msg.refusal)
-    return { dados: JSON.parse(msg.content) as T, uso: { entrada: j.usage?.prompt_tokens ?? 0, saida: j.usage?.completion_tokens ?? 0 } }
+    const cache = j.usage?.prompt_tokens_details?.cached_tokens ?? 0
+    return { dados: JSON.parse(msg.content) as T, uso: { entrada: j.usage?.prompt_tokens ?? 0, saida: j.usage?.completion_tokens ?? 0, ...(cache ? { cache } : {}) } }
   }
   try {
-    return await chamar(escolhido)
+    const r = await chamar(escolhido)
+    return { ...r, uso: comChamada(r.uso, tarefa, escolhido) }
   } catch (e) {
     const fabrica = fabricaDe(tarefa)
     // Outro provedor (Anthropic) caindo por QUALQUER motivo, ou a OpenAI recusando o nome do modelo: volta ao de fábrica. Cota esgotada na OpenAI não repete (não gasta à toa).
     if (escolhido !== fabrica && (provedorDoModelo(escolhido) === 'anthropic' || recusouOModelo(e))) {
       console.error(`[ia-config] o modelo configurado "${escolhido}" falhou para ${tarefa}; usei o de fábrica "${fabrica}": ${(e as Error).message.slice(0, 160)}`)
-      return await chamar(fabrica)
+      const r = await chamar(fabrica)
+      return { ...r, uso: comChamada(r.uso, tarefa, fabrica, escolhido) }
     }
     throw e
   }
@@ -144,12 +174,14 @@ export async function transcrever(audio: Buffer, mime = 'audio/ogg'): Promise<{ 
     return pedir('/audio/transcriptions', { method: 'POST', body: form })
   }
   let r: Response
+  let rodou = escolhido
   try {
     r = await enviar(escolhido)
   } catch (e) {
     if (escolhido !== MODELO_AUDIO_FABRICA && recusouOModelo(e)) {
       console.error(`[ia-config] o modelo de áudio configurado "${escolhido}" foi recusado; usei o de fábrica "${MODELO_AUDIO_FABRICA}": ${(e as Error).message.slice(0, 160)}`)
       r = await enviar(MODELO_AUDIO_FABRICA)
+      rodou = MODELO_AUDIO_FABRICA
     } else throw e
   }
   const j = (await r.json()) as {
@@ -160,5 +192,5 @@ export async function transcrever(audio: Buffer, mime = 'audio/ogg'): Promise<{ 
   const uso: Uso = { entrada: u?.input_token_details?.text_tokens ?? 0, saida: u?.output_tokens ?? 0 }
   if (u?.type === 'duration' && u.seconds) uso.audioSeg = u.seconds
   else if (u) uso.audio = u.input_token_details?.audio_tokens ?? u.input_tokens ?? 0
-  return { texto: j.text.trim(), uso }
+  return { texto: j.text.trim(), uso: comChamada(uso, 'audio', rodou, rodou !== escolhido ? escolhido : undefined) }
 }

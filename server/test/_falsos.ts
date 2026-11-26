@@ -94,7 +94,7 @@ const db = createServer(async (req, res) => {
   if (E.recusarColuna) {
     const col = E.recusarColuna
     const noSelect = (url.searchParams.get('select') ?? '').split(',').includes(col)
-    const noCorpo = req.method === 'POST' && corpoTxt.includes(`"${col}":`)
+    const noCorpo = (req.method === 'POST' || req.method === 'PATCH') && corpoTxt.includes(`"${col}":`)
     if (noSelect || noCorpo) {
       return enviar(400, { code: noCorpo ? 'PGRST204' : '42703', message: `Could not find the '${col}' column of '${tabela}' in the schema cache` })
     }
