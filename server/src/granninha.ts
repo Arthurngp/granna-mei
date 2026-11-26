@@ -558,7 +558,8 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
   if (tipo === 'audio') {
     const m = await baixarMidia(d.fileUrl ?? '')
     const tr = await transcrever(m.buffer, m.mime)
-    texto = tr.texto
+    // Texto mandado junto do áudio na mesma rajada (rajada.ts) chega como legenda e completa a transcrição.
+    texto = [tr.texto, (d.caption ?? '').trim()].filter(Boolean).join('\n')
     soma(tr.uso)
     // Transcrição vazia (áudio mudo, ruído, gravação de meio segundo): dizer isso, em vez de mandar
     // a lista de exemplos como se a pessoa tivesse escrito algo que não dá para entender.

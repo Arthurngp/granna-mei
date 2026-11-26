@@ -44,6 +44,7 @@ const gw = createServer((req, res) => {
 await new Promise<void>((ok) => gw.listen(0, ok))
 process.env.WA_GATEWAY_URL = `http://127.0.0.1:${(gw.address() as AddressInfo).port}`
 
+process.env.GRANNINHA_ESPERA_MS ??= '0' // a espera da rajada tem teste próprio (test/rajada.ts)
 const { iniciar } = await import('../src/index.ts')
 const { sb } = await import('../src/banco.ts')
 const srv = iniciar(0)
