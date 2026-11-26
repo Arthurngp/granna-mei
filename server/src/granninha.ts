@@ -27,7 +27,7 @@ import { carregarBase } from './base.ts'
 import { antesEAgora, devePerguntar, JANELA_MIN, pareceMesmoLancamento, pareceReenvio, perguntaDuplicata, perguntaReenvio, respostaDuplicata, respostaSimNao, type LancAntigo } from './duplicata.ts'
 import { brl as brlComSinal, contasQueFicaramNegativas, ehPerguntaClara, linhasDeSaldoDepois, reconhecer, responderConsulta, saldosDaBase } from './consultas.ts'
 import { foraDoDisponivel } from './cartao.ts'
-import { confirma, ERROU, MSG } from './voz.ts'
+import { confirma, ERROU, MSG, reacaoPara } from './voz.ts'
 import { carteiraDoBanco, textoSaldoLido } from './print-banco.ts'
 import { configAtiva, corrigirSaldoImportado, depoisDaMensagem, iniciar as iniciarConfig, responder as responderConfig, responderPrintSaldo, veioPeloWhats } from './config-whats-fluxo.ts'
 import type { EstadoConfig } from './config-whats.ts'
@@ -58,6 +58,8 @@ export interface Saida {
   resposta?: string
   /** Id da mensagem no WhatsApp, para o servidor registrar se a resposta não foi entregue. */
   msgId?: string
+  /** Reação a pôr na mensagem da pessoa antes da resposta (voz.ts), ou nada. */
+  reacao?: string | null
 }
 
 /**
@@ -337,7 +339,7 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
     up = await sb.from('mensagens').update(linhaFinal).eq('id', msgId)
   }
   if (up.error) console.error('[granninha] atualizar mensagem', up.error.message)
-  return { status, para: telefone, resposta, msgId }
+  return { status, para: telefone, resposta, msgId, reacao: reacaoPara(status, intencao, efeitos) }
 }
 
 /**

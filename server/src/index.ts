@@ -10,7 +10,7 @@ import './env.ts'
 import { sb } from './banco.ts'
 import { rotaAdmin } from './admin.ts'
 import { bloquearAtrasadas, rotaCobranca } from './cobranca.ts'
-import { assinaturaValida, conferirNumero, enviarTexto, statusSessao } from './gateway.ts'
+import { assinaturaValida, conferirNumero, digitando, enviarTexto, marcarLidas, reagir, statusSessao } from './gateway.ts'
 import { excluirVencidas, soltarNumerosDeExcluidas } from './excluir.ts'
 import { agrupar, ESPERA_MAX_MS, esperaMs, RAJADA_MAX } from './rajada.ts'
 import { hojeSP, marcarColunaEventoFaltando, NA_FILA, processar, registrarChegada, semColunaEvento, type EventoGateway } from './granninha.ts'
@@ -52,24 +52,84 @@ function enfileirar(chave: string, tarefa: () => Promise<void>) {
  * esperaMs(), a rajada vai para a fila do número e é atendida de uma vez. As linhas seguem gravadas como 'na fila' no banco e
  * protegidas pelo emVoo: se o processo morrer no meio da espera, a varredura (presas.ts) atende cada uma sozinha, nenhuma se perde.
  */
-const rajadas = new Map<string, { eventos: EventoGateway[]; timer: ReturnType<typeof setTimeout>; desde: number }>()
+type Relogio = ReturnType<typeof setTimeout>
+const rajadas = new Map<string, { eventos: EventoGateway[]; timer: Relogio; desde: number; jid: string; timerDigitar?: Relogio; cliente: Promise<boolean> }>()
+
+/**
+ * Sinais de conversa (pedido do Arthur em 2026-11-26): os tiques azuis ~1 s depois de chegar, e o "digitando..." DIGITAR_MS depois da ÚLTIMA
+ * mensagem, mantido enquanto a IA pensa e desligado quando a resposta sai. Mensagem nova no meio da espera desliga o digitando e o relógio
+ * dele volta do zero, como uma pessoa que para de digitar para ler. Só para quem é cliente: número desconhecido recebe silêncio, e ver
+ * "lida" e "digitando" sem resposta seria pior que nada. GRANNINHA_SINAIS=off desliga os três (lida, digitando, reação).
+ */
+const sinaisLigados = () => (process.env.GRANNINHA_SINAIS ?? 'on') !== 'off'
+const digitarMs = () => Number(process.env.GRANNINHA_DIGITAR_MS ?? 3000)
+const lidaMs = () => Number(process.env.GRANNINHA_LIDA_MS ?? 1000)
+/** WhatsApp apaga o "digitando..." sozinho depois de uns segundos: renova enquanto a resposta não sai. */
+const RENOVA_DIGITANDO_MS = 8000
+const digitandoEm = new Map<string, ReturnType<typeof setInterval>>()
+/** Quantas unidades de cada número estão sendo processadas agora (mensagem nova não apaga o digitando de quem já está pensando). */
+const ocupados = new Map<string, number>()
+function ligarDigitando(chave: string, jid: string) {
+  if (!sinaisLigados()) return
+  void digitando(jid, true)
+  if (digitandoEm.has(chave)) return
+  digitandoEm.set(chave, setInterval(() => void digitando(jid, true), RENOVA_DIGITANDO_MS))
+}
+function desligarDigitando(chave: string, jid: string, avisar = true) {
+  const i = digitandoEm.get(chave)
+  if (!i) return
+  clearInterval(i)
+  digitandoEm.delete(chave)
+  if (avisar && sinaisLigados()) void digitando(jid, false)
+}
+const cacheCliente = new Map<string, { ok: boolean; em: number }>()
+async function ehClienteParaSinais(jid: string): Promise<boolean> {
+  if (!sinaisLigados()) return false
+  const k = jid.split('@')[0]
+  const c = cacheCliente.get(k)
+  if (c && Date.now() - c.em < 5 * 60_000) return c.ok
+  try {
+    const ok = !!(await clientePorNumero(jid))
+    cacheCliente.set(k, { ok, em: Date.now() })
+    return ok
+  } catch {
+    return false
+  }
+}
+
 function esperarRajada(chave: string, ev: EventoGateway) {
-  const r = rajadas.get(chave) ?? { eventos: [], timer: undefined as unknown as ReturnType<typeof setTimeout>, desde: Date.now() }
+  const jid = ev.data?.from ?? ev.data?.key?.remoteJid ?? chave
+  const r = rajadas.get(chave) ?? { eventos: [], timer: undefined as unknown as Relogio, desde: Date.now(), jid, cliente: ehClienteParaSinais(jid) }
   clearTimeout(r.timer)
+  clearTimeout(r.timerDigitar)
   r.eventos.push(ev)
   rajadas.set(chave, r)
+  const id = ev.data?.key?.id
+  // Leu: os tiques azuis saem pouco depois de chegar. Escreveu de novo: quem estava "digitando" para (se não está pensando em outra).
+  void r.cliente.then((ok) => {
+    if (!ok) return
+    if (id) setTimeout(() => void marcarLidas(r.jid, [id]), lidaMs())
+    if (!(ocupados.get(chave) ?? 0)) desligarDigitando(chave, r.jid)
+  })
   const espera = Math.min(esperaMs(), Math.max(0, r.desde + ESPERA_MAX_MS - Date.now()))
   if (r.eventos.length >= RAJADA_MAX || espera === 0) return soltarRajada(chave)
+  if (digitarMs() < espera) r.timerDigitar = setTimeout(() => void r.cliente.then((ok) => ok && rajadas.get(chave) === r && ligarDigitando(chave, r.jid)), digitarMs())
   r.timer = setTimeout(() => soltarRajada(chave), espera)
 }
 function soltarRajada(chave: string) {
   const r = rajadas.get(chave)
   if (!r) return
   clearTimeout(r.timer)
+  clearTimeout(r.timerDigitar)
   rajadas.delete(chave)
-  for (const u of agrupar(r.eventos)) {
+  const unidades = agrupar(r.eventos)
+  ocupados.set(chave, (ocupados.get(chave) ?? 0) + unidades.length)
+  for (const u of unidades) {
     enfileirar(chave, async () => {
       const ids = [u.ev.data?.key?.id, ...u.juntadas].filter(Boolean) as string[]
+      const cliente = await r.cliente
+      // Pensando: o digitando fica ligado até a resposta sair.
+      if (cliente) ligarDigitando(chave, r.jid)
       try {
         // As mensagens juntadas saem de 'recebida' antes de a principal começar: a varredura nunca as atende sozinhas depois.
         // Se a marcação falhar (ou pegar menos linhas), atende cada mensagem sozinha, como antes da espera: juntar sem marcar deixaria as
@@ -89,13 +149,26 @@ function soltarRajada(chave: string) {
         for (const ev of fila) {
           const res = await processar(ev, { jaRegistrada: true })
           if (res.status !== 'ignorada' || res.resposta) ultimaMensagem = new Date().toISOString()
-          if (res.para && res.resposta) await entregar(res.para, res.resposta, res.msgId)
+          // A reação vem antes da resposta, como quem acena e depois fala. Na mensagem que foi processada (a última da rajada).
+          if (cliente && res.reacao && res.msgId) await reagir(r.jid, res.msgId, res.reacao)
+          if (res.para && res.resposta) {
+            // A resposta enviada já apaga o "digitando" no WhatsApp: só para a renovação, sem mandar "parou".
+            desligarDigitando(chave, r.jid, false)
+            await entregar(res.para, res.resposta, res.msgId)
+          }
         }
       } catch (e) {
         erros++
         console.error('[webhook]', (e as Error).message)
       } finally {
         for (const id of ids) emVoo.delete(id)
+        const resta = (ocupados.get(chave) ?? 1) - 1
+        if (resta > 0) ocupados.set(chave, resta)
+        else {
+          ocupados.delete(chave)
+          // Acabou tudo (inclusive o caso de não ter resposta, ex.: "ok" que fica em silêncio): o digitando não pode ficar pendurado.
+          desligarDigitando(chave, r.jid)
+        }
       }
     })
   }

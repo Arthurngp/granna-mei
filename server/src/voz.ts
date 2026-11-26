@@ -97,3 +97,16 @@ export const MSG = {
   sairSemConfirmar: 'Pronto. Não vou mais te mandar mensagem por aqui. Se quiser usar a Granninha, é só terminar o cadastro no painel.',
   numeroConfirmado: (nome: string) => `Pronto${nome ? `, ${nome}` : ''}, seu número tá confirmado e agora a gente tá conectado! Me manda o que entrou ou saiu que eu anoto.\n\nPor exemplo: "recebi 150 no pix" ou "paguei 89 de luz".`,
 }
+
+/**
+ * Reação na mensagem da pessoa (pedido do Arthur em 2026-11-26). A regra "nenhum emoji" vale para o TEXTO; a reação é o gesto de quem leu, como
+ * uma pessoa faria. Só em dois momentos, para não virar enxurrada: anotou alguma coisa, ou a pessoa agradeceu ou se despediu.
+ * Pergunta, erro, limite e mensagem ignorada não levam reação.
+ */
+export const REACAO = { anotei: '\u{1F44D}', carinho: '\u2764\uFE0F' } as const
+export function reacaoPara(status: string, intencao: string | null, efeitos: { lancamentos?: unknown[]; contas?: unknown[]; fixas?: unknown[]; contasPagas?: unknown[] }): string | null {
+  if (status !== 'ok') return null
+  if (intencao === 'despedida') return REACAO.carinho
+  const gravou = [efeitos.lancamentos, efeitos.contas, efeitos.fixas, efeitos.contasPagas].some((x) => (x?.length ?? 0) > 0)
+  return gravou ? REACAO.anotei : null
+}
