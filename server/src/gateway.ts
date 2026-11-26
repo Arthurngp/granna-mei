@@ -140,3 +140,34 @@ export async function qrDaSessao(): Promise<{ conectado: boolean; imagem: string
   }
   return { conectado: false, imagem: null, estado: (await statusSessao()).estado, numero: null }
 }
+
+/**
+ * Sinais de conversa (pedido do Arthur em 2026-11-26: "mostrar que está digitando" e "reagir à mensagem", para a conversa ficar fluida).
+ * Rotas lidas no código do WA-AKG, commit 936b26b:
+ * - POST /api/chat/{sessao}/{jid}/presence { presence: 'composing' | 'paused' }  (o "digitando..." some sozinho depois de uns segundos no WhatsApp)
+ * - PUT  /api/chat/{sessao}/{jid}/read     { messageIds: [...] }                (os dois tiques azuis)
+ * - POST /api/messages/{sessao}/{jid}/{id}/react { emoji }                      (reação na mensagem da pessoa)
+ * Tudo é MELHOR ESFORÇO: uma tentativa, prazo curto, e falha nunca impede a resposta (só fica no log, no máximo uma vez por minuto).
+ */
+let avisouSinalEm = 0
+async function sinal(caminho: string, metodo: 'POST' | 'PUT', corpo: unknown): Promise<boolean> {
+  try {
+    const r = await fetch(`${base()}${caminho}`, { method: metodo, headers: cabecalhos(), body: JSON.stringify(corpo), signal: AbortSignal.timeout(5_000) })
+    if (r.ok) return true
+    throw new Error(`HTTP ${r.status}`)
+  } catch (e) {
+    if (Date.now() - avisouSinalEm > 60_000) {
+      avisouSinalEm = Date.now()
+      console.error('[sinal] o gateway não aceitou', caminho.split('/').pop(), (e as Error).message)
+    }
+    return false
+  }
+}
+const jidDe = (para: string) => (para.includes('@') ? para : `${para.replace(/\D/g, '')}@s.whatsapp.net`)
+
+export const digitando = (para: string, ligado: boolean) =>
+  sinal(`/api/chat/${sessao()}/${encodeURIComponent(jidDe(para))}/presence`, 'POST', { presence: ligado ? 'composing' : 'paused' })
+export const marcarLidas = (para: string, ids: string[]) =>
+  ids.length ? sinal(`/api/chat/${sessao()}/${encodeURIComponent(jidDe(para))}/read`, 'PUT', { messageIds: ids }) : Promise.resolve(true)
+export const reagir = (para: string, msgId: string, emoji: string) =>
+  sinal(`/api/messages/${sessao()}/${encodeURIComponent(jidDe(para))}/${encodeURIComponent(msgId)}/react`, 'POST', { emoji })
