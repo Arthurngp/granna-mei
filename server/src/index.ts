@@ -8,7 +8,7 @@
 import { createServer, type IncomingMessage } from 'node:http'
 import './env.ts'
 import { sb } from './banco.ts'
-import { rotaAdmin } from './admin.ts'
+import { ligarSimulador, rotaAdmin } from './admin.ts'
 import { bloquearAtrasadas, rotaCobranca } from './cobranca.ts'
 import { assinaturaValida, conferirNumero, digitando, enviarTexto, marcarLidas, reagir, statusSessao } from './gateway.ts'
 import { excluirVencidas, soltarNumerosDeExcluidas } from './excluir.ts'
@@ -356,11 +356,30 @@ export const varredura = {
   emVoo: () => emVoo,
 }
 
+/**
+ * Depois de gravada a chegada: protege a mensagem da varredura e põe na espera da rajada do número. É o caminho do webhook, e o simulador
+ * do admin entra exatamente por aqui (receberDoSimulador), para nunca divergir do WhatsApp de verdade.
+ */
+function seguirEvento(ev: EventoGateway) {
+  const chave = (ev.data?.from ?? ev.data?.key?.remoteJid ?? 'x').split('@')[0]
+  const idEmVoo = ev.data?.key?.id
+  if (idEmVoo) emVoo.add(idEmVoo)
+  esperarRajada(chave, ev)
+}
+
+/** O simulador do admin: o mesmo registro e o mesmo seguimento do webhook. Só recebe eventos de número do simulador (admin.ts confere). */
+export async function receberDoSimulador(ev: EventoGateway): Promise<'nova' | 'duplicada' | 'ignorar'> {
+  const chegada = await registrarChegada(ev)
+  if (chegada === 'nova') seguirEvento(ev)
+  return chegada
+}
+
 export function iniciar(porta = PORTA) {
+  ligarSimulador(receberDoSimulador)
   const srv = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://x')
     try {
-      if (await rotaAdmin(req, res, url.pathname, () => corpo(req))) return
+      if (await rotaAdmin(req, res, url.pathname, (limite) => corpo(req, limite))) return
       if (await rotaCobranca(req, res, url.pathname)) return
       if (req.method === 'POST' && url.pathname === '/webhook') {
         const bruto = await corpo(req)
@@ -382,11 +401,7 @@ export function iniciar(porta = PORTA) {
           return
         }
         res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"ok":true}')
-        if (chegada !== 'nova') return
-        const chave = (ev.data?.from ?? ev.data?.key?.remoteJid ?? 'x').split('@')[0]
-        const idEmVoo = ev.data?.key?.id
-        if (idEmVoo) emVoo.add(idEmVoo)
-        esperarRajada(chave, ev)
+        if (chegada === 'nova') seguirEvento(ev)
         return
       }
       if (req.method === 'GET' && url.pathname === '/saude') {

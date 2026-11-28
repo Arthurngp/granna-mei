@@ -513,5 +513,81 @@ export async function mockApi(caminho: string, init: RequestInit): Promise<unkno
     iaMock.chaves = iaMock.chaves.filter((k) => k.id !== c.id)
     return { ok: true }
   }
+  if (caminho.startsWith('/admin/simulador')) return mockSimulador(caminho, c)
   return erro('Rota desconhecida no modo de exemplo')
+}
+
+/* ---------------- simulador (modo de exemplo): responde como o servidor, com uma conversa pronta no número 1 ---------------- */
+type EvSim = { seq: number; em: string; tipo: string; id?: string; texto?: string; emoji?: string; ids?: string[] }
+const simMock = (() => {
+  const numeros = ['5500900000001', '5500900000002', '5500900000003', '5500900000004', '5500900000005', '5500900000006']
+  const ev = new Map<string, EvSim[]>()
+  let seq = 0
+  const t = (min: number) => new Date(Date.now() - min * 60_000).toISOString()
+  const push = (n: string, e: Omit<EvSim, 'seq' | 'em'>, em = new Date().toISOString()) => {
+    const l = ev.get(n) ?? []
+    l.push({ ...e, seq: ++seq, em })
+    ev.set(n, l)
+  }
+  const N = numeros[0]
+  push(N, { tipo: 'entrada', id: 'SIMA1', texto: '482913' }, t(12))
+  push(N, { tipo: 'lida', ids: ['SIMA1'] }, t(12))
+  push(N, { tipo: 'texto', texto: 'Oi, Ana! Número confirmado. Eu sou a Granninha e vou anotar o dinheiro do seu negócio por aqui.\n\nPra começar: qual é o seu ramo? Pode ser *salão*, *loja*, *comida* ou outro.' }, t(12))
+  push(N, { tipo: 'entrada', id: 'SIMA2', texto: 'salão de beleza' }, t(10))
+  push(N, { tipo: 'lida', ids: ['SIMA2'] }, t(10))
+  push(N, { tipo: 'texto', texto: 'Anotado, salão. Já deixei as categorias certas para você.\n\nAgora me manda o primeiro registro: pode ser assim, "recebi 150 no pix".' }, t(10))
+  push(N, { tipo: 'entrada', id: 'SIMA3', texto: 'recebi 180 de escova e hidratação no pix' }, t(3))
+  push(N, { tipo: 'lida', ids: ['SIMA3'] }, t(3))
+  push(N, { tipo: 'reacao', id: 'SIMA3', emoji: '👍' }, t(3))
+  push(N, { tipo: 'texto', texto: 'Anotei *R$ 180,00* de entrada em Serviços, no Pix.\n\nSaldo na conta do banco: R$ 180,00.' }, t(3))
+  const msgs = new Map<string, Record<string, unknown>[]>([
+    [N, [
+      { id: 'SIMA3', tipo: 'texto', texto: 'recebi 180 de escova e hidratação no pix', status: 'ok', intencao: 'acoes', resposta: '', erro: null, efeitos: { lancamentos: ['l1'] }, ms: 2140, custo_usd: 0.00041, criado_em: t(3) },
+      { id: 'SIMA2', tipo: 'texto', texto: 'salão de beleza', status: 'ok', intencao: 'config', resposta: '', erro: null, efeitos: {}, ms: 380, custo_usd: 0, criado_em: t(10) },
+      { id: 'SIMA1', tipo: 'texto', texto: '482913', status: 'ok', intencao: null, resposta: '', erro: null, efeitos: {}, ms: 210, custo_usd: null, criado_em: t(12) },
+    ]],
+  ])
+  const contas = new Map<string, Record<string, unknown> | null>([
+    [N, { user_id: 'u-sim1', nome: 'Ana Teste', email: 'sim1-3f9a2c@simulador.granninha.com.br', verificado: true, onboarding_via: 'whats', etapa_config: 'fim', assinatura: { status: 'trial', trial_fim: t(-7 * 24 * 60).slice(0, 10) }, codigo: null, criado_em: t(13) }],
+    [numeros[1], { user_id: 'u-sim2', nome: 'Bruno Teste', email: 'sim2-81be04@simulador.granninha.com.br', verificado: false, onboarding_via: 'whats', etapa_config: null, assinatura: { status: 'trial', trial_fim: t(-7 * 24 * 60).slice(0, 10) }, codigo: { codigo: '730214', expira_em: t(-25) }, criado_em: t(2) }],
+  ])
+  return { numeros, ev, msgs, contas, push }
+})()
+const fmtSim = (n: string) => `(00) ${n.slice(4, 9)}-${n.slice(9)}`
+function mockSimulador(caminho: string, c: Record<string, string | boolean | null>): unknown {
+  const m = simMock
+  if (caminho === '/admin/simulador') {
+    return {
+      pronto: true,
+      ambiente: { onboarding_whats: true, sinais: true, espera_ms: 10_000, digitar_ms: 3000, modo_teste: false, avisos: 'todos' },
+      numeros: m.numeros.map((n) => ({ numero: n, formatado: fmtSim(n), conta: m.contas.get(n) ?? null, ultima: null })),
+    }
+  }
+  if (caminho.startsWith('/admin/simulador/conversa')) {
+    const q = new URLSearchParams(caminho.split('?')[1] ?? '')
+    const n = q.get('numero') ?? ''
+    const depois = Number(q.get('depois') ?? 0)
+    return { eventos: (m.ev.get(n) ?? []).filter((e) => e.seq > depois), mensagens: m.msgs.get(n) ?? [] }
+  }
+  const n = String(c.numero ?? '')
+  if (caminho === '/admin/simulador/enviar') {
+    const id = 'SIM' + Math.random().toString(36).slice(2, 10).toUpperCase()
+    m.push(n, { tipo: 'entrada', id, texto: String(c.texto ?? '') })
+    setTimeout(() => m.push(n, { tipo: 'lida', ids: [id] }), 1000)
+    setTimeout(() => m.push(n, { tipo: 'digitando' }), 3000)
+    setTimeout(() => m.push(n, { tipo: 'texto', texto: `Anotei: "${String(c.texto ?? 'mídia')}". (modo de exemplo: no servidor de verdade quem responde é a Granninha.)` }), 6000)
+    return { id, chegada: 'nova' }
+  }
+  if (caminho === '/admin/simulador/conta') {
+    m.contas.set(n, { user_id: 'u-' + n.slice(-1), nome: String(c.nome || ''), email: `sim${n.slice(-1)}-000000@simulador.granninha.com.br`, verificado: false, onboarding_via: 'whats', etapa_config: null, assinatura: { status: 'trial', trial_fim: '2026-12-05' }, codigo: { codigo: '104582', expira_em: new Date(Date.now() + 1800_000).toISOString() }, criado_em: new Date().toISOString() })
+    return { conta: m.contas.get(n) }
+  }
+  if (caminho === '/admin/simulador/codigo') return { conta: m.contas.get(n) }
+  if (caminho === '/admin/simulador/zerar') {
+    m.contas.delete(n)
+    m.ev.delete(n)
+    m.msgs.delete(n)
+    return { zerado: true }
+  }
+  return Promise.reject(new Error('Rota desconhecida no modo de exemplo'))
 }

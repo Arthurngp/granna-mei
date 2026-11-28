@@ -6,6 +6,7 @@
  */
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { env } from './env.ts'
+import { midiaDoSimulador, numeroDoSimulador, registrarNoSimulador } from './simulador.ts'
 
 function cabecalhos(): Record<string, string> {
   const h: Record<string, string> = { 'x-api-key': env('WA_GATEWAY_API_KEY'), 'Content-Type': 'application/json' }
@@ -26,6 +27,8 @@ const ESPERA_ENVIO_MS = Number(process.env.ENVIO_ESPERA_MS ?? 1000)
  * 4xx de pedido inválido não se repete, porque daria exatamente o mesmo erro.
  */
 export async function enviarTexto(para: string, texto: string, tentativas = TENTATIVAS_ENVIO): Promise<void> {
+  // Número do simulador do admin (simulador.ts): a mensagem vai para a caixa de saída dele, nunca para o gateway.
+  if (numeroDoSimulador(para)) return registrarNoSimulador(para, { tipo: 'texto', texto })
   const jid = para.includes('@') ? para : `${para.replace(/\D/g, '')}@s.whatsapp.net`
   let ultimo = ''
   for (let i = 0; i < Math.max(1, tentativas); i++) {
@@ -56,6 +59,8 @@ export async function enviarTexto(para: string, texto: string, tentativas = TENT
  * e quem chama trata como "não envia".
  */
 export async function conferirNumero(telefone: string): Promise<{ existe: boolean; jid: string | null }> {
+  const sim = numeroDoSimulador(telefone)
+  if (sim) return { existe: true, jid: `${sim}@s.whatsapp.net` }
   const numero = telefone.replace(/\D/g, '')
   if (numero.length < 12) throw new Error('gateway conferir número: número curto demais')
   const r = await fetch(`${base()}/api/chat/${sessao()}/check`, { method: 'POST', headers: cabecalhos(), body: JSON.stringify({ numbers: [numero] }), signal: AbortSignal.timeout(15_000) })
@@ -70,6 +75,8 @@ export async function conferirNumero(telefone: string): Promise<{ existe: boolea
 /** Baixa a mídia que o gateway guardou ("/api/media/arquivo.ogg"). Limite de 15 MB. */
 export async function baixarMidia(fileUrl: string): Promise<{ buffer: Buffer; mime: string }> {
   if (!/^\/api\/media\/[A-Za-z0-9_.-]+$/.test(fileUrl)) throw new Error('caminho de mídia inválido')
+  const sim = midiaDoSimulador(fileUrl)
+  if (sim) return sim
   const r = await fetch(base() + fileUrl, { headers: cabecalhos(), signal: AbortSignal.timeout(20_000) })
   if (!r.ok) throw new Error(`gateway mídia ${r.status}`)
   const buffer = Buffer.from(await r.arrayBuffer())
@@ -176,15 +183,18 @@ const jidDe = (para: string): string | null => {
 const nada = Promise.resolve(false)
 
 export const digitando = (para: string, ligado: boolean) => {
+  if (numeroDoSimulador(para)) return registrarNoSimulador(para, { tipo: ligado ? 'digitando' : 'parou' }), Promise.resolve(true)
   const j = jidDe(para)
   return j ? sinal(`/api/chat/${sessao()}/${encodeURIComponent(j)}/presence`, 'POST', { presence: ligado ? 'composing' : 'paused' }) : nada
 }
 export const marcarLidas = (para: string, ids: string[]) => {
+  if (numeroDoSimulador(para)) return registrarNoSimulador(para, { tipo: 'lida', ids: ids.filter((i) => ID_VALIDO.test(i)) }), Promise.resolve(true)
   const j = jidDe(para)
   const validos = ids.filter((i) => ID_VALIDO.test(i))
   return j && validos.length ? sinal(`/api/chat/${sessao()}/${encodeURIComponent(j)}/read`, 'PUT', { messageIds: validos }) : nada
 }
 export const reagir = (para: string, msgId: string, emoji: string) => {
+  if (numeroDoSimulador(para)) return registrarNoSimulador(para, { tipo: 'reacao', id: msgId, emoji }), Promise.resolve(true)
   const j = jidDe(para)
   return j && ID_VALIDO.test(msgId) ? sinal(`/api/messages/${sessao()}/${encodeURIComponent(j)}/${encodeURIComponent(msgId)}/react`, 'POST', { emoji }) : nada
 }
