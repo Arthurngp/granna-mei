@@ -8,6 +8,7 @@ import { desvincularSessao, garantirSessao, qrDaSessao, statusSessao } from './g
 import { criarTroca, depsReais, tratarTroca } from './trocar-whatsapp.ts'
 import { ErroExclusao, excluirContaDefinitivo } from './excluir.ts'
 import { numeroDeAviso } from './alerta.ts'
+import { rotaSimulador, type Receber } from './simulador-rotas.ts'
 import { adicionarChave, definirChaveAtiva, depsReais as depsIA, ErroConfig, listar as listarIA, removerChave, salvarModelo, salvarModeloCliente } from './ia-config-admin.ts'
 
 // Os domínios valem sempre, além do que vier em ADMIN_ORIGENS: trocar o domínio não pode derrubar o admin.
@@ -37,6 +38,12 @@ const trocaWhats = criarTroca(
     falhou((await sb.from('admin_auditoria').insert({ admin_id: adminId, acao, detalhes })).error, 'auditar a troca de número')
   }),
 )
+
+/** O caminho do webhook, ligado pelo index.ts ao subir (passado assim para o admin.ts não importar o index.ts). */
+let receberSim: Receber | null = null
+export function ligarSimulador(f: Receber | ((ev: never) => Promise<'nova' | 'duplicada' | 'ignorar'>)) {
+  receberSim = f as Receber
+}
 
 export function cors(req: IncomingMessage, res: ServerResponse) {
   const o = req.headers.origin
@@ -68,7 +75,7 @@ async function adminDo(req: IncomingMessage): Promise<string | null> {
 
 const json = (res: ServerResponse, st: number, corpo: unknown) => res.writeHead(st, { 'Content-Type': 'application/json' }).end(JSON.stringify(corpo))
 
-export async function rotaAdmin(req: IncomingMessage, res: ServerResponse, caminho: string, corpo: () => Promise<string>): Promise<boolean> {
+export async function rotaAdmin(req: IncomingMessage, res: ServerResponse, caminho: string, corpo: (limite?: number) => Promise<string>): Promise<boolean> {
   if (!caminho.startsWith('/admin/')) return false
   cors(req, res)
   if (req.method === 'OPTIONS') {
@@ -103,6 +110,16 @@ export async function rotaAdmin(req: IncomingMessage, res: ServerResponse, camin
     falhou((await sb.from('admin_auditoria').insert({ admin_id: admin, acao: 'alerta', detalhes: { situacao: ligado ? `ligado para …${numero.slice(-4)}` : 'desligado' } })).error, 'auditar o alerta')
     json(res, 200, { ok: true, alerta_whats: numero, alerta_ligado: ligado })
     return true
+  }
+  // Simulador de conversa (aba Simulador): o mesmo caminho do WhatsApp, com os números fixos do simulador (simulador-rotas.ts).
+  if (caminho === '/admin/simulador' || caminho.startsWith('/admin/simulador/')) {
+    try {
+      const r = await rotaSimulador(req.method ?? '', caminho, new URL(req.url ?? '/', 'http://x').searchParams, corpo, admin, receberSim)
+      if (r) return json(res, r.status, r.json), true
+    } catch (e) {
+      json(res, 500, { erro: `Simulador: ${(e as Error).message.slice(0, 300)}` })
+      return true
+    }
   }
   const troca = await tratarTroca(trocaWhats, admin, req.method ?? '', caminho, corpo)
   if (troca) {

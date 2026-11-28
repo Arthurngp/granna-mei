@@ -1,0 +1,495 @@
+/* Simulador de conversa: as cores do WhatsApp valem só dentro da conversa; o resto segue o admin. */
+.simu {
+  --wa-topo: #008069;
+  --wa-fundo: #efeae2;
+  --wa-eu: #d9fdd3;
+  --wa-ela: #ffffff;
+  --wa-texto: #111b21;
+  --wa-meta: #667781;
+  --wa-lida: #53bdeb;
+  --wa-barra: #f0f2f5;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 300px;
+  gap: 14px;
+  align-items: start;
+  /* O corpo das páginas do admin é uma grade de 12 colunas: o simulador ocupa a linha inteira, como os cartões. */
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.simu-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.simu-lista button {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-areas: 'av txt' 'av tag';
+  column-gap: 10px;
+  row-gap: 4px;
+  align-items: center;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: var(--sombra);
+}
+.simu-lista button.on {
+  border-color: var(--wa);
+  box-shadow: 0 0 0 2px rgba(23, 163, 79, 0.18);
+}
+.simu-avatar {
+  grid-area: av;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--mist);
+  color: var(--indigo);
+  font-weight: 760;
+}
+.simu-lista-txt {
+  grid-area: txt;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.simu-lista-txt b {
+  font-size: 14.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.simu-lista-txt small {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.simu-lista .simu-tag {
+  grid-area: tag;
+  justify-self: start;
+}
+.simu-tag {
+  font-size: 11.5px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  background: var(--mist);
+  color: var(--indigo-2);
+}
+.simu-tag.espera {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.simu-tag.bom {
+  background: var(--in-bg);
+  color: var(--in);
+}
+
+.simu-chat {
+  display: flex;
+  flex-direction: column;
+  height: clamp(460px, calc(100vh - 310px), 760px);
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  box-shadow: var(--sombra);
+  background: var(--wa-fundo);
+  position: relative;
+}
+.simu-chat-topo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--wa-topo);
+  color: #fff;
+  padding: 10px 14px;
+  min-height: 58px;
+}
+.simu-chat-topo img {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #fff;
+}
+.simu-chat-topo div {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.simu-chat-topo b {
+  font-size: 16px;
+}
+.simu-chat-topo small {
+  font-size: 12.5px;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.simu-chat-topo small.dig {
+  opacity: 1;
+  font-weight: 650;
+}
+.simu-chat-de {
+  font-size: 12px;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.simu-espera {
+  height: 3px;
+  background: #8fe9b8;
+  transform-origin: left;
+  animation: simu-espera linear forwards;
+}
+@keyframes simu-espera {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.simu-fundo {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 5% 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background-color: var(--wa-fundo);
+  background-image: radial-gradient(rgba(17, 27, 33, 0.045) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+.simu-vazio {
+  align-self: center;
+  margin: auto 0;
+  max-width: 340px;
+  text-align: center;
+  background: #fff7d6;
+  color: #54431d;
+  font-size: 13.5px;
+  line-height: 1.45;
+  padding: 10px 14px;
+  border-radius: 10px;
+  box-shadow: 0 1px 1px rgba(11, 20, 26, 0.08);
+}
+.simu-divisor {
+  align-self: center;
+  margin: 8px 0;
+}
+.simu-divisor span {
+  background: #fff;
+  color: var(--wa-meta);
+  font-size: 12px;
+  font-weight: 650;
+  padding: 4px 10px;
+  border-radius: 8px;
+  box-shadow: 0 1px 1px rgba(11, 20, 26, 0.08);
+}
+.simu-bolha {
+  position: relative;
+  max-width: min(78%, 520px);
+  padding: 6px 9px 6px;
+  border-radius: 9px;
+  color: var(--wa-texto);
+  font-size: 14.5px;
+  line-height: 1.4;
+  box-shadow: 0 1px 1px rgba(11, 20, 26, 0.1);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.simu-bolha.ela {
+  align-self: flex-start;
+  background: var(--wa-ela);
+  border-top-left-radius: 2px;
+}
+.simu-bolha.eu {
+  align-self: flex-end;
+  background: var(--wa-eu);
+  border-top-right-radius: 2px;
+  cursor: pointer;
+}
+.simu-bolha.eu.escolhida {
+  outline: 2px solid var(--wa-topo);
+  outline-offset: 1px;
+}
+.simu-bolha.eu.falhou {
+  background: var(--out-bg);
+}
+.simu-bolha.ela + .simu-bolha.eu,
+.simu-bolha.eu + .simu-bolha.ela {
+  margin-top: 6px;
+}
+.simu-txt a {
+  color: #027eb5;
+  text-decoration: underline;
+}
+.simu-meta {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 3px;
+  margin-top: 2px;
+  color: var(--wa-meta);
+  font-size: 11px;
+}
+.simu-meta .lida {
+  color: var(--wa-lida);
+}
+.simu-reacao {
+  position: absolute;
+  left: -10px;
+  bottom: -12px;
+  background: #fff;
+  border-radius: 999px;
+  padding: 1px 5px;
+  font-size: 14px;
+  box-shadow: 0 1px 3px rgba(11, 20, 26, 0.18);
+}
+.simu-bolha.eu:has(.simu-reacao) {
+  margin-bottom: 12px;
+}
+.simu-falhou {
+  display: block;
+  color: var(--out);
+  font-size: 12px;
+  margin-top: 2px;
+}
+.simu-foto {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+}
+.simu-audio {
+  display: block;
+  width: 240px;
+  max-width: 100%;
+  height: 36px;
+}
+.simu-arq {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(11, 20, 26, 0.05);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  font-size: 13.5px;
+}
+.simu-digitando {
+  display: flex;
+  gap: 4px;
+  padding: 12px 14px;
+}
+.simu-digitando span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--wa-meta);
+  animation: simu-pula 1.2s infinite ease-in-out;
+}
+.simu-digitando span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.simu-digitando span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes simu-pula {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+.simu-recado {
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 13px;
+  padding: 8px 14px;
+}
+.simu-barra {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  background: var(--wa-barra);
+  padding: 8px 10px calc(8px + var(--sab));
+}
+.simu-barra textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 0;
+  border-radius: 10px;
+  padding: 11px 12px;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.35;
+  min-height: 44px;
+  max-height: 120px;
+  background: #fff;
+  color: var(--wa-texto);
+  field-sizing: content;
+}
+.simu-barra textarea:focus {
+  outline: 2px solid rgba(0, 128, 105, 0.35);
+}
+.simu-ic {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #54656f;
+}
+.simu-enviar {
+  background: var(--wa-topo);
+  color: #fff;
+}
+.simu-enviar.gravando {
+  background: var(--out);
+}
+
+.simu-painel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.simu-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+.simu-card h3 {
+  font-size: 15px;
+  margin: 0;
+}
+.simu-card p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.simu-conta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+}
+.simu-conta small {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.simu-conta .simu-tag {
+  margin-top: 4px;
+}
+.simu-dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 10px;
+  margin: 0;
+  font-size: 13px;
+}
+.simu-dl dt {
+  color: var(--muted);
+}
+.simu-dl dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.simu-leu {
+  font-style: italic;
+}
+.simu-codigo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 12px;
+}
+.simu-codigo small {
+  color: var(--muted);
+  font-weight: 650;
+}
+.simu-codigo b {
+  font-size: 30px;
+  letter-spacing: 6px;
+  font-variant-numeric: tabular-nums;
+  color: var(--indigo);
+}
+.simu-zerar-abre {
+  align-self: flex-start;
+  color: var(--out);
+}
+.simu-zerar {
+  background: var(--out-bg);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.simu-zerar-bt {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.simu-erro {
+  color: var(--out);
+  font-size: 13px;
+}
+.simu-nota {
+  font-size: 12.5px !important;
+}
+
+@media (max-width: 1080px) {
+  .simu {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+  .simu-lista {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .simu-lista button {
+    flex: none;
+    width: 210px;
+  }
+}
+@media (max-width: 760px) {
+  .simu {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .simu-lista button {
+    width: 186px;
+  }
+  .simu-chat {
+    height: 72vh;
+    min-height: 420px;
+  }
+  .simu-fundo {
+    padding: 12px 10px 8px;
+  }
+  .simu-bolha {
+    max-width: 86%;
+  }
+  .simu-chat-de {
+    display: none;
+  }
+}

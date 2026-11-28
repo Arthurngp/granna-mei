@@ -7,11 +7,12 @@ import { Avisos } from './telas/Avisos'
 import { Clientes } from './telas/Clientes'
 import { Configuracoes } from './telas/Configuracoes'
 import { Granninha } from './telas/Granninha'
+import { Simulador } from './telas/Simulador'
 import { SlotCtx } from './telas/visao/layout'
 import { Visao } from './telas/Visao'
 
 type Etapa = 'carregando' | 'entrar' | 'sem-acesso' | 'ativar-2fa' | 'codigo-2fa' | 'dentro'
-type Aba = 'visao' | 'clientes' | 'granninha' | 'avisos' | 'auditoria' | 'configuracoes'
+type Aba = 'visao' | 'clientes' | 'granninha' | 'simulador' | 'avisos' | 'auditoria' | 'configuracoes'
 
 export default function App() {
   const [etapa, setEtapa] = useState<Etapa>('carregando')
@@ -74,6 +75,7 @@ export default function App() {
                 ['visao', 'Visão geral'],
                 ['clientes', 'Clientes'],
                 ['granninha', 'Granninha'],
+                ['simulador', 'Simulador'],
                 ['avisos', 'Avisos'],
                 ['auditoria', 'Auditoria'],
                 ['configuracoes', 'Configurações'],
@@ -92,6 +94,7 @@ export default function App() {
         {aba === 'visao' && <Visao />}
         {aba === 'clientes' && <Clientes />}
         {aba === 'granninha' && <Granninha />}
+        {aba === 'simulador' && <Simulador />}
         {aba === 'avisos' && <Avisos />}
         {aba === 'auditoria' && <Auditoria />}
         {aba === 'configuracoes' && <Configuracoes />}

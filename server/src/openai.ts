@@ -168,13 +168,25 @@ export async function jsonEstruturado<T>(sistema: string, usuario: string | { ty
 }
 
 /** Transcreve um áudio (ogg/opus do WhatsApp) e devolve o consumo, para o custo no admin. */
+/**
+ * O nome do arquivo diz o formato para a transcrição. O WhatsApp manda sempre ogg; mp3 vem dos testes; webm, m4a e wav vêm do áudio gravado
+ * no navegador pelo simulador do admin (Chrome grava webm, Safari grava mp4).
+ */
+export function nomeDoAudio(mime: string): string {
+  if (mime.includes('mpeg')) return 'audio.mp3'
+  if (mime.includes('webm')) return 'audio.webm'
+  if (mime.includes('mp4') || mime.includes('m4a') || mime.includes('aac')) return 'audio.m4a'
+  if (mime.includes('wav')) return 'audio.wav'
+  return 'audio.ogg'
+}
+
 export async function transcrever(audio: Buffer, mime = 'audio/ogg'): Promise<{ texto: string; uso: Uso }> {
   const escolhido = await modeloDe('audio')
   const enviar = (modelo: string) => {
     const form = new FormData()
     form.append('model', modelo)
     form.append('language', 'pt')
-    form.append('file', new Blob([new Uint8Array(audio)], { type: mime }), mime.includes('mpeg') ? 'audio.mp3' : 'audio.ogg')
+    form.append('file', new Blob([new Uint8Array(audio)], { type: mime }), nomeDoAudio(mime))
     return pedir('/audio/transcriptions', { method: 'POST', body: form })
   }
   let r: Response

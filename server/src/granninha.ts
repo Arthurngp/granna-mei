@@ -17,6 +17,7 @@ import { avisoDeRetirada, categoriaDeNegocio, ehDoNegocio } from './retirada.ts'
 import { faturaDe } from './cartao.ts'
 import { executar, reverter, ultimaComEfeito, ultimaMensagem, type Efeitos, type Origem } from './executar.ts'
 import { baixarMidia } from './gateway.ts'
+import { ehDoSimulador } from './simulador.ts'
 import { BOLETO, conferir, interpretar, NEGOCIO, opcaoEscolhida, PESSOAL, type Acao, type Contexto, type Opcao } from './interpretar.ts'
 import { lerDocumento, textoDoDocumento, type Transacao } from './midia.ts'
 import { cruzar as cruzarExtrato, dataDe, falarDoExtrato, naoParaAnotar, perguntaSobreAnotados, simParaAnotar, type Anotado } from './extrato.ts'
@@ -208,7 +209,8 @@ export async function processar(ev: EventoGateway, opts: { jaRegistrada?: boolea
   // Modo teste: com WA_SOMENTE_NUMEROS preenchido, só esses números conversam. O resto é ignorado em
   // silêncio (sem resposta, sem IA), mas a linha sai de "recebida" para a varredura não voltar nela.
   const liberados = (process.env.WA_SOMENTE_NUMEROS ?? '').split(',').map((n) => chaveDoNumero(n.trim())).filter(Boolean)
-  const fora = liberados.length > 0 && !liberados.includes(chaveDoNumero(de))
+  // O número do simulador do admin (simulador.ts) não é pessoa real: o modo teste não o cala, senão o simulador fica mudo sem dizer por quê.
+  const fora = liberados.length > 0 && !liberados.includes(chaveDoNumero(de)) && !ehDoSimulador(de)
   if (fora) {
     status = 'ignorada'
     erro = 'fora da lista de números liberados'
