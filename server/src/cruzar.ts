@@ -62,6 +62,12 @@ export function chaveBanco(texto: string | null | undefined): string | null {
   return null
 }
 
+/** Quantos bancos conhecidos diferentes o texto cita ("nubank e inter" → 2). */
+export function quantosBancos(texto: string | null | undefined): number {
+  const t = tira(texto ?? '')
+  return t ? BANCOS.filter(([, re]) => re.test(t)).length : 0
+}
+
 /** O titular do comprovante é o dono (nome da pessoa ou do negócio)? Pelo menos 2 palavras em comum, ou 1 se o nome tem uma só. */
 export function titularEhDono(titular: string | null | undefined, donos: (string | null | undefined)[]): boolean {
   const pal = (s: string) => tira(s).split(' ').filter((p) => p.length >= 3 && !['ltda', 'eireli', 'cia', 'servicos', 'comercio', 'mei'].includes(p))
