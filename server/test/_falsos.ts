@@ -182,7 +182,9 @@ export const SEM_ACAO = { intencao: 'outro', acoes: [], pergunta: null, correcao
 export const ia = {
   /** Texto da mensagem (sem o invólucro) → o que a "IA" entendeu. */
   regras: [] as [RegExp, unknown][],
-  chamadas: { interpretacao: 0, resposta: 0, transcricao: 0, documento: 0, ajuda: 0 },
+  chamadas: { interpretacao: 0, resposta: 0, transcricao: 0, documento: 0, ajuda: 0, configuracao: 0 },
+  /** IA da configuração pela conversa (config-entender.ts): mensagem → o que ela entendeu. Sem regra que case, "não é resposta". */
+  regrasConfig: [] as [RegExp, Record<string, unknown>][],
   /** O que a IA falsa devolve para a ajuda, e o último prompt (sistema e usuário) que ela recebeu. */
   respostaAjuda: 'Eu sou a Granninha, ajudo a anotar o dinheiro do seu negócio. Me manda o primeiro registro quando quiser.',
   ultimaAjuda: { sistema: '', usuario: '' },
@@ -234,6 +236,11 @@ function saidaFalsa(nome: string, sistema: string, usuario: string): unknown {
     const m = /RESUMO \(JSON\):\n([\s\S]*?)\n\nPERGUNTA:/.exec(usuario)
     ia.ultimoResumo = m ? JSON.parse(m[1]) : null
     saida = { resposta: 'RESPOSTA-DA-IA' }
+  } else if (nome === 'configuracao') {
+    ia.chamadas.configuracao++
+    const msg = /Mensagem: ([\s\S]*)$/.exec(usuario)?.[1] ?? usuario
+    const achou = ia.regrasConfig.find(([re]) => re.test(msg))?.[1]
+    saida = { eh_resposta: false, pular: false, sim_nao: null, ramo: null, ocupacao: null, contas: [], valor: null, cartao_banco: null, cartao_dia: null, ...(achou ?? {}) }
   } else throw new Error('esquema de IA desconhecido: ' + nome)
   return saida
 }
@@ -398,7 +405,8 @@ export function semear() {
   E.falharSelect = null
   E.storage = []
   ia.regras = []
-  ia.chamadas = { interpretacao: 0, resposta: 0, transcricao: 0, documento: 0, ajuda: 0 }
+  ia.chamadas = { interpretacao: 0, resposta: 0, transcricao: 0, documento: 0, ajuda: 0, configuracao: 0 }
+  ia.regrasConfig = []
   ia.respostaAjuda = 'Eu sou a Granninha, ajudo a anotar o dinheiro do seu negócio. Me manda o primeiro registro quando quiser.'
   ia.ultimaAjuda = { sistema: '', usuario: '' }
   ia.ultimoSistemaPergunta = ''

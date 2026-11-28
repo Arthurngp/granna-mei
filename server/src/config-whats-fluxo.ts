@@ -9,9 +9,12 @@
 import { randomUUID } from 'node:crypto'
 import { falhou, sb } from './banco.ts'
 import {
-  abandonou, bancoConhecido, boasVindas, categoriasPadrao, DAS, ehEspecie, ehNao, ehPronto, ehPular, ehSim, fechamentoDe, lerBanco, lerCartao, lerOcupacao, lerRamo, lerValor,
-  MATERIAL_POR_RAMO, MAX_BANCOS, MAX_CARTOES, MAX_VOLTAS, MAIS_FIXA, pergunta, RAMOS, TEXTO_FIM, type Etapa, type EstadoConfig,
+  abandonou, bancoConhecido, boasVindas, categoriasPadrao, DAS, ehEspecie, ehNao, ehPronto, ehPular, ehSim, fechamentoDe, lerBanco, lerCartao, lerOcupacao, lerRamo, lerReserva, lerValor,
+  MATERIAL_POR_RAMO, MAX_BANCOS, MAX_CARTOES, MAX_VOLTAS, MAIS_FIXA, naConta, nomeDoBanco, pareceDuvida, pareceLancamento, pergunta, sugerirBanco, TEXTO_FIM, valorNaFrase,
+  type Etapa, type EstadoConfig,
 } from './config-whats.ts'
+import { entenderResposta, type Entendido } from './config-entender.ts'
+import type { Uso } from './openai.ts'
 import { somaMeses, vencimentoNoMes } from './datas.ts'
 import { despedidaDe } from './despedida.ts'
 
@@ -112,8 +115,11 @@ export interface RespostaConfig {
   /** A mensagem foi resposta da configuração (nada mais a fazer com ela). */
   tratou: boolean
   resposta: string
+  /** Consumo da IA da configuração, quando ela foi chamada (entra no custo da mensagem, tratada ou não). */
+  uso?: Uso | null
 }
 const NAO_TRATOU: RespostaConfig = { tratou: false, resposta: '' }
+const naoTratou = (uso: Uso | null | undefined): RespostaConfig => ({ tratou: false, resposta: '', uso: uso ?? null })
 
 async function bancosDe(userId: string) {
   const r = await sb.from('carteiras').select('id,nome,tipo,padrao').eq('user_id', userId)
@@ -121,8 +127,10 @@ async function bancosDe(userId: string) {
   return (r.data ?? []) as { id: string; nome: string; tipo: string; padrao: boolean }[]
 }
 
+type TipoCarteira = 'banco' | 'dinheiro' | 'investimento'
+
 /** Põe o nome do banco: renomeia a "Conta do banco" que nasceu no cadastro; se ela já tem nome, cria outra conta. Devolve id e nome. */
-async function porBanco(userId: string, nome: string, tipo: 'banco' | 'dinheiro'): Promise<{ id: string; nome: string }> {
+async function porBanco(userId: string, nome: string, tipo: TipoCarteira): Promise<{ id: string; nome: string }> {
   const cs = await bancosDe(userId)
   const iguais = cs.find((c) => c.tipo === tipo && c.nome.trim().toLowerCase() === nome.trim().toLowerCase())
   if (iguais) return iguais
@@ -131,7 +139,8 @@ async function porBanco(userId: string, nome: string, tipo: 'banco' | 'dinheiro'
     falhou((await sb.from('carteiras').update({ nome }).eq('user_id', userId).eq('id', generica.id)).error, 'config: nome do banco')
     return { id: generica.id, nome }
   }
-  const novo = { user_id: userId, id: id(tipo === 'banco' ? 'b' : 'd'), nome, tipo, saldo_inicial: 0, padrao: !cs.some((c) => c.padrao) }
+  // Dinheiro guardado (caixinha, poupança) nunca é a conta principal: o dia a dia sai do banco ou da espécie.
+  const novo = { user_id: userId, id: id(tipo === 'banco' ? 'b' : tipo === 'dinheiro' ? 'd' : 'r'), nome, tipo, saldo_inicial: 0, padrao: tipo !== 'investimento' && !cs.some((c) => c.padrao) }
   falhou((await sb.from('carteiras').insert(novo)).error, 'config: conta nova')
   return { id: novo.id, nome }
 }
@@ -149,6 +158,7 @@ async function porSaldo(userId: string, carteira: string, valor: number): Promis
 }
 
 const real = (n: number) => 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const maiuscula = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 /** Avança para a etapa seguinte, grava, e devolve a pergunta dela (ou a mensagem final). */
 async function irPara(userId: string, e: EstadoConfig, etapa: Etapa, extra: Partial<EstadoConfig> = {}, nomeConta?: string): Promise<string> {
@@ -163,10 +173,114 @@ async function irPara(userId: string, e: EstadoConfig, etapa: Etapa, extra: Part
 }
 
 const juntar = (...p: string[]) => p.filter(Boolean).join('\n\n')
+const LIMPO: Partial<EstadoConfig> = { bancoNome: undefined, voltaPara: undefined, sugestao: undefined, saldoDito: undefined }
+
+/** "Sou videomaker", "trabalho com fotografia": a ocupação sem o "sou". */
+const semSou = (t: string) => t.trim().replace(/^(eu\s+)?(sou|trabalho com|trabalho de|trabalho como|faço|mexo com|atuo como)\s+(um|uma)?\s*/i, '')
+
+/** As contas que a configuração conhece, para a IA não perguntar de novo o que já foi dito. */
+async function nomesDasContas(userId: string) {
+  return (await bancosDe(userId)).filter((c) => c.tipo !== 'cartao' && c.nome !== 'Conta do banco').map((c) => c.nome)
+}
+
+/** A IA entende a resposta que o código não leu. Só para o que pode ser resposta: lançamento e dúvida vão para a conversa normal sem gastar IA. */
+async function entender(userId: string, e: EstadoConfig, t: string): Promise<{ d: Entendido | null; uso: Uso | null; tentou: boolean }> {
+  if (pareceLancamento(t) || pareceDuvida(t) || t.length > 300) return { d: null, uso: null, tentou: false }
+  const r = await entenderResposta(e.etapa, t, await nomesDasContas(userId))
+  return { d: r.dados, uso: r.uso, tentou: true }
+}
+
+/** Grava o ramo (e a ocupação) e troca o nome da categoria de material pelo do ramo. */
+async function porRamo(userId: string, ramo: string | null, ocupacao: string | null) {
+  const muda: Record<string, string> = {}
+  if (ramo) muda.ramo = ramo
+  if (ocupacao) muda.ocupacao = ocupacao
+  if (Object.keys(muda).length) falhou((await sb.from('perfis').update(muda).eq('id', userId)).error, 'config: ramo')
+  if (ramo) falhou((await sb.from('categorias').update({ nome: MATERIAL_POR_RAMO[ramo] ?? 'Material' }).eq('user_id', userId).eq('id', 'material')).error, 'config: categoria do ramo')
+}
+
+/** Depois do ramo: "Boa, videomaker! Anotado." e a pergunta do banco. */
+async function depoisDoRamo(userId: string, e: EstadoConfig, ocupacao: string | null): Promise<string> {
+  return juntar(ocupacao ? `Boa, ${ocupacao}! Anotado.` : 'Anotado!', await irPara(userId, e, 'banco'))
+}
+
+interface ContaDita {
+  tipo: TipoCarteira
+  nome: string
+  saldo: number | null
+}
+
+/** "Caixinha" sem o banco, e a pessoa tem um banco só com nome: é a caixinha dele ("Caixinha Nubank"). */
+function nomeDaReserva(base: string, cs: { nome: string; tipo: string }[]): string {
+  if (base.includes(' ')) return base
+  const bancos = cs.filter((c) => c.tipo === 'banco' && c.nome !== 'Conta do banco')
+  return bancos.length === 1 ? `${base} ${bancos[0].nome}` : base
+}
+
+/**
+ * Cria as contas ditas (banco, dinheiro, caixinha), põe o saldo de quem veio com valor e pergunta o saldo de quem veio sem, uma de cada vez.
+ * Conta que já existe com saldo posto aqui não é perguntada de novo ("eu já disse que no Nubank tinha 450").
+ */
+async function registrarContas(userId: string, e: EstadoConfig, ditas: ContaDita[]): Promise<string> {
+  const notas: string[] = []
+  const pendentes = [...(e.pendentes ?? [])]
+  const saldoFixado = { ...(e.saldoFixado ?? {}) }
+  let bancos = e.bancos ?? 0
+  const nomes = new Map<string, string>()
+  for (const d of ditas) {
+    const c = await porBanco(userId, d.nome, d.tipo)
+    nomes.set(c.id, c.nome)
+    bancos++
+    const ja = saldoFixado[c.id]
+    if (typeof ja === 'number') {
+      notas.push(`${maiuscula(naConta(c.nome))} já tá anotado: ${real(ja)}.`)
+    } else if (d.saldo !== null) {
+      const pos = await porSaldo(userId, c.id, d.saldo)
+      if (pos) saldoFixado[c.id] = d.saldo
+      notas.push(pos ? `Anotei ${real(d.saldo)} ${naConta(c.nome)}.` : `${maiuscula(naConta(c.nome))} já tem lançamento, então não mexi no saldo.`)
+    } else if (!pendentes.includes(c.id)) pendentes.push(c.id)
+  }
+  const base: Partial<EstadoConfig> = { ...LIMPO, saldoFixado, bancos }
+  if (pendentes.length) {
+    const [prox, ...resto] = pendentes
+    const nome = nomes.get(prox) ?? (await bancosDe(userId)).find((c) => c.id === prox)?.nome
+    return juntar(...notas, await irPara(userId, e, 'saldo', { ...base, carteira: prox, pendentes: resto }, nome))
+  }
+  return juntar(...notas, await irPara(userId, e, bancos >= MAX_BANCOS ? 'cartao' : 'mais_banco', { ...base, carteira: undefined, pendentes: undefined }))
+}
+
+/** Confirma um nome antes de virar conta: o banco escrito errado ("Você quis dizer Nubank?") ou o nome que não é de banco conhecido. */
+async function confirmarBanco(userId: string, e: EstadoConfig, nome: string, sugestao: boolean, saldo: number | null): Promise<string> {
+  const volta = e.etapa === 'banco_confirma' ? (e.voltaPara ?? 'banco') : (e.etapa as 'banco' | 'mais_banco')
+  return irPara(userId, e, 'banco_confirma', { bancoNome: nome, voltaPara: volta, sugestao: sugestao || undefined, saldoDito: saldo ?? undefined })
+}
+
+/** O que a IA entendeu como contas, já no formato de gravar. Banco com nome corrigido pela IA ("nubak") passa pela confirmação. */
+async function contasDaIA(userId: string, e: EstadoConfig, d: Entendido): Promise<{ resposta: string } | null> {
+  const cs = await bancosDe(userId)
+  const ditas: ContaDita[] = []
+  for (const c of d.contas) {
+    if (c.tipo === 'dinheiro') ditas.push({ tipo: 'dinheiro', nome: 'Dinheiro', saldo: c.saldo })
+    else if (c.tipo === 'reserva') ditas.push({ tipo: 'investimento', nome: nomeDaReserva(lerReserva(c.nome_dito) ?? (c.banco ? `Caixinha ${c.banco}` : 'Caixinha'), cs), saldo: c.saldo })
+    else if (c.banco) {
+      // A pessoa escreveu diferente do nome certo: confirma antes ("Você quis dizer Nubank?"). Só quando é a única conta da mensagem.
+      if (!nomeDoBanco(c.nome_dito) && d.contas.length === 1) return { resposta: await confirmarBanco(userId, e, c.banco, true, c.saldo) }
+      ditas.push({ tipo: 'banco', nome: c.banco, saldo: c.saldo })
+    } else if (d.contas.length === 1) {
+      const nome = lerBanco(c.nome_dito)
+      if (!nome) return null
+      return { resposta: await confirmarBanco(userId, e, nome, false, c.saldo) }
+    }
+  }
+  if (!ditas.length) return null
+  return { resposta: await registrarContas(userId, e, ditas) }
+}
 
 /**
  * A mensagem de texto (ou áudio já transcrito) é resposta da pergunta da configuração? Se for, faz o que ela pede e devolve a próxima pergunta.
- * Na etapa das contas de todo mês, só PRONTO é tratado aqui: o resto passa pelo leitor normal ("aluguel 900 dia 10").
+ * Primeiro o código (número, nome de banco, valor, sim/não); o que ele não lê e pode ser resposta vai para a IA (config-entender.ts). Lançamento e
+ * dúvida nunca são resposta: vão para a conversa normal, e a pergunta da configuração volta depois. Na etapa das contas de todo mês, só o "é só
+ * isso" é tratado aqui: o resto passa pelo leitor normal ("aluguel 900 dia 10").
  */
 export async function responder(userId: string, e: EstadoConfig, texto: string): Promise<RespostaConfig> {
   const t = texto.trim()
@@ -174,83 +288,158 @@ export async function responder(userId: string, e: EstadoConfig, texto: string):
   const pulou = ehPular(t)
   switch (e.etapa) {
     case 'ramo': {
-      const ramo = pulou ? null : lerRamo(t)
-      if (!pulou && !ramo) return /^\s*\d{1,2}\s*$/.test(t) ? { tratou: true, resposta: `Não achei essa opção. ${pergunta(e)}` } : NAO_TRATOU
-      if (ramo) {
-        falhou((await sb.from('perfis').update({ ramo }).eq('id', userId)).error, 'config: ramo')
-        falhou((await sb.from('categorias').update({ nome: MATERIAL_POR_RAMO[ramo] ?? 'Material' }).eq('user_id', userId).eq('id', 'material')).error, 'config: categoria do ramo')
+      if (pulou) return { tratou: true, resposta: await irPara(userId, e, 'banco') }
+      const ramo = lerRamo(t)
+      if (ramo === 'outro') {
+        await porRamo(userId, 'outro', null)
+        return { tratou: true, resposta: await irPara(userId, e, 'ocupacao') }
       }
-      if (ramo === 'outro') return { tratou: true, resposta: await irPara(userId, e, 'ocupacao') }
-      const nomeRamo = RAMOS.find((r) => r.id === ramo)?.nome
-      return { tratou: true, resposta: juntar(nomeRamo ? `Anotado: ${nomeRamo}.` : '', await irPara(userId, e, 'banco')) }
+      if (ramo) {
+        await porRamo(userId, ramo, null)
+        return { tratou: true, resposta: await depoisDoRamo(userId, e, null) }
+      }
+      if (/^\s*\d{1,2}\s*$/.test(t)) return { tratou: true, resposta: `Não entendi esse número. ${pergunta(e)}` }
+      if (despedidaDe(t)) return NAO_TRATOU
+      const { d, uso, tentou } = await entender(userId, e, t)
+      if (!d) {
+        // IA fora: a resposta livre que parece uma profissão ("sou videomaker") é aceita como está. Lançamento e dúvida não.
+        const oc = tentou ? lerOcupacao(semSou(t)) : null
+        if (!oc) return naoTratou(uso)
+        await porRamo(userId, 'outro', oc.toLowerCase())
+        return { tratou: true, resposta: await depoisDoRamo(userId, e, oc.toLowerCase()), uso }
+      }
+      if (!d.eh_resposta) return naoTratou(uso)
+      if (d.pular) return { tratou: true, resposta: await irPara(userId, e, 'banco'), uso }
+      const oc = d.ocupacao ?? (d.ramo ? null : lerOcupacao(semSou(t))?.toLowerCase() ?? null)
+      const r = d.ramo ?? (oc ? 'outro' : null)
+      if (!r) return naoTratou(uso)
+      await porRamo(userId, r, oc)
+      if (r === 'outro' && !oc) return { tratou: true, resposta: await irPara(userId, e, 'ocupacao'), uso }
+      return { tratou: true, resposta: await depoisDoRamo(userId, e, oc), uso }
     }
     case 'ocupacao': {
-      const oc = pulou ? null : lerOcupacao(t)
-      if (!pulou && !oc) return NAO_TRATOU
-      if (oc) falhou((await sb.from('perfis').update({ ocupacao: oc }).eq('id', userId)).error, 'config: ocupação')
-      return { tratou: true, resposta: await irPara(userId, e, 'banco') }
+      const oc = pulou ? null : lerOcupacao(semSou(t))
+      if (!pulou && (!oc || pareceLancamento(t) || pareceDuvida(t))) return NAO_TRATOU
+      if (oc) await porRamo(userId, null, oc.toLowerCase())
+      return { tratou: true, resposta: await depoisDoRamo(userId, e, oc ? oc.toLowerCase() : null) }
     }
     case 'banco':
     case 'mais_banco': {
       if (pulou || (e.etapa === 'mais_banco' && ehNao(t))) {
-        if (e.etapa === 'banco') return { tratou: true, resposta: juntar('Tudo bem, deixei como "Conta do banco". Dá pra mudar o nome no painel.', await irPara(userId, e, 'saldo', { carteira: undefined }, 'Conta do banco')) }
+        if (e.etapa === 'banco') return { tratou: true, resposta: juntar('Tudo bem, deixo como "Conta do banco" por enquanto.', await irPara(userId, e, 'saldo', { carteira: undefined }, 'Conta do banco')) }
         return { tratou: true, resposta: await irPara(userId, e, 'cartao') }
       }
       // "ok", "certo", "valeu", "kkk": não é resposta, é reação. Vai para o fluxo normal (que fica em silêncio) e a pergunta volta depois.
       if (despedidaDe(t)) return NAO_TRATOU
-      const especie = ehEspecie(t)
-      const nome = especie ? 'Dinheiro' : lerBanco(t)
-      if (!nome) return NAO_TRATOU
-      // Nome que não é de banco conhecido: confirma antes de virar conta.
-      if (!especie && !bancoConhecido(t)) return { tratou: true, resposta: await irPara(userId, e, 'banco_confirma', { bancoNome: nome, voltaPara: e.etapa }) }
-      return { tratou: true, resposta: await criarBancoEPedirSaldo(userId, e, nome, especie ? 'dinheiro' : 'banco') }
+      if (ehSim(t)) return { tratou: true, resposta: 'Qual? Me diz o nome do banco, ou se é caixinha ou dinheiro em casa.' }
+      if (!pareceLancamento(t)) {
+        const valor = valorNaFrase(t)
+        const semValor = t.replace(/(?:r\$\s*)?\d[\d.,]*(?:\s*(?:reais|real|conto|contos))?/gi, ' ').replace(/\b(tenho|tem|uns|umas|mais ou menos|la|lá|com|e)\b/gi, ' ').replace(/\s+/g, ' ').trim()
+        // A caixinha vem antes do banco: "caixinha do nubank" é dinheiro guardado, não um segundo Nubank.
+        const reserva = lerReserva(t)
+        if (reserva) return { tratou: true, resposta: await registrarContas(userId, e, [{ tipo: 'investimento', nome: nomeDaReserva(reserva, await bancosDe(userId)), saldo: valor }]) }
+        if (ehEspecie(t)) return { tratou: true, resposta: await registrarContas(userId, e, [{ tipo: 'dinheiro', nome: 'Dinheiro', saldo: valor }]) }
+        const conhecido = nomeDoBanco(semValor)
+        if (conhecido && semValor.split(' ').length <= 4) return { tratou: true, resposta: await registrarContas(userId, e, [{ tipo: 'banco', nome: conhecido, saldo: valor }]) }
+        const sug = sugerirBanco(semValor)
+        if (sug) return { tratou: true, resposta: await confirmarBanco(userId, e, sug, true, valor) }
+      }
+      const { d, uso } = await entender(userId, e, t)
+      if (!d) {
+        // IA fora (ou mensagem que não é para ela): o caminho de sempre, nome curto confirma antes de virar conta.
+        const nome = pareceLancamento(t) ? null : lerBanco(t)
+        if (!nome) return naoTratou(uso)
+        if (bancoConhecido(t)) return { tratou: true, resposta: await registrarContas(userId, e, [{ tipo: 'banco', nome, saldo: null }]), uso }
+        return { tratou: true, resposta: await confirmarBanco(userId, e, nome, false, null), uso }
+      }
+      if (!d.eh_resposta) return naoTratou(uso)
+      if (d.pular || (e.etapa === 'mais_banco' && d.sim_nao === 'nao' && !d.contas.length)) {
+        if (e.etapa === 'banco') return { tratou: true, resposta: juntar('Tudo bem, deixo como "Conta do banco" por enquanto.', await irPara(userId, e, 'saldo', { carteira: undefined }, 'Conta do banco')), uso }
+        return { tratou: true, resposta: await irPara(userId, e, 'cartao'), uso }
+      }
+      if (d.sim_nao === 'sim' && !d.contas.length) return { tratou: true, resposta: 'Qual? Me diz o nome do banco, ou se é caixinha ou dinheiro em casa.', uso }
+      const r = await contasDaIA(userId, e, d)
+      return r ? { tratou: true, resposta: r.resposta, uso } : naoTratou(uso)
     }
     case 'banco_confirma': {
       const volta = e.voltaPara ?? 'banco'
-      if (pulou) return { tratou: true, resposta: await irPara(userId, e, volta, { bancoNome: undefined, voltaPara: undefined }) }
-      if (ehSim(t) && e.bancoNome) return { tratou: true, resposta: await criarBancoEPedirSaldo(userId, { ...e, etapa: volta, bancoNome: undefined, voltaPara: undefined }, e.bancoNome, 'banco') }
-      if (despedidaDe(t) || ehNao(t)) return { tratou: true, resposta: await irPara(userId, e, volta, { bancoNome: undefined, voltaPara: undefined }) }
+      const voltar = { ...e, etapa: volta, ...LIMPO } as EstadoConfig
+      if (pulou) return { tratou: true, resposta: await irPara(userId, e, volta, LIMPO) }
+      if (ehSim(t) && e.bancoNome) return { tratou: true, resposta: await registrarContas(userId, voltar, [{ tipo: 'banco', nome: e.bancoNome, saldo: e.saldoDito ?? null }]) }
+      if (despedidaDe(t) || ehNao(t)) {
+        if (e.sugestao) {
+          await gravar(userId, { ...voltar, em: agoraIso(), voltas: 0 })
+          return { tratou: true, resposta: 'Ah, tá. Então me escreve o nome do banco do jeito que aparece no app.' }
+        }
+        return { tratou: true, resposta: await irPara(userId, e, volta, LIMPO) }
+      }
+      // Disse outro nome: banco conhecido entra direto; escrito errado ou desconhecido, confirma de novo.
+      const valor = valorNaFrase(t) ?? e.saldoDito ?? null
+      const conhecido = nomeDoBanco(t)
+      if (conhecido) return { tratou: true, resposta: await registrarContas(userId, voltar, [{ tipo: 'banco', nome: conhecido, saldo: valor }]) }
+      const sug = sugerirBanco(t)
+      if (sug) return { tratou: true, resposta: await confirmarBanco(userId, e, sug, true, valor) }
       const outro = lerBanco(t)
       if (!outro) return NAO_TRATOU
-      // Disse o nome certo: banco conhecido entra direto; outro nome desconhecido, confirma de novo.
-      if (bancoConhecido(t)) return { tratou: true, resposta: await criarBancoEPedirSaldo(userId, { ...e, etapa: volta, bancoNome: undefined, voltaPara: undefined }, outro, 'banco') }
-      return { tratou: true, resposta: await irPara(userId, e, 'banco_confirma', { bancoNome: outro, voltaPara: volta }) }
+      return { tratou: true, resposta: await confirmarBanco(userId, e, outro, false, valor) }
     }
     case 'saldo': {
       const cs = await bancosDe(userId)
       const conta = cs.find((c) => c.id === e.carteira) ?? cs.find((c) => c.tipo === 'banco' && c.padrao) ?? cs.find((c) => c.tipo === 'banco')
-      const seguinte = (e.bancos ?? 0) >= MAX_BANCOS ? 'cartao' : 'mais_banco'
-      if (pulou) return { tratou: true, resposta: await irPara(userId, e, seguinte) }
-      const v = lerValor(t)
-      if (v === null || !conta) return NAO_TRATOU
+      const seguinte = async (extra: Partial<EstadoConfig>): Promise<string> => {
+        const [prox, ...resto] = e.pendentes ?? []
+        if (prox) return irPara(userId, e, 'saldo', { ...extra, carteira: prox, pendentes: resto }, cs.find((c) => c.id === prox)?.nome)
+        return irPara(userId, e, (e.bancos ?? 0) >= MAX_BANCOS ? 'cartao' : 'mais_banco', { ...extra, carteira: undefined, pendentes: undefined })
+      }
+      if (pulou) return { tratou: true, resposta: await seguinte({}) }
+      let v = lerValor(t) ?? (pareceLancamento(t) ? null : valorNaFrase(t))
+      let uso: Uso | null = null
+      if (v === null) {
+        const r = await entender(userId, e, t)
+        uso = r.uso
+        if (r.d && r.d.eh_resposta && r.d.pular) return { tratou: true, resposta: await seguinte({}), uso }
+        v = r.d?.eh_resposta ? (r.d.valor ?? r.d.contas[0]?.saldo ?? null) : null
+      }
+      if (v === null || !conta) return naoTratou(uso)
       // O saldo já foi posto pelo extrato (saldo final dele): não muda, e diz qual ficou.
       const jaFixado = e.saldoFixado?.[conta.id]
       if (typeof jaFixado === 'number') {
-        const nota = Math.abs(jaFixado - v) < 0.01 ? `Bateu com o extrato: ${real(v)} no ${conta.nome}.` : `Pelo extrato, o ${conta.nome} ficou com ${real(jaFixado)} de saldo, então mantive esse. Se não for isso, dá pra ajustar no painel.`
-        return { tratou: true, resposta: juntar(nota, await irPara(userId, e, seguinte, { carteira: undefined })) }
+        const nota = Math.abs(jaFixado - v) < 0.01 ? `Bateu com o extrato: ${real(v)} ${naConta(conta.nome)}.` : `Pelo extrato, ficou ${real(jaFixado)} ${naConta(conta.nome)}, então mantive esse. Se não for isso, dá pra ajustar no painel.`
+        return { tratou: true, resposta: juntar(nota, await seguinte({})), uso }
       }
       const pos = await porSaldo(userId, conta.id, v)
       const fixado = pos ? { ...(e.saldoFixado ?? {}), [conta.id]: v } : e.saldoFixado
-      const nota = pos ? `Anotado: ${real(v)} no ${conta.nome}.` : `O ${conta.nome} já tem lançamento, então não mexi no saldo. Dá pra ajustar no painel, em Ajustes.`
-      return { tratou: true, resposta: juntar(nota, await irPara(userId, e, seguinte, { saldoFixado: fixado, carteira: undefined })) }
+      const nota = pos ? `Anotei ${real(v)} ${naConta(conta.nome)}.` : `${maiuscula(naConta(conta.nome))} já tem lançamento, então não mexi no saldo. Dá pra ajustar no painel.`
+      return { tratou: true, resposta: juntar(nota, await seguinte({ saldoFixado: fixado })), uso }
     }
     case 'cartao':
     case 'cartao_dia': {
       if (pulou || (e.etapa === 'cartao' && ehNao(t))) return { tratou: true, resposta: await irPara(userId, e, 'das', { cartao: undefined }) }
       if (despedidaDe(t)) return NAO_TRATOU
+      if (e.etapa === 'cartao' && ehSim(t)) return { tratou: true, resposta: 'Boa! De qual banco é o cartão, e que dia vence a fatura?' }
       let banco: string | null = null
       let dia: number | null = null
+      let uso: Uso | null = null
       if (e.etapa === 'cartao_dia') {
         banco = e.cartao ?? null
-        const m = /^\s*(?:dia\s+)?([1-9]|[12]\d|3[01])\s*$/i.exec(t)
+        const m = /^\s*(?:(?:todo\s+)?dia\s+)?([1-9]|[12]\d|3[01])\s*$/i.exec(t) ?? /\bdia\s+([1-9]|[12]\d|3[01])\b/i.exec(t)
         dia = m ? Number(m[1]) : null
         if (dia === null) return NAO_TRATOU
       } else {
-        const l = lerCartao(t)
-        if (!l || !l.banco) return NAO_TRATOU
-        banco = l.banco
-        dia = l.dia
-        if (dia === null) return { tratou: true, resposta: await irPara(userId, e, 'cartao_dia', { cartao: banco }) }
+        const l = pareceLancamento(t) ? null : lerCartao(t)
+        if (l?.banco) {
+          banco = l.banco
+          dia = l.dia
+        } else {
+          const r = await entender(userId, e, t)
+          uso = r.uso
+          if (!r.d || !r.d.eh_resposta) return naoTratou(uso)
+          if (r.d.pular || (r.d.sim_nao === 'nao' && !r.d.cartao_banco)) return { tratou: true, resposta: await irPara(userId, e, 'das', { cartao: undefined }), uso }
+          banco = r.d.cartao_banco ? nomeDoBanco(r.d.cartao_banco) ?? lerBanco(r.d.cartao_banco) : null
+          dia = r.d.cartao_dia
+          if (!banco) return r.d.sim_nao === 'sim' ? { tratou: true, resposta: 'Boa! De qual banco é o cartão, e que dia vence a fatura?', uso } : naoTratou(uso)
+        }
+        if (dia === null) return { tratou: true, resposta: await irPara(userId, e, 'cartao_dia', { cartao: banco }), uso }
       }
       const cs = await bancosDe(userId)
       const paga = cs.find((c) => c.tipo === 'banco' && c.padrao) ?? cs.find((c) => c.tipo === 'banco')
@@ -260,16 +449,26 @@ export async function responder(userId: string, e: EstadoConfig, texto: string):
         falhou((await sb.from('carteiras').insert(novo)).error, 'config: cartão')
       }
       const cartoes = (e.cartoes ?? 0) + 1
-      const nota = `Anotei o ${nome}, com a fatura vencendo todo dia ${dia}. Considerei que ela fecha 7 dias antes, dá pra ajustar no painel.`
-      if (cartoes >= MAX_CARTOES) return { tratou: true, resposta: juntar(nota, await irPara(userId, e, 'das', { cartoes, cartao: undefined })) }
+      const nota = `Anotei o ${nome}, com a fatura vencendo todo dia ${dia}.`
+      if (cartoes >= MAX_CARTOES) return { tratou: true, resposta: juntar(nota, await irPara(userId, e, 'das', { cartoes, cartao: undefined })), uso }
       await gravar(userId, { ...e, etapa: 'cartao', em: agoraIso(), voltas: 0, cartoes, cartao: undefined })
-      return { tratou: true, resposta: juntar(nota, 'Tem outro cartão? Me diz qual e o dia, ou NÃO.') }
+      return { tratou: true, resposta: juntar(nota, 'Tem outro cartão?'), uso }
     }
     case 'das': {
-      if (pulou || ehNao(t)) return { tratou: true, resposta: await irPara(userId, e, 'fixas') }
-      if (!ehSim(t)) return NAO_TRATOU
+      let sim = ehSim(t)
+      let nao = pulou || ehNao(t)
+      let uso: Uso | null = null
+      if (!sim && !nao) {
+        const r = await entender(userId, e, t)
+        uso = r.uso
+        if (!r.d || !r.d.eh_resposta) return naoTratou(uso)
+        sim = r.d.sim_nao === 'sim'
+        nao = r.d.pular || r.d.sim_nao === 'nao'
+        if (!sim && !nao) return naoTratou(uso)
+      }
+      if (nao) return { tratou: true, resposta: await irPara(userId, e, 'fixas'), uso }
       await porDas(userId)
-      return { tratou: true, resposta: juntar(`Guardei o DAS: ${real(DAS.valor)} todo dia ${DAS.dia}.`, await irPara(userId, e, 'fixas')) }
+      return { tratou: true, resposta: juntar(`Combinado, te lembro do DAS todo dia ${DAS.dia}.`, await irPara(userId, e, 'fixas')), uso }
     }
     case 'fixas': {
       if (pulou || ehPronto(t)) return { tratou: true, resposta: await irPara(userId, e, 'fim') }
@@ -278,12 +477,6 @@ export async function responder(userId: string, e: EstadoConfig, texto: string):
     default:
       return NAO_TRATOU
   }
-}
-
-/** Cria (ou renomeia a genérica) a conta do banco dito e pergunta o saldo dela. */
-async function criarBancoEPedirSaldo(userId: string, e: EstadoConfig, nome: string, tipo: 'banco' | 'dinheiro'): Promise<string> {
-  const c = await porBanco(userId, nome, tipo)
-  return irPara(userId, e, 'saldo', { carteira: c.id, bancos: (e.bancos ?? 0) + 1, bancoNome: undefined, voltaPara: undefined }, c.nome)
 }
 
 /** O DAS como conta fixa, com as contas dos próximos vencimentos (como o cadastro do site fazia). Não duplica. */
