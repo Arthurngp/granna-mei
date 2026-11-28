@@ -10,6 +10,7 @@
  */
 import { randomBytes, randomInt } from 'node:crypto'
 import { falhou, formatarNumero, sb } from './banco.ts'
+import { linhaContaPadrao, linhasCategoriasPadrao } from './config-whats-fluxo.ts'
 import { excluirContaDefinitivo } from './excluir.ts'
 import { esperaMs } from './rajada.ts'
 import {
@@ -152,9 +153,13 @@ export async function rotaSimulador(metodo: string, caminho: string, busca: URLS
     // O que o site grava no cadastro de hoje: o número digitado (sem confirmar) e por onde a conta entrou. O passo 6 é a tela de confirmar.
     let up = await sb.from('perfis').update({ whats: formatarNumero(numero), onboarding_via: 'whats', onboarding_passo: 6 }).eq('id', id)
     if (up.error) up = await sb.from('perfis').update({ whats: formatarNumero(numero), onboarding_passo: 6 }).eq('id', id)
-    if (up.error) {
+    // E o que o `salvarMinimo` do site grava antes do código: a conta do banco principal e as categorias padrão (as preferências de lembrete e
+    // resumo do site são os padrões do banco). Sem isto a conta de teste não seria o clone do cadastro real.
+    const extra = up.error ? null : await Promise.all([sb.from('carteiras').insert(linhaContaPadrao(id)), sb.from('categorias').insert(linhasCategoriasPadrao(id))])
+    const falhaExtra = extra?.find((r) => r.error)?.error
+    if (up.error || falhaExtra) {
       await sb.auth.admin.deleteUser(id)
-      return erro(500, `Não consegui preparar a conta: ${up.error.message}`)
+      return erro(500, `Não consegui preparar a conta: ${(up.error ?? falhaExtra)!.message}`)
     }
     await novoCodigo(id)
     await auditar(admin, 'simulador_conta', id, { numero: `…${numero.slice(-4)}`, motivo: 'conta de teste do simulador' })

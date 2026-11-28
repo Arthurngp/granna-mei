@@ -74,6 +74,17 @@ async function gravar(userId: string, e: EstadoConfig) {
 /* ---------------- começo: depois de confirmar o número ---------------- */
 
 /**
+ * As linhas das categorias padrão, iguais às que o painel grava (`paraCategoria` em src/lib/remoto.ts): TODA linha com `natureza` e `pessoal`.
+ * Num insert em lote o PostgREST usa a união das colunas e põe NULL onde a linha não tem a chave; sem isto, `pessoal` (not null) ia nulo em todas
+ * menos "Retirada do dono" e a configuração pela conversa não começava (achado pelo simulador em 2026-11-28).
+ */
+export const linhasCategoriasPadrao = (userId: string, ramo = 'outro') =>
+  categoriasPadrao(ramo).map((c) => ({ user_id: userId, id: c.id, nome: c.nome, tipo: c.tipo, cor: c.cor, natureza: (c as { natureza?: string }).natureza ?? null, pessoal: !!(c as { pessoal?: boolean }).pessoal }))
+
+/** A conta de banco principal que o painel cria no cadastro (`salvarMinimo` em src/pages/Onboarding.tsx). */
+export const linhaContaPadrao = (userId: string) => ({ user_id: userId, id: 'banco', nome: 'Conta do banco', tipo: 'banco', saldo_inicial: 0, padrao: true })
+
+/**
  * Garante o mínimo para a conta funcionar (uma conta de banco principal e as categorias), caso o site não tenha gravado, e começa a conversa.
  * Devolve a mensagem de boas-vindas com a primeira pergunta.
  */
@@ -81,13 +92,13 @@ export async function iniciar(userId: string, nome: string): Promise<string> {
   const cs = await sb.from('carteiras').select('id').eq('user_id', userId).limit(1)
   falhou(cs.error, 'config: carteiras')
   if (!cs.data?.length) {
-    const r = await sb.from('carteiras').insert({ user_id: userId, id: 'banco', nome: 'Conta do banco', tipo: 'banco', saldo_inicial: 0, padrao: true })
+    const r = await sb.from('carteiras').insert(linhaContaPadrao(userId))
     falhou(r.error, 'config: conta padrão')
   }
   const cat = await sb.from('categorias').select('id').eq('user_id', userId).limit(1)
   falhou(cat.error, 'config: categorias')
   if (!cat.data?.length) {
-    const r = await sb.from('categorias').insert(categoriasPadrao('outro').map((c) => ({ user_id: userId, ...c })))
+    const r = await sb.from('categorias').insert(linhasCategoriasPadrao(userId))
     falhou(r.error, 'config: categorias padrão')
   }
   const agora = agoraIso()

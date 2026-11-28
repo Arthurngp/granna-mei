@@ -138,6 +138,30 @@ await caso('onboarding: o código do cadastro, mandado pelo simulador, confirma 
   assert.equal(chamadas.length, 0, chamadas.join(' | '))
 })
 
+await caso('cadastro pelo WhatsApp sem categorias: o código começa a configuração pela conversa (defeito do pessoal nulo)', async () => {
+  process.env.ONBOARDING_WHATS = 'on'
+  try {
+    const N3 = '5500900000003'
+    contaSim('u-sim3', '0000000003', false, { onboarding_via: 'whats', config_whats: null })
+    E.tabelas.verificacoes = [{ user_id: 'u-sim3', codigo: '551177', expira_em: new Date(Date.now() + 600_000).toISOString() }]
+    sim.limparCaixaDoSimulador(N3)
+    const { evento } = sim.eventoDoSimulador(N3, { tipo: 'texto', texto: '551177' })
+    await receberDoSimulador(evento as never)
+    await esperar(() => sim.eventosDoSimulador(N3).some((e) => e.tipo === 'texto'))
+    const cats = E.tabelas.categorias.filter((c) => c.user_id === 'u-sim3')
+    assert.equal(cats.length, 14, 'as categorias padrão não foram gravadas')
+    // O banco recusa pessoal nulo: toda linha do lote precisa trazer a coluna (o PostgREST põe NULL onde a chave falta).
+    for (const c of cats) {
+      assert.equal(typeof c.pessoal, 'boolean', `categoria ${c.id} sem pessoal`)
+      assert.ok('natureza' in c, `categoria ${c.id} sem natureza`)
+    }
+    const p = E.tabelas.perfis.find((x) => x.id === 'u-sim3')!
+    assert.equal((p.config_whats as { etapa?: string } | null)?.etapa, 'ramo', 'a configuração pela conversa não começou')
+  } finally {
+    delete process.env.ONBOARDING_WHATS
+  }
+})
+
 await caso('a rota recusa número que não é do simulador, antes de mexer em qualquer coisa', async () => {
   let recebeu = 0
   const receber = (async () => {
