@@ -14,6 +14,7 @@ import {
   type Etapa, type EstadoConfig,
 } from './config-whats.ts'
 import { entenderResposta, type Entendido } from './config-entender.ts'
+import { quantosBancos } from './cruzar.ts'
 import type { Uso } from './openai.ts'
 import { somaMeses, vencimentoNoMes } from './datas.ts'
 import { despedidaDe } from './despedida.ts'
@@ -340,7 +341,8 @@ export async function responder(userId: string, e: EstadoConfig, texto: string):
         if (reserva) return { tratou: true, resposta: await registrarContas(userId, e, [{ tipo: 'investimento', nome: nomeDaReserva(reserva, await bancosDe(userId)), saldo: valor }]) }
         if (ehEspecie(t)) return { tratou: true, resposta: await registrarContas(userId, e, [{ tipo: 'dinheiro', nome: 'Dinheiro', saldo: valor }]) }
         const conhecido = nomeDoBanco(semValor)
-        if (conhecido && semValor.split(' ').length <= 4) return { tratou: true, resposta: await registrarContas(userId, e, [{ tipo: 'banco', nome: conhecido, saldo: valor }]) }
+        // Um banco só: "nubank e inter" vai para a IA, senão o Inter sumiria sem aviso.
+        if (conhecido && semValor.split(' ').length <= 4 && quantosBancos(semValor) === 1) return { tratou: true, resposta: await registrarContas(userId, e, [{ tipo: 'banco', nome: conhecido, saldo: valor }]) }
         const sug = sugerirBanco(semValor)
         if (sug) return { tratou: true, resposta: await confirmarBanco(userId, e, sug, true, valor) }
       }

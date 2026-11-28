@@ -413,7 +413,7 @@ function Conversa({ slot, ambiente, mudou }: { slot: Slot; ambiente: Ambiente; m
           )}
         </div>
       </section>
-      <Painel slot={slot} ambiente={ambiente} mudou={mudou} detalhe={detalhe} escolhida={!!escolhida} mandarCodigo={(c) => void enviar({ tipo: 'texto', texto: `Meu código Granninha: ${c}` })} limpou={() => {
+      <Painel slot={slot} ambiente={ambiente} mudou={mudou} detalhe={detalhe} escolhida={!!escolhida} mandarCodigo={(c) => void enviar({ tipo: 'texto', texto: c })} limpou={() => {
         seq.current = 0
         setEventos([])
         setMensagens([])

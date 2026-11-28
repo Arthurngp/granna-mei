@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict'
 process.env.ONBOARDING_WHATS = 'on'
-const { acao, acoes, caso, E, fim, HOJE, ia, processar, SEM_ACAO } = await import('./_falsos.ts')
+const { acao, acoes, caso, E, fim, HOJE, ia, processar, SEM_ACAO, semear } = await import('./_falsos.ts')
 const C = await import('../src/config-whats.ts')
 const F = await import('../src/config-whats-fluxo.ts')
 
@@ -417,6 +417,30 @@ await caso('caixinha é dinheiro guardado (fora do disponível), não banco; "ca
   assert.equal(C.ehEspecie('guardo em casa'), true)
   assert.equal(C.lerReserva('paguei 50 da caixinha'), null)
   assert.equal(ia.chamadas.configuracao, 0)
+})
+
+await caso('"recebo no nubank", "pago tudo pelo inter", "entrou no nubank": verbo sem valor é resposta, não lançamento; dois bancos vão para a IA', async () => {
+  for (const [frase, banco] of [['recebo no nubank', 'Nubank'], ['pago tudo pelo inter', 'Inter'], ['entrou no nubank', 'Nubank']]) {
+    semear()
+    semearNova()
+    await confirmar()
+    await fala('4')
+    const r = await fala(frase)
+    assert.match(r, new RegExp(`^Quanto tem no ${banco} hoje`), `${frase} → ${r} (${ultimaMsg().erro ?? ''})`)
+    assert.equal(carteiras().find((c) => c.id === 'banco')?.nome, banco, frase)
+    assert.equal(lancs().length, 0, frase)
+  }
+  assert.equal(C.pareceLancamento('recebi 200 no pix'), true)
+  assert.equal(C.pareceLancamento('recebo no nubank'), false)
+  // Dois bancos numa frase curta: o código não escolhe um e esquece o outro.
+  semear()
+  semearNova()
+  await confirmar()
+  await fala('4')
+  ia.regrasConfig = [[/nubank e inter/, { eh_resposta: true, contas: [{ tipo: 'banco', banco: 'Nubank', nome_dito: 'nubank', saldo: null }, { tipo: 'banco', banco: 'Inter', nome_dito: 'inter', saldo: null }] }]]
+  assert.match(await fala('nubank e inter'), /^Quanto tem no Nubank hoje/)
+  assert.ok(carteira('Inter'), 'o Inter sumiu')
+  assert.match(await fala('100'), /^Anotei R\$ 100,00 no Nubank\.\n\nQuanto tem no Inter hoje/)
 })
 
 await caso('lançamento no meio da configuração continua lançamento (nem a IA da configuração é chamada); a pergunta volta no fim', async () => {

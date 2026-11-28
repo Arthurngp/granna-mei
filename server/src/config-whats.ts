@@ -250,9 +250,12 @@ export function valorNaFrase(texto: string): number | null {
   return lerValor(achados[0])
 }
 
-/** Frase de quem está contando um movimento de dinheiro ("paguei 50 de luz", "recebi 200 no pix"): é lançamento, não resposta da configuração. */
+/**
+ * Frase de quem está contando um movimento de dinheiro ("paguei 50 de luz", "recebi 200 no pix"): é lançamento, não resposta da configuração.
+ * Precisa do verbo E de um número: "recebo no nubank", "pago tudo pelo inter" e "entrou no nubank" são respostas naturais para "cai em qual banco?".
+ */
 export const pareceLancamento = (texto: string) =>
-  /\b(paguei|pago|gastei|gasto|recebi|recebo|vendi|comprei|transferi|mandei|caiu|entrou|saiu|devolvi|emprestei|saquei|depositei|fiz um pix|pix de|pix pra|pix para)\b/.test(norm(texto))
+  /\d/.test(texto) && /\b(paguei|pago|gastei|gasto|recebi|recebo|vendi|comprei|transferi|mandei|caiu|entrou|saiu|devolvi|emprestei|saquei|depositei|fiz um pix|pix de|pix pra|pix para)\b/.test(norm(texto))
 
 /** Pergunta da pessoa ("quanto custa?", "como funciona"): vai para a conversa normal, e a pergunta da configuração volta depois. */
 export const pareceDuvida = (texto: string) =>
