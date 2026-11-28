@@ -693,6 +693,8 @@ async function conversar(cliente: { id: string; nome: string; negocio?: string }
   // Resposta à pergunta da configuração pela conversa (config-whats.ts). Só quando não há pergunta própria em aberto: ela vem primeiro.
   if (saida.config && !documento && !anexo && !(pend?.tipo && fresco) && !baixaDoGancho) {
     const rc = await responderConfig(cliente.id, saida.config, texto)
+    // A IA da configuração (quando o código não entendeu) entra no custo da mensagem, tratada ou não.
+    if (rc.uso) soma(rc.uso)
     if (rc.tratou) return { status: 'ok', resposta: rc.resposta, efeitos: {}, intencao: 'config', texto, tokens }
   }
 

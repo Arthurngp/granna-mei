@@ -32,6 +32,12 @@ export interface EstadoConfig {
   /** Etapa banco_confirma: o nome de banco que não é conhecido, esperando a confirmação, e de qual etapa ele veio. */
   bancoNome?: string
   voltaPara?: 'banco' | 'mais_banco'
+  /** Etapa banco_confirma: o nome é a correção de um banco escrito errado ("nubak" → Nubank), e a pergunta é "Você quis dizer...?". */
+  sugestao?: boolean
+  /** Etapa banco_confirma: o saldo que veio junto com o nome ("nubak 450"), para não perguntar de novo depois da confirmação. */
+  saldoDito?: number
+  /** Contas ditas de uma vez ("Nubank e Inter") que ainda esperam o saldo: a etapa do saldo pergunta uma por uma. */
+  pendentes?: string[]
   /** Contas cujo saldo foi posto aqui (id → valor): extrato importado depois não soma em dobro. */
   saldoFixado?: Record<string, number>
   /** Quantos bancos e cartões já foram cadastrados aqui (teto contra laço). */
@@ -82,34 +88,44 @@ export const MAX_VOLTAS = 2
 export const MAX_BANCOS = 4
 export const MAX_CARTOES = 3
 
-/* ---------------- textos (voz da moedinha: sem emoji, sem travessão) ---------------- */
+/*
+ * ---------------- textos ----------------
+ * Pedido do Arthur em 2026-11-28, depois de testar no chip: "a Granninha é a amiguinha, não um robô". Mensagem curta, uma pergunta aberta por
+ * vez, sem lista numerada e sem instrução de comando (PULAR, NÃO, PRONTO continuam funcionando, só não são ensinados como comando).
+ * Voz da moedinha: sem emoji e sem travessão.
+ */
 
-const listaRamos = () => RAMOS.map((r, i) => `${i + 1}. ${r.nome}`).join('\n')
 const real = (n: number) => 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+/** "no Nubank", "na Caixinha Nubank", "em dinheiro": o jeito de falar de cada conta numa frase. */
+export function naConta(nome: string): string {
+  if (/^dinheiro$/i.test(nome.trim())) return 'em dinheiro'
+  return /^(caixinha|poupan[cç]a|reserva|conta|cooperativa|caixa)\b/i.test(nome.trim()) ? `na ${nome}` : `no ${nome}`
+}
+
 export function boasVindas(nome: string): string {
-  return `Pronto${nome ? `, ${nome}` : ''}, seu número tá confirmado e agora a gente tá conectado!\n\nAgora vou te fazer umas perguntas rápidas pra deixar tudo do seu jeito, uma de cada vez. Se não quiser responder alguma, é só mandar PULAR.\n\n${pergunta({ etapa: 'ramo', em: '' })}`
+  return `Pronto${nome ? `, ${nome}` : ''}! Número confirmado, agora a gente tá junto.\n\nPra eu deixar tudo do seu jeito: você trabalha com o quê?`
 }
 
 /** A pergunta de cada etapa. `nomeConta` é o nome da conta da etapa de saldo. */
 export function pergunta(e: EstadoConfig, nomeConta?: string): string {
   switch (e.etapa) {
-    case 'ramo': return `Primeiro: o que você faz? Responde com o número:\n${listaRamos()}`
-    case 'ocupacao': return 'E qual é a sua ocupação? Me diz em poucas palavras, tipo: fotógrafa, tatuador, mecânico.'
-    case 'banco': return 'Onde cai o dinheiro do seu negócio? Me diz o nome do banco, tipo Nubank. Se preferir, manda um print da tela do app com o saldo que eu leio.'
-    case 'saldo': return `E quanto tem ${nomeConta ? `no ${nomeConta}` : 'nessa conta'} hoje? Me manda o valor, tipo 1.250,00, ou o print da tela com o saldo.`
-    case 'mais_banco': return 'Usa mais algum banco, ou guarda dinheiro em espécie? Me diz qual, ou NÃO.'
-    case 'cartao': return 'Usa cartão de crédito? Me diz de qual banco e o dia que a fatura vence, tipo: Nubank dia 10. Se não usa, responde NÃO.'
-    case 'cartao_dia': return `Que dia vence a fatura do ${e.cartao ?? 'cartão'}? Me manda só o número do dia, tipo 10.`
-    case 'banco_confirma': return `Seu banco se chama ${e.bancoNome ?? 'assim'}? É isso, ou o nome é outro?`
-    case 'das': return `Quer que eu já guarde o DAS do MEI, de ${real(DAS.valor)}, todo dia ${DAS.dia}?`
-    case 'fixas': return 'Última: quais contas chegam todo mês? Me manda uma de cada vez, tipo: aluguel 900 dia 10. Quando acabar, responde PRONTO.'
+    case 'ramo': return 'Me conta: você trabalha com o quê? Pode ser do seu jeito, tipo manicure, lanchonete ou videomaker.'
+    case 'ocupacao': return 'E o que você faz, exatamente? Tipo fotógrafa, tatuador, mecânico.'
+    case 'banco': return 'E o dinheiro do trabalho cai em qual banco?'
+    case 'saldo': return nomeConta ? `Quanto tem ${naConta(nomeConta)} hoje, mais ou menos?` : 'Quanto tem nessa conta hoje, mais ou menos?'
+    case 'mais_banco': return 'Tem mais alguma conta, caixinha ou dinheiro guardado em casa?'
+    case 'cartao': return 'Usa cartão de crédito? Se usa, me diz de qual banco e o dia que a fatura vence.'
+    case 'cartao_dia': return `E a fatura do ${e.cartao ?? 'cartão'} vence que dia?`
+    case 'banco_confirma': return e.sugestao ? `Você quis dizer ${e.bancoNome}?` : `${e.bancoNome ?? 'Esse'} é o nome do seu banco, né?`
+    case 'das': return `Quer que eu te lembre do DAS do MEI (${real(DAS.valor)}) todo dia ${DAS.dia}?`
+    case 'fixas': return 'Última coisa: quais contas chegam todo mês? Me manda uma por vez, tipo "aluguel 900 dia 10". Quando acabar, me fala que é só isso.'
     case 'fim': return ''
   }
 }
 
-export const TEXTO_FIM = 'Prontinho, tudo configurado! Eu te aviso no WhatsApp um dia antes de cada conta vencer, às 9h. Agora é só me mandar o que entrou ou saiu, do seu jeito: texto, áudio, foto do comprovante ou print do extrato.'
-export const MAIS_FIXA = 'Mais alguma conta de todo mês? Me manda do mesmo jeito, ou PRONTO.'
+export const TEXTO_FIM = 'Prontinho, tá tudo configurado! Agora é só me mandar o que entrar ou sair, do seu jeito: texto, áudio ou foto do comprovante. E eu te aviso um dia antes de cada conta vencer.'
+export const MAIS_FIXA = 'Tem mais alguma conta de todo mês?'
 
 /* ---------------- leitura das respostas (por código) ---------------- */
 
@@ -148,8 +164,9 @@ const NOME_BANCO: Record<string, string> = {
   brb: 'BRB', bnb: 'Banco do Nordeste',
 }
 
-/** Dinheiro em espécie em vez de banco. */
-export const ehEspecie = (t: string) => /\b(dinheiro|especie|gaveta|carteira fisica|em maos|vivo)\b/.test(norm(t)) && !chaveBanco(t)
+/** Dinheiro em espécie em vez de banco ("dinheiro", "em casa", "na gaveta", "em mãos"). */
+const EM_MAOS = /\b(especie|gaveta|carteira fisica|em maos|vivo|em casa|guardo em casa)\b/
+export const ehEspecie = (t: string) => (/\bdinheiro\b/.test(norm(t)) || EM_MAOS.test(norm(t))) && !chaveBanco(t)
 
 /**
  * O nome de um banco dito na conversa. Banco conhecido vira o nome de exibição ("nu" → "Nubank"); outro nome curto, sem número, é aceito como
@@ -165,7 +182,84 @@ export function lerBanco(texto: string): string | null {
   // Inicial maiúscula em cada palavra, menos nas pequenas do meio ("Cooperativa do Vale", não "Do Vale").
   return t.split(' ').map((w, i) => (i > 0 && /^(de|do|da|dos|das|e)$/i.test(w) ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1))).join(' ')
 }
-const NAO_E_BANCO = /\b(paguei|pago|pagar|paga|recebi|receber|recebe|comprei|compra|gastei|gasto|vendi|venda|saldo|quanto|quanta|como|qual|quais|onde|quando|porque|ajuda|oi|ola|opa|bom|boa|obrigad\w*|valeu|reais|real|pix|luz|agua|aluguel|internet|conta|contas|fatura|sim|nao|pular|pronto|ok|beleza|tchau|cartao|credito|debito)\b/
+const NAO_E_BANCO = /\b(paguei|pago|pagar|paga|recebi|receber|recebe|comprei|compra|gastei|gasto|vendi|venda|saldo|quanto|quanta|como|qual|quais|onde|quando|porque|ajuda|oi|ola|opa|bom|boa|obrigad\w*|valeu|reais|real|pix|luz|agua|aluguel|internet|conta|contas|fatura|sim|nao|pular|pronto|ok|beleza|tchau|cartao|credito|debito|caixinha|cofrinho|porquinho|poupanca|reserva|investimento|investimentos|cdb|tesouro)\b/
+
+/** O nome de exibição do banco conhecido citado no texto ("nu" → "Nubank"), ou null. */
+export const nomeDoBanco = (texto: string | null | undefined): string | null => {
+  const k = chaveBanco(texto)
+  return k ? NOME_BANCO[k] ?? null : null
+}
+/** Os nomes de banco que a IA pode devolver (o que vier fora disto não é nome canônico). */
+export const NOMES_BANCOS = Object.values(NOME_BANCO)
+
+/**
+ * Dinheiro guardado que não é a conta do dia a dia: a "caixinha" (popularizada pelo Nubank), cofrinho, poupança, reserva, investimento. Vira conta
+ * do tipo investimento, que fica fora do disponível. Vem ANTES do banco: "caixinha do nubank" é uma caixinha, não um segundo Nubank.
+ */
+const RESERVA = /\b(caixinhas?|cofrinhos?|porquinho|poupanca|reserva|investimentos?|cdb|tesouro)\b/
+export function lerReserva(texto: string): string | null {
+  const t = norm(texto)
+  const m = RESERVA.exec(t)
+  // "cofrinho em casa" é dinheiro em espécie, não conta guardada no banco.
+  if (!m || NAO_E_RESERVA.test(t) || EM_MAOS.test(t)) return null
+  const tipo = m[1].startsWith('caixinha') ? 'Caixinha' : m[1].startsWith('cofrinho') || m[1] === 'porquinho' ? 'Cofrinho' : m[1] === 'poupanca' ? 'Poupança' : m[1] === 'reserva' ? 'Reserva' : 'Investimentos'
+  const banco = nomeDoBanco(texto)
+  return banco ? `${tipo} ${banco}` : tipo
+}
+const NAO_E_RESERVA = /\b(paguei|gastei|comprei|recebi|vendi|transferi|tirei|saquei)\b/
+
+/** Distância de edição (letras trocadas, faltando ou sobrando). */
+function distancia(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
+  for (let j = 1; j <= b.length; j++) d[0][j] = j
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+  return d[a.length][b.length]
+}
+/** Nomes que aceitam correção de digitação. Os curtos (nu, bb, xp, c6, inter, neon, next) ficam de fora: um erro neles cai em outro banco. */
+const CORRIGIVEIS: [string, string][] = [
+  ['nubank', 'Nubank'], ['bradesco', 'Bradesco'], ['santander', 'Santander'], ['banco do brasil', 'Banco do Brasil'], ['mercado pago', 'Mercado Pago'],
+  ['mercadopago', 'Mercado Pago'], ['picpay', 'PicPay'], ['sicoob', 'Sicoob'], ['sicredi', 'Sicredi'], ['pagbank', 'PagBank'], ['pagseguro', 'PagBank'],
+  ['original', 'Original'], ['banrisul', 'Banrisul'], ['infinitepay', 'InfinitePay'], ['caixa economica', 'Caixa'], ['banco inter', 'Inter'], ['itau unibanco', 'Itaú'],
+]
+/**
+ * Banco escrito errado ("nubak", "bradeco", "santader"): o nome certo mais parecido, para perguntar "Você quis dizer...?". Só para nome curto
+ * (até 3 palavras), sem número, que não é banco conhecido como está. Até 1 letra de diferença em nomes de 5 a 6 letras, até 2 nos maiores.
+ */
+export function sugerirBanco(texto: string): string | null {
+  if (chaveBanco(texto)) return null
+  const t = norm(texto).replace(/^(no|na|o|a|meu|minha)\s+/, '').replace(/^banco\s+(?!do brasil)/, '')
+  if (t.length < 5 || /\d/.test(t) || t.split(' ').length > 3) return null
+  let melhor: { nome: string; d: number } | null = null
+  for (const [alvo, nome] of CORRIGIVEIS) {
+    const limite = alvo.length <= 6 ? 1 : 2
+    const d = distancia(t, alvo)
+    if (d > 0 && d <= limite && (!melhor || d < melhor.d)) melhor = { nome, d }
+  }
+  return melhor?.nome ?? null
+}
+
+/**
+ * O valor solto numa frase de saldo ("tenho 450 lá", "nubank 1.200", "uns 300"): o único número com cara de dinheiro, ou null se houver mais de um
+ * ou nenhum. Número de dia ("dia 10") não conta.
+ */
+export function valorNaFrase(texto: string): number | null {
+  const sem = texto.toLowerCase().replace(/\bdia\s+\d{1,2}\b/g, ' ')
+  const achados = [...sem.matchAll(/(?:r\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?)(?:\s*(?:reais|real|conto|contos))?/g)].map((m) => m[1])
+  if (achados.length !== 1) return null
+  return lerValor(achados[0])
+}
+
+/**
+ * Frase de quem está contando um movimento de dinheiro ("paguei 50 de luz", "recebi 200 no pix"): é lançamento, não resposta da configuração.
+ * Precisa do verbo E de um número: "recebo no nubank", "pago tudo pelo inter" e "entrou no nubank" são respostas naturais para "cai em qual banco?".
+ */
+export const pareceLancamento = (texto: string) =>
+  /\d/.test(texto) && /\b(paguei|pago|gastei|gasto|recebi|recebo|vendi|comprei|transferi|mandei|caiu|entrou|saiu|devolvi|emprestei|saquei|depositei|fiz um pix|pix de|pix pra|pix para)\b/.test(norm(texto))
+
+/** Pergunta da pessoa ("quanto custa?", "como funciona"): vai para a conversa normal, e a pergunta da configuração volta depois. */
+export const pareceDuvida = (texto: string) =>
+  /\?\s*$/.test(texto.trim()) || /^(como|quanto|quanta|qual|quais|onde|quando|porque|por que|o que e|pra que|serve)\b/.test(norm(texto))
 
 /** Um valor de saldo: "1.250,00", "1250", "R$ 300", "300 reais", "zero". Nunca negativo. O ponto é separador de milhar, como se escreve no Brasil. */
 export function lerValor(texto: string): number | null {
